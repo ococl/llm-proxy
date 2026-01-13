@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,10 +20,24 @@ type Proxy struct {
 	router    *Router
 	cooldown  *CooldownManager
 	detector  *Detector
+	client    *http.Client
 }
 
 func NewProxy(cfg *ConfigManager, router *Router, cd *CooldownManager, det *Detector) *Proxy {
-	return &Proxy{configMgr: cfg, router: router, cooldown: cd, detector: det}
+	return &Proxy{
+		configMgr: cfg,
+		router:    router,
+		cooldown:  cd,
+		detector:  det,
+		client: &http.Client{
+			Timeout: 5 * time.Minute,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+	}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -158,9 +173,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			proxyReq.Header.Set("Authorization", "Bearer "+backend.APIKey)
 		}
 
-		client := &http.Client{Timeout: 5 * time.Minute}
 		backendStart := time.Now()
-		resp, err := client.Do(proxyReq)
+		resp, err := p.client.Do(proxyReq)
 		backendDuration := time.Since(backendStart)
 		metrics.RecordBackendTime(route.BackendName, backendDuration)
 
@@ -199,11 +213,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(resp.StatusCode)
 
 			if isStream {
-				p.streamResponse(w, resp.Body)
+				if !p.streamResponse(r.Context(), w, resp.Body) {
+					resp.Body.Close()
+				}
 			} else {
 				io.Copy(w, resp.Body)
+				resp.Body.Close()
 			}
-			resp.Body.Close()
 			return
 		}
 
@@ -251,11 +267,22 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(lastBody))
 }
 
-func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
+func (p *Proxy) streamResponse(ctx context.Context, w http.ResponseWriter, body io.ReadCloser) (closed bool) {
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			body.Close()
+		case <-done:
+		}
+	}()
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		io.Copy(w, body)
-		return
+		return ctx.Err() != nil
 	}
 
 	rc := http.NewResponseController(w)
@@ -263,13 +290,20 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
 
 	buf := make([]byte, 32*1024)
 	for {
-		n, err := body.Read(buf)
+		n, readErr := body.Read(buf)
 		if n > 0 {
-			w.Write(buf[:n])
+			_, writeErr := w.Write(buf[:n])
+			if writeErr != nil {
+				LogGeneral("DEBUG", "写入客户端失败: %v", writeErr)
+				return ctx.Err() != nil
+			}
 			flusher.Flush()
 		}
-		if err != nil {
-			break
+		if readErr != nil {
+			if readErr != io.EOF && ctx.Err() == nil {
+				LogGeneral("DEBUG", "读取后端响应结束: %v", readErr)
+			}
+			return ctx.Err() != nil
 		}
 	}
 }
