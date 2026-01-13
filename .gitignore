@@ -1,8 +1,5 @@
 dist
 
-# Go
-src/go.sum
-
 # IDE
 .idea/
 *.swp

@@ -17,7 +17,8 @@ jobs:
       - name: 设置 Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.25'
+          cache-dependency-path: src/go.sum
 
       - name: 运行测试
         working-directory: src
@@ -52,10 +53,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 获取版本信息
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "is_beta=false" >> $GITHUB_OUTPUT
+          else
+            echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+            echo "is_beta=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: 设置 Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.25'
+          cache-dependency-path: src/go.sum
 
       - name: 构建
         working-directory: src
@@ -64,24 +77,36 @@ jobs:
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: 0
         run: |
-          go build -ldflags "-s -w" -o ../dist/llm-proxy-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} .
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          go build -ldflags "-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.BuildTime=${BUILD_TIME}" -o ../dist/llm-proxy-${{ steps.version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} .
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: llm-proxy-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist/llm-proxy-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+          name: llm-proxy-${{ steps.version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/llm-proxy-${{ steps.version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
 
   release:
-    name: 发布
+    name: 发布 (${{ steps.version.outputs.is_beta == 'true' && 'beta' || '正式版' }})
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: 获取版本信息
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "is_beta=false" >> $GITHUB_OUTPUT
+          else
+            echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+            echo "is_beta=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: 下载所有构建产物
         uses: actions/download-artifact@v4
@@ -115,6 +140,6 @@ jobs:
           body_path: CHANGELOG.md
           files: release/*.zip
           draft: false
-          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+          prerelease: ${{ steps.version.outputs.is_beta }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

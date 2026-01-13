@@ -75,6 +75,13 @@ type Config struct {
 	Logging     Logging                `yaml:"logging"`
 }
 
+func (c *Config) GetListen() string {
+	if c.Listen == "" {
+		return ":8765"
+	}
+	return c.Listen
+}
+
 type ConfigManager struct {
 	config     *Config
 	configPath string
