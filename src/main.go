@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -55,9 +58,31 @@ func main() {
 	LogGeneral("INFO", "访问地址: http://%s", formatListenAddress(cfg.GetListen()))
 	LogGeneral("INFO", "已加载 %d 个后端，%d 个模型别名", len(cfg.Backends), len(cfg.Models))
 
-	if err := http.ListenAndServe(cfg.GetListen(), proxy); err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+	server := &http.Server{
+		Addr:    cfg.GetListen(),
+		Handler: RecoveryMiddleware(proxy),
 	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("服务器启动失败: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	LogGeneral("INFO", "正在关闭服务器...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		LogGeneral("ERROR", "服务器关闭失败: %v", err)
+	}
+
+	LogGeneral("INFO", "服务器已关闭")
 }
 
 func formatListenAddress(listen string) string {

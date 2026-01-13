@@ -75,7 +75,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewReader(body))
 
 	var reqBody map[string]interface{}
-	json.Unmarshal(body, &reqBody)
+	if err := json.Unmarshal(body, &reqBody); err != nil {
+		LogGeneral("WARN", "[%s] 解析请求体失败: %v", reqID, err)
+		http.Error(w, "无效的 JSON 请求体", http.StatusBadRequest)
+		return
+	}
 
 	// Inject system prompt if file exists
 	reqBody = ProcessSystemPrompt(reqBody)
@@ -141,7 +145,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		modifiedBody["model"] = route.Model
 
-		newBody, _ := json.Marshal(modifiedBody)
+		newBody, err := json.Marshal(modifiedBody)
+		if err != nil {
+			lastErr = err
+			logBuilder.WriteString(fmt.Sprintf("序列化请求体失败: %v\n", err))
+			LogGeneral("ERROR", "[%s] 序列化请求体失败: %v", reqID, err)
+			continue
+		}
 
 		targetURL, err := url.Parse(route.BackendURL)
 		if err != nil {
@@ -162,7 +172,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		logBuilder.WriteString(fmt.Sprintf("目标URL: %s\n", targetURL.String()))
 
-		proxyReq, _ := http.NewRequest(r.Method, targetURL.String(), bytes.NewReader(newBody))
+		proxyReq, err := http.NewRequest(r.Method, targetURL.String(), bytes.NewReader(newBody))
+		if err != nil {
+			lastErr = err
+			logBuilder.WriteString(fmt.Sprintf("创建代理请求失败: %v\n", err))
+			LogGeneral("ERROR", "[%s] 创建代理请求失败: %v", reqID, err)
+			continue
+		}
 		for k, v := range r.Header {
 			proxyReq.Header[k] = v
 		}
@@ -217,7 +233,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					resp.Body.Close()
 				}
 			} else {
-				io.Copy(w, resp.Body)
+				if _, err := io.Copy(w, resp.Body); err != nil {
+					LogGeneral("DEBUG", "[%s] 写入响应失败: %v", reqID, err)
+				}
 				resp.Body.Close()
 			}
 			return

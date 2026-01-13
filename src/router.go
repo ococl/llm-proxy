@@ -102,7 +102,11 @@ func (r *Router) collectFallbackRoutes(alias string, visited map[string]bool) []
 
 	var result []ResolvedRoute
 	for _, fallbackAlias := range fallbacks {
-		routes, _ := r.resolveWithVisited(fallbackAlias, visited)
+		routes, err := r.resolveWithVisited(fallbackAlias, visited)
+		if err != nil {
+			LogGeneral("WARN", "解析回退别名 %s 失败: %v", fallbackAlias, err)
+			continue
+		}
 		if len(routes) > 0 {
 			LogGeneral("DEBUG", "添加回退路由: %s -> %s", alias, fallbackAlias)
 			result = append(result, routes...)

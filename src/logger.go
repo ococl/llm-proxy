@@ -13,6 +13,7 @@ import (
 var (
 	generalLogger   *os.File
 	logMu           sync.Mutex
+	configMu        sync.RWMutex // 保护日志配置变量
 	logLevel        = "info"
 	consoleLogLevel = "info"
 	testMode        = false
@@ -52,6 +53,7 @@ var sensitivePatterns = []*regexp.Regexp{
 }
 
 func InitLogger(cfg *Config) error {
+	configMu.Lock()
 	loggingConfig = &cfg.Logging
 	logLevel = strings.ToLower(cfg.Logging.Level)
 	if logLevel == "" {
@@ -67,6 +69,7 @@ func InitLogger(cfg *Config) error {
 	if cfg.Logging.MaxFileSizeMB > 0 {
 		maxFileSizeMB = cfg.Logging.MaxFileSizeMB
 	}
+	configMu.Unlock()
 
 	if separateFiles {
 		if err := os.MkdirAll(cfg.Logging.RequestDir, 0755); err != nil {
@@ -134,9 +137,17 @@ func logInternal(level string, target LogTarget, format string, args ...interfac
 	if testMode {
 		return
 	}
+
+	configMu.RLock()
+	currentLogLevel := logLevel
+	currentConsoleLevel := consoleLogLevel
+	currentMaskSensitive := maskSensitive
+	currentLoggingConfig := loggingConfig
+	configMu.RUnlock()
+
 	levelLower := strings.ToLower(level)
-	filePriority := levelPriority[levelLower] >= levelPriority[logLevel]
-	consolePriority := levelPriority[levelLower] >= levelPriority[consoleLogLevel]
+	filePriority := levelPriority[levelLower] >= levelPriority[currentLogLevel]
+	consolePriority := levelPriority[levelLower] >= levelPriority[currentConsoleLevel]
 
 	shouldLogFile := (target == LogTargetBoth || target == LogTargetFile) && filePriority
 	shouldLogConsole := (target == LogTargetBoth || target == LogTargetConsole) && consolePriority
@@ -149,7 +160,7 @@ func logInternal(level string, target LogTarget, format string, args ...interfac
 	defer logMu.Unlock()
 
 	msg := fmt.Sprintf(format, args...)
-	if maskSensitive {
+	if currentMaskSensitive {
 		msg = MaskSensitiveData(msg)
 	}
 
@@ -168,8 +179,8 @@ func logInternal(level string, target LogTarget, format string, args ...interfac
 	}
 
 	if shouldLogFile && generalLogger != nil {
-		if loggingConfig != nil {
-			rotateLogIfNeeded(loggingConfig.GeneralFile)
+		if currentLoggingConfig != nil {
+			rotateLogIfNeeded(currentLoggingConfig.GeneralFile)
 		}
 		generalLogger.WriteString(fileLine)
 		currentLogSize += int64(len(fileLine))

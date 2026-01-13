@@ -108,7 +108,10 @@ func (cm *ConfigManager) load() error {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return err
 	}
-	stat, _ := os.Stat(cm.configPath)
+	stat, err := os.Stat(cm.configPath)
+	if err != nil {
+		return err
+	}
 	cm.config = &cfg
 	cm.lastMod = stat.ModTime()
 	return nil
@@ -118,15 +121,20 @@ func (cm *ConfigManager) Get() *Config {
 	cm.mu.RLock()
 	stat, err := os.Stat(cm.configPath)
 	if err != nil || stat.ModTime().Equal(cm.lastMod) {
-		defer cm.mu.RUnlock()
-		return cm.config
+		cfg := cm.config
+		cm.mu.RUnlock()
+		return cfg
 	}
 	cm.mu.RUnlock()
 
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	// Double check after acquiring write lock
-	stat, _ = os.Stat(cm.configPath)
+	stat, err = os.Stat(cm.configPath)
+	if err != nil {
+		LogGeneral("WARN", "检查配置文件失败: %v，继续使用旧配置", err)
+		return cm.config
+	}
 	if stat.ModTime().Equal(cm.lastMod) {
 		return cm.config
 	}
@@ -145,7 +153,10 @@ func (cm *ConfigManager) tryReload() error {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return err
 	}
-	stat, _ := os.Stat(cm.configPath)
+	stat, err := os.Stat(cm.configPath)
+	if err != nil {
+		return err
+	}
 	cm.config = &cfg
 	cm.lastMod = stat.ModTime()
 	LogGeneral("INFO", "配置重载成功")

@@ -122,7 +122,9 @@ func parseSystemPrompt(data string) (*SystemPromptConfig, string) {
 	if idx != -1 {
 		yamlPart := data[:idx]
 		content = strings.TrimSpace(data[idx+4:])
-		yaml.Unmarshal([]byte(yamlPart), config)
+		if err := yaml.Unmarshal([]byte(yamlPart), config); err != nil {
+			LogGeneral("WARN", "解析 system prompt 配置失败: %v，使用默认配置", err)
+		}
 	}
 
 	return config, content
@@ -246,7 +248,10 @@ func injectMessage(messages []interface{}, content string, config *SystemPromptC
 		return append([]interface{}{newMsg}, messages...)
 	}
 
-	msg := messages[systemIdx].(map[string]interface{})
+	msg, ok := messages[systemIdx].(map[string]interface{})
+	if !ok {
+		return messages
+	}
 	oldContent, _ := msg["content"].(string)
 
 	switch config.Position {
