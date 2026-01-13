@@ -62,6 +62,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var reqBody map[string]interface{}
 	json.Unmarshal(body, &reqBody)
 
+	// Inject system prompt if file exists
+	reqBody = ProcessSystemPrompt(reqBody)
+
 	modelAlias, _ := reqBody["model"].(string)
 	if modelAlias == "" {
 		LogGeneral("WARN", "[%s] 请求缺少 model 字段", reqID)
