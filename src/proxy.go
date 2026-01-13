@@ -25,6 +25,11 @@ func NewProxy(cfg *ConfigManager, router *Router, cd *CooldownManager, det *Dete
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/v1/models" || r.URL.Path == "/models" {
+		p.handleModels(w, r)
+		return
+	}
+
 	reqID := time.Now().Format("2006-01-02_15-04-05") + "_" + uuid.New().String()[:8]
 	cfg := p.configMgr.Get()
 
@@ -76,7 +81,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		logBuilder.WriteString(fmt.Sprintf("\n--- Attempt %d ---\n", i+1))
-		logBuilder.WriteString(fmt.Sprintf("Backend: %s\nModel: %s\nURL: %s%s\n", route.BackendName, route.Model, route.BackendURL, r.URL.Path))
+		logBuilder.WriteString(fmt.Sprintf("Backend: %s\nModel: %s\n", route.BackendName, route.Model))
 
 		modifiedBody := make(map[string]interface{})
 		for k, v := range reqBody {
@@ -86,9 +91,24 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		newBody, _ := json.Marshal(modifiedBody)
 
-		targetURL, _ := url.Parse(route.BackendURL)
-		targetURL.Path = targetURL.Path + r.URL.Path
+		targetURL, err := url.Parse(route.BackendURL)
+		if err != nil {
+			lastErr = err
+			logBuilder.WriteString(fmt.Sprintf("Error parsing backend URL: %v\n", err))
+			continue
+		}
+
+		// Smart path join: avoid duplicate prefix (e.g., /v1/v1)
+		backendPath := targetURL.Path
+		reqPath := r.URL.Path
+		if backendPath != "" && strings.HasPrefix(reqPath, backendPath) {
+			targetURL.Path = reqPath
+		} else {
+			targetURL.Path = backendPath + reqPath
+		}
 		targetURL.RawQuery = r.URL.RawQuery
+
+		logBuilder.WriteString(fmt.Sprintf("URL: %s\n", targetURL.String()))
 
 		proxyReq, _ := http.NewRequest(r.Method, targetURL.String(), bytes.NewReader(newBody))
 		for k, v := range r.Header {
@@ -174,4 +194,34 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
 			break
 		}
 	}
+}
+
+func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
+	cfg := p.configMgr.Get()
+
+	type Model struct {
+		ID      string `json:"id"`
+		Object  string `json:"object"`
+		Created int64  `json:"created"`
+		OwnedBy string `json:"owned_by"`
+	}
+
+	type Response struct {
+		Object string  `json:"object"`
+		Data   []Model `json:"data"`
+	}
+
+	var models []Model
+	for alias := range cfg.Models {
+		models = append(models, Model{
+			ID:      alias,
+			Object:  "model",
+			Created: time.Now().Unix(),
+			OwnedBy: "llm-proxy",
+		})
+	}
+
+	resp := Response{Object: "list", Data: models}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
