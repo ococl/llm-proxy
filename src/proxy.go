@@ -227,7 +227,10 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var models []Model
-	for alias := range cfg.Models {
+	for alias, modelAlias := range cfg.Models {
+		if modelAlias == nil || !modelAlias.IsEnabled() {
+			continue
+		}
 		models = append(models, Model{
 			ID:      alias,
 			Object:  "model",

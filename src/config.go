@@ -9,15 +9,34 @@ import (
 )
 
 type Backend struct {
-	Name   string `yaml:"name"`
-	URL    string `yaml:"url"`
-	APIKey string `yaml:"api_key,omitempty"`
+	Name    string `yaml:"name"`
+	URL     string `yaml:"url"`
+	APIKey  string `yaml:"api_key,omitempty"`
+	Enabled *bool  `yaml:"enabled,omitempty"`
+}
+
+func (b *Backend) IsEnabled() bool {
+	return b.Enabled == nil || *b.Enabled
 }
 
 type ModelRoute struct {
 	Backend  string `yaml:"backend"`
 	Model    string `yaml:"model"`
 	Priority int    `yaml:"priority"`
+	Enabled  *bool  `yaml:"enabled,omitempty"`
+}
+
+func (r *ModelRoute) IsEnabled() bool {
+	return r.Enabled == nil || *r.Enabled
+}
+
+type ModelAlias struct {
+	Enabled *bool        `yaml:"enabled,omitempty"`
+	Routes  []ModelRoute `yaml:"routes"`
+}
+
+func (m *ModelAlias) IsEnabled() bool {
+	return m.Enabled == nil || *m.Enabled
 }
 
 type Fallback struct {
@@ -38,13 +57,13 @@ type Logging struct {
 }
 
 type Config struct {
-	Listen      string                  `yaml:"listen"`
-	ProxyAPIKey string                  `yaml:"proxy_api_key"`
-	Backends    []Backend               `yaml:"backends"`
-	Models      map[string][]ModelRoute `yaml:"models"`
-	Fallback    Fallback                `yaml:"fallback"`
-	Detection   Detection               `yaml:"detection"`
-	Logging     Logging                 `yaml:"logging"`
+	Listen      string                 `yaml:"listen"`
+	ProxyAPIKey string                 `yaml:"proxy_api_key"`
+	Backends    []Backend              `yaml:"backends"`
+	Models      map[string]*ModelAlias `yaml:"models"`
+	Fallback    Fallback               `yaml:"fallback"`
+	Detection   Detection              `yaml:"detection"`
+	Logging     Logging                `yaml:"logging"`
 }
 
 type ConfigManager struct {

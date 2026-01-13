@@ -21,19 +21,22 @@ type ResolvedRoute struct {
 
 func (r *Router) Resolve(alias string) ([]ResolvedRoute, error) {
 	cfg := r.configMgr.Get()
-	routes, exists := cfg.Models[alias]
-	if !exists {
+	modelAlias, exists := cfg.Models[alias]
+	if !exists || modelAlias == nil || !modelAlias.IsEnabled() {
 		return nil, nil
 	}
 
-	sorted := make([]ModelRoute, len(routes))
-	copy(sorted, routes)
+	sorted := make([]ModelRoute, len(modelAlias.Routes))
+	copy(sorted, modelAlias.Routes)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Priority < sorted[j].Priority
 	})
 
 	var result []ResolvedRoute
 	for _, route := range sorted {
+		if !route.IsEnabled() {
+			continue
+		}
 		key := r.cooldown.Key(route.Backend, route.Model)
 		if r.cooldown.IsCoolingDown(key) {
 			LogGeneral("DEBUG", "Skipping %s (cooling down)", key)
@@ -42,6 +45,10 @@ func (r *Router) Resolve(alias string) ([]ResolvedRoute, error) {
 		backend := r.configMgr.GetBackend(route.Backend)
 		if backend == nil {
 			LogGeneral("WARN", "Backend not found: %s", route.Backend)
+			continue
+		}
+		if !backend.IsEnabled() {
+			LogGeneral("DEBUG", "Skipping disabled backend: %s", route.Backend)
 			continue
 		}
 		result = append(result, ResolvedRoute{
