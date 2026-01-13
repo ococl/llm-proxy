@@ -47,6 +47,10 @@ detection:
 
 logging:
   level: "info"
+  general_file: "./logs/proxy.log"
+  separate_files: false
   request_dir: "./logs/requests"
   error_dir: "./logs/errors"
-  general_file: "./logs/proxy.log"
+  mask_sensitive: true
+  enable_metrics: false
+  max_file_size_mb: 100

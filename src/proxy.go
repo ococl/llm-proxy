@@ -42,7 +42,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		expected := "Bearer " + cfg.ProxyAPIKey
 		if auth != expected {
-			http.Error(w, "Invalid API key", http.StatusUnauthorized)
+			LogGeneral("WARN", "API Key 验证失败，客户端: %s", r.RemoteAddr)
+			http.Error(w, "无效的 API Key", http.StatusUnauthorized)
 			return
 		}
 	}
@@ -51,7 +52,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		LogGeneral("ERROR", "[%s] 读取请求体失败: %v", reqID, err)
+		http.Error(w, "读取请求体失败", http.StatusBadRequest)
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
@@ -61,15 +63,21 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	modelAlias, _ := reqBody["model"].(string)
 	if modelAlias == "" {
-		http.Error(w, "Missing model field", http.StatusBadRequest)
+		LogGeneral("WARN", "[%s] 请求缺少 model 字段", reqID)
+		http.Error(w, "缺少 model 字段", http.StatusBadRequest)
 		return
 	}
 
+	LogGeneral("INFO", "[%s] 收到请求: 模型=%s 客户端=%s", reqID, modelAlias, r.RemoteAddr)
+
 	routes, _ := p.router.Resolve(modelAlias)
 	if len(routes) == 0 {
-		http.Error(w, fmt.Sprintf("Unknown model alias: %s", modelAlias), http.StatusBadRequest)
+		LogGeneral("WARN", "[%s] 未知的模型别名: %s", reqID, modelAlias)
+		http.Error(w, fmt.Sprintf("未知的模型别名: %s", modelAlias), http.StatusBadRequest)
 		return
 	}
+
+	LogGeneral("DEBUG", "[%s] 解析到 %d 个可用路由", reqID, len(routes))
 
 	isStream := false
 	if s, ok := reqBody["stream"].(bool); ok {
@@ -77,13 +85,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var logBuilder strings.Builder
-	logBuilder.WriteString(fmt.Sprintf("================== REQUEST ==================\n"))
-	logBuilder.WriteString(fmt.Sprintf("ID: %s\nTime: %s\nClient: %s\n\n", reqID, time.Now().Format(time.RFC3339), r.RemoteAddr))
-	logBuilder.WriteString("--- Headers ---\n")
+	logBuilder.WriteString(fmt.Sprintf("================== 请求日志 ==================\n"))
+	logBuilder.WriteString(fmt.Sprintf("请求ID: %s\n时间: %s\n客户端: %s\n\n", reqID, time.Now().Format(time.RFC3339), r.RemoteAddr))
+	logBuilder.WriteString("--- 请求头 ---\n")
 	for k, v := range r.Header {
 		logBuilder.WriteString(fmt.Sprintf("%s: %s\n", k, strings.Join(v, ", ")))
 	}
-	logBuilder.WriteString("\n--- Body ---\n")
+	logBuilder.WriteString("\n--- 请求体 ---\n")
 	logBuilder.WriteString(string(body))
 	logBuilder.WriteString("\n")
 
@@ -96,13 +104,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		maxRetries = len(routes)
 	}
 
+	metrics := NewRequestMetrics(reqID, modelAlias)
+	var finalBackend string
+
 	for i, route := range routes {
 		if i >= maxRetries {
 			break
 		}
 
-		logBuilder.WriteString(fmt.Sprintf("\n--- Attempt %d ---\n", i+1))
-		logBuilder.WriteString(fmt.Sprintf("Backend: %s\nModel: %s\n", route.BackendName, route.Model))
+		logBuilder.WriteString(fmt.Sprintf("\n--- 尝试 %d ---\n", i+1))
+		logBuilder.WriteString(fmt.Sprintf("后端: %s\n模型: %s\n", route.BackendName, route.Model))
+		LogGeneral("DEBUG", "[%s] 尝试后端 %s (模型: %s)", reqID, route.BackendName, route.Model)
 
 		modifiedBody := make(map[string]interface{})
 		for k, v := range reqBody {
@@ -115,11 +127,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		targetURL, err := url.Parse(route.BackendURL)
 		if err != nil {
 			lastErr = err
-			logBuilder.WriteString(fmt.Sprintf("Error parsing backend URL: %v\n", err))
+			logBuilder.WriteString(fmt.Sprintf("解析后端URL失败: %v\n", err))
+			LogGeneral("ERROR", "[%s] 解析后端URL失败: %v", reqID, err)
 			continue
 		}
 
-		// Smart path join: avoid duplicate prefix (e.g., /v1/v1)
 		backendPath := targetURL.Path
 		reqPath := r.URL.Path
 		if backendPath != "" && strings.HasPrefix(reqPath, backendPath) {
@@ -129,7 +141,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		targetURL.RawQuery = r.URL.RawQuery
 
-		logBuilder.WriteString(fmt.Sprintf("URL: %s\n", targetURL.String()))
+		logBuilder.WriteString(fmt.Sprintf("目标URL: %s\n", targetURL.String()))
 
 		proxyReq, _ := http.NewRequest(r.Method, targetURL.String(), bytes.NewReader(newBody))
 		for k, v := range r.Header {
@@ -143,18 +155,27 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		client := &http.Client{Timeout: 5 * time.Minute}
+		backendStart := time.Now()
 		resp, err := client.Do(proxyReq)
+		backendDuration := time.Since(backendStart)
+		metrics.RecordBackendTime(route.BackendName, backendDuration)
+
 		if err != nil {
 			lastErr = err
-			logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+			logBuilder.WriteString(fmt.Sprintf("请求失败: %v\n", err))
+			LogGeneral("WARN", "[%s] 后端 %s 请求失败: %v", reqID, route.BackendName, err)
 			key := p.cooldown.Key(route.BackendName, route.Model)
 			p.cooldown.SetCooldown(key, time.Duration(cfg.Fallback.CooldownSeconds)*time.Second)
 			continue
 		}
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			logBuilder.WriteString(fmt.Sprintf("Status: %d OK\n", resp.StatusCode))
+			logBuilder.WriteString(fmt.Sprintf("状态: %d 成功\n", resp.StatusCode))
+			LogGeneral("INFO", "[%s] 请求成功: 后端=%s 状态=%d 耗时=%dms", reqID, route.BackendName, resp.StatusCode, backendDuration.Milliseconds())
 			WriteRequestLog(cfg, reqID, logBuilder.String())
+
+			finalBackend = route.BackendName
+			metrics.Finish(true, finalBackend)
 
 			for k, v := range resp.Header {
 				w.Header()[k] = v
@@ -175,27 +196,34 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lastStatus = resp.StatusCode
 		lastBody = string(respBody)
 
-		logBuilder.WriteString(fmt.Sprintf("Status: %d\nResponse: %s\n", resp.StatusCode, lastBody))
+		logBuilder.WriteString(fmt.Sprintf("状态: %d\n响应: %s\n", resp.StatusCode, lastBody))
+		LogGeneral("WARN", "[%s] 后端 %s 返回错误: 状态=%d", reqID, route.BackendName, resp.StatusCode)
 
 		if p.detector.ShouldFallback(resp.StatusCode, lastBody) {
 			key := p.cooldown.Key(route.BackendName, route.Model)
 			p.cooldown.SetCooldown(key, time.Duration(cfg.Fallback.CooldownSeconds)*time.Second)
-			logBuilder.WriteString(fmt.Sprintf("Action: Cooldown %s, trying next\n", key))
+			logBuilder.WriteString(fmt.Sprintf("操作: 冷却 %s，尝试下一个后端\n", key))
+			LogGeneral("INFO", "[%s] 触发回退: %s 进入冷却", reqID, key)
 			continue
 		}
 
 		WriteRequestLog(cfg, reqID, logBuilder.String())
+		finalBackend = route.BackendName
+		metrics.Finish(false, finalBackend)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
 		return
 	}
 
-	logBuilder.WriteString("\n--- Final Result ---\nAll backends failed\n")
+	logBuilder.WriteString("\n--- 最终结果 ---\n所有后端均失败\n")
+	LogGeneral("ERROR", "[%s] 所有后端均失败", reqID)
 	WriteRequestLog(cfg, reqID, logBuilder.String())
 	WriteErrorLog(cfg, reqID, logBuilder.String())
 
+	metrics.Finish(false, "")
+
 	if lastErr != nil {
-		http.Error(w, fmt.Sprintf("All backends failed: %v", lastErr), http.StatusBadGateway)
+		http.Error(w, fmt.Sprintf("所有后端均失败: %v", lastErr), http.StatusBadGateway)
 		return
 	}
 	w.WriteHeader(lastStatus)
@@ -224,6 +252,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
 
 func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 	cfg := p.configMgr.Get()
+	LogGeneral("DEBUG", "收到模型列表请求: 客户端=%s", r.RemoteAddr)
 
 	type Model struct {
 		ID      string `json:"id"`
@@ -250,6 +279,7 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	LogGeneral("DEBUG", "返回 %d 个可用模型", len(models))
 	resp := Response{Object: "list", Data: models}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

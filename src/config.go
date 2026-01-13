@@ -51,10 +51,18 @@ type Detection struct {
 }
 
 type Logging struct {
-	Level       string `yaml:"level"`
-	RequestDir  string `yaml:"request_dir"`
-	ErrorDir    string `yaml:"error_dir"`
-	GeneralFile string `yaml:"general_file"`
+	Level         string `yaml:"level"`
+	RequestDir    string `yaml:"request_dir"`
+	ErrorDir      string `yaml:"error_dir"`
+	GeneralFile   string `yaml:"general_file"`
+	SeparateFiles bool   `yaml:"separate_files"`
+	MaskSensitive *bool  `yaml:"mask_sensitive,omitempty"`
+	EnableMetrics bool   `yaml:"enable_metrics"`
+	MaxFileSizeMB int    `yaml:"max_file_size_mb"`
+}
+
+func (l *Logging) ShouldMaskSensitive() bool {
+	return l.MaskSensitive == nil || *l.MaskSensitive
 }
 
 type Config struct {
@@ -114,7 +122,7 @@ func (cm *ConfigManager) Get() *Config {
 		return cm.config
 	}
 	if err := cm.tryReload(); err != nil {
-		LogGeneral("WARN", "Config reload failed: %v, using previous", err)
+		LogGeneral("WARN", "配置重载失败: %v，继续使用旧配置", err)
 	}
 	return cm.config
 }
@@ -131,7 +139,7 @@ func (cm *ConfigManager) tryReload() error {
 	stat, _ := os.Stat(cm.configPath)
 	cm.config = &cfg
 	cm.lastMod = stat.ModTime()
-	LogGeneral("INFO", "Config reloaded successfully")
+	LogGeneral("INFO", "配置重载成功")
 	return nil
 }
 

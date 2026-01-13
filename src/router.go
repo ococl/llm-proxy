@@ -27,7 +27,7 @@ func (r *Router) Resolve(alias string) ([]ResolvedRoute, error) {
 
 func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]ResolvedRoute, error) {
 	if visited[alias] {
-		LogGeneral("WARN", "Circular fallback detected for alias: %s", alias)
+		LogGeneral("WARN", "检测到循环回退: 别名=%s", alias)
 		return nil, nil
 	}
 	visited[alias] = true
@@ -63,16 +63,16 @@ func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]Re
 			}
 			key := r.cooldown.Key(route.Backend, route.Model)
 			if r.cooldown.IsCoolingDown(key) {
-				LogGeneral("DEBUG", "Skipping %s (cooling down)", key)
+				LogGeneral("DEBUG", "跳过冷却中的后端: %s", key)
 				continue
 			}
 			backend := r.configMgr.GetBackend(route.Backend)
 			if backend == nil {
-				LogGeneral("WARN", "Backend not found: %s", route.Backend)
+				LogGeneral("WARN", "后端不存在: %s", route.Backend)
 				continue
 			}
 			if !backend.IsEnabled() {
-				LogGeneral("DEBUG", "Skipping disabled backend: %s", route.Backend)
+				LogGeneral("DEBUG", "跳过已禁用的后端: %s", route.Backend)
 				continue
 			}
 			result = append(result, ResolvedRoute{
@@ -100,7 +100,7 @@ func (r *Router) collectFallbackRoutes(alias string, visited map[string]bool) []
 	for _, fallbackAlias := range fallbacks {
 		routes, _ := r.resolveWithVisited(fallbackAlias, visited)
 		if len(routes) > 0 {
-			LogGeneral("DEBUG", "Including fallback routes from %s for %s", fallbackAlias, alias)
+			LogGeneral("DEBUG", "添加回退路由: %s -> %s", alias, fallbackAlias)
 			result = append(result, routes...)
 		}
 	}
