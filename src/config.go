@@ -60,6 +60,7 @@ type Logging struct {
 	MaskSensitive *bool  `yaml:"mask_sensitive,omitempty"`
 	EnableMetrics bool   `yaml:"enable_metrics"`
 	MaxFileSizeMB int    `yaml:"max_file_size_mb"`
+	Colorize      *bool  `yaml:"colorize,omitempty"`
 }
 
 func (l *Logging) ShouldMaskSensitive() bool {

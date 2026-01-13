@@ -47,6 +47,7 @@ detection:
 
 logging:
   level: "info"
+  colorize: true
   general_file: "./logs/proxy.log"
   separate_files: false
   request_dir: "./logs/requests"

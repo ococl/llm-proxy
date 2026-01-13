@@ -49,6 +49,8 @@ func main() {
 	detector := NewDetector(configMgr)
 	proxy := NewProxy(configMgr, router, cooldown, detector)
 
+	printBanner(Version, cfg.GetListen(), len(cfg.Backends), len(cfg.Models))
+
 	LogGeneral("INFO", "LLM Proxy %s", Version)
 	LogGeneral("INFO", "访问地址: http://%s", formatListenAddress(cfg.GetListen()))
 	LogGeneral("INFO", "已加载 %d 个后端，%d 个模型别名", len(cfg.Backends), len(cfg.Models))

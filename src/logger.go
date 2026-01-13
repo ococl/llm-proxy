@@ -153,18 +153,26 @@ func logInternal(level string, target LogTarget, format string, args ...interfac
 		msg = MaskSensitiveData(msg)
 	}
 
-	line := fmt.Sprintf("[%s] [%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), strings.ToUpper(level), msg)
+	now := time.Now()
+	fileTime := now.Format("2006-01-02 15:04:05")
+	consoleTime := now.Format("15:04:05")
+	fileLine := fmt.Sprintf("[%s] [%s] %s\n", fileTime, strings.ToUpper(level), msg)
 
 	if shouldLogConsole {
-		fmt.Print(line)
+		if shouldUseColor() {
+			consoleLine := fmt.Sprintf("%s  %s  %s\n", colorTimeStr(consoleTime), colorLevel(level), highlightRequestID(msg))
+			fmt.Print(consoleLine)
+		} else {
+			fmt.Print(fileLine)
+		}
 	}
 
 	if shouldLogFile && generalLogger != nil {
 		if loggingConfig != nil {
 			rotateLogIfNeeded(loggingConfig.GeneralFile)
 		}
-		generalLogger.WriteString(line)
-		currentLogSize += int64(len(line))
+		generalLogger.WriteString(fileLine)
+		currentLogSize += int64(len(fileLine))
 	}
 }
 
