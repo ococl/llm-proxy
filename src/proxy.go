@@ -25,6 +25,12 @@ func NewProxy(cfg *ConfigManager, router *Router, cd *CooldownManager, det *Dete
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/health" || r.URL.Path == "/healthz" {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+		return
+	}
+
 	if r.URL.Path == "/v1/models" || r.URL.Path == "/models" {
 		p.handleModels(w, r)
 		return
