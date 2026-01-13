@@ -1,0 +1,14 @@
+dist
+
+# Go
+src/go.sum
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

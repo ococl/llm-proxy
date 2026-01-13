@@ -1,0 +1,11 @@
+{
+	"go.goroot": "",
+	"go.gopath": "",
+	"editor.formatOnSave": true,
+	"editor.defaultFormatter": "golang.go",
+	"[go]": {
+		"editor.codeActionsOnSave": {
+			"source.organizeImports": "explicit"
+		}
+	}
+}
