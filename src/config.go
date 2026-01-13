@@ -45,7 +45,7 @@ type Fallback struct {
 }
 
 type Detection struct {
-	ErrorCodes    []int    `yaml:"error_codes"`
+	ErrorCodes    []string `yaml:"error_codes"`
 	ErrorPatterns []string `yaml:"error_patterns"`
 }
 

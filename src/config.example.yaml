@@ -1,0 +1,49 @@
+listen: ":8080"
+proxy_api_key: "sk-your-unified-api-key"
+
+backends:
+  - name: "primary"
+    url: "https://api.primary-provider.com/v1"
+    api_key: "sk-primary-xxx"
+
+  - name: "secondary"
+    url: "https://api.secondary-provider.com/v1"
+    api_key: "sk-secondary-yyy"
+    enabled: false
+
+models:
+  "anthropic/claude-sonnet-4":
+    routes:
+      - backend: "primary"
+        model: "claude-sonnet-4"
+        priority: 1
+      - backend: "secondary"
+        model: "claude-sonnet-4"
+        priority: 2
+        enabled: false
+
+  "openai/gpt-4o":
+    enabled: false
+    routes:
+      - backend: "primary"
+        model: "gpt-4o"
+        priority: 1
+
+fallback:
+  cooldown_seconds: 300
+  max_retries: 3
+
+detection:
+  error_codes: ["4xx", "5xx"]
+  error_patterns:
+    - "insufficient_quota"
+    - "rate_limit"
+    - "exceeded"
+    - "billing"
+    - "quota"
+
+logging:
+  level: "info"
+  request_dir: "./logs/requests"
+  error_dir: "./logs/errors"
+  general_file: "./logs/proxy.log"
