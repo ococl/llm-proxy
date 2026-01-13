@@ -30,8 +30,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reqID := time.Now().Format("2006-01-02_15-04-05") + "_" + uuid.New().String()[:8]
 	cfg := p.configMgr.Get()
+
+	if cfg.ProxyAPIKey != "" {
+		auth := r.Header.Get("Authorization")
+		expected := "Bearer " + cfg.ProxyAPIKey
+		if auth != expected {
+			http.Error(w, "Invalid API key", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	reqID := time.Now().Format("2006-01-02_15-04-05") + "_" + uuid.New().String()[:8]
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -115,6 +125,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			proxyReq.Header[k] = v
 		}
 		proxyReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
+
+		backend := p.configMgr.GetBackend(route.BackendName)
+		if backend != nil && backend.APIKey != "" {
+			proxyReq.Header.Set("Authorization", "Bearer "+backend.APIKey)
+		}
 
 		client := &http.Client{Timeout: 5 * time.Minute}
 		resp, err := client.Do(proxyReq)

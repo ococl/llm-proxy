@@ -38,12 +38,13 @@ type Logging struct {
 }
 
 type Config struct {
-	Listen    string                  `yaml:"listen"`
-	Backends  []Backend               `yaml:"backends"`
-	Models    map[string][]ModelRoute `yaml:"models"`
-	Fallback  Fallback                `yaml:"fallback"`
-	Detection Detection               `yaml:"detection"`
-	Logging   Logging                 `yaml:"logging"`
+	Listen      string                  `yaml:"listen"`
+	ProxyAPIKey string                  `yaml:"proxy_api_key"`
+	Backends    []Backend               `yaml:"backends"`
+	Models      map[string][]ModelRoute `yaml:"models"`
+	Fallback    Fallback                `yaml:"fallback"`
+	Detection   Detection               `yaml:"detection"`
+	Logging     Logging                 `yaml:"logging"`
 }
 
 type ConfigManager struct {
