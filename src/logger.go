@@ -13,7 +13,12 @@ var (
 	generalLogger *os.File
 	logMu         sync.Mutex
 	logLevel      = "debug"
+	testMode      = false
 )
+
+func SetTestMode(enabled bool) {
+	testMode = enabled
+}
 
 var levelPriority = map[string]int{
 	"debug": 0,
@@ -43,6 +48,9 @@ func InitLogger(cfg *Config) error {
 }
 
 func LogGeneral(level, format string, args ...interface{}) {
+	if testMode {
+		return
+	}
 	if levelPriority[strings.ToLower(level)] < levelPriority[logLevel] {
 		return
 	}
@@ -57,11 +65,17 @@ func LogGeneral(level, format string, args ...interface{}) {
 }
 
 func WriteRequestLog(cfg *Config, reqID string, content string) error {
+	if testMode {
+		return nil
+	}
 	filename := filepath.Join(cfg.Logging.RequestDir, reqID+".log")
 	return os.WriteFile(filename, []byte(content), 0644)
 }
 
 func WriteErrorLog(cfg *Config, reqID string, content string) error {
+	if testMode {
+		return nil
+	}
 	filename := filepath.Join(cfg.Logging.ErrorDir, reqID+".log")
 	return os.WriteFile(filename, []byte(content), 0644)
 }
