@@ -1,7 +1,9 @@
 package main
 
 import (
+	"math/rand"
 	"sort"
+	"time"
 )
 
 type Router struct {
@@ -40,6 +42,20 @@ func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]Re
 		sort.Slice(sorted, func(i, j int) bool {
 			return sorted[i].Priority < sorted[j].Priority
 		})
+
+		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+		for i := 0; i < len(sorted); {
+			j := i + 1
+			for j < len(sorted) && sorted[j].Priority == sorted[i].Priority {
+				j++
+			}
+			if j-i > 1 {
+				rng.Shuffle(j-i, func(a, b int) {
+					sorted[i+a], sorted[i+b] = sorted[i+b], sorted[i+a]
+				})
+			}
+			i = j
+		}
 
 		for _, route := range sorted {
 			if !route.IsEnabled() {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,7 +43,7 @@ func InitLogger(cfg *Config) error {
 }
 
 func LogGeneral(level, format string, args ...interface{}) {
-	if levelPriority[level] < levelPriority[logLevel] {
+	if levelPriority[strings.ToLower(level)] < levelPriority[logLevel] {
 		return
 	}
 	logMu.Lock()

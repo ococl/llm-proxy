@@ -85,8 +85,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var lastStatus int
 	var lastBody string
 
+	maxRetries := cfg.Fallback.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = len(routes)
+	}
+
 	for i, route := range routes {
-		if i >= cfg.Fallback.MaxRetries {
+		if i >= maxRetries {
 			break
 		}
 

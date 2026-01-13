@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"time"
 )
 
 func main() {
@@ -21,6 +22,12 @@ func main() {
 	}
 
 	cooldown := NewCooldownManager()
+	go func() {
+		for {
+			time.Sleep(time.Minute)
+			cooldown.ClearExpired()
+		}
+	}()
 	router := NewRouter(configMgr, cooldown)
 	detector := NewDetector(configMgr)
 	proxy := NewProxy(configMgr, router, cooldown, detector)
