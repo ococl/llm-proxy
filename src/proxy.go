@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -261,16 +262,12 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
 	rc := http.NewResponseController(w)
 	rc.SetWriteDeadline(time.Time{})
 
-	buf := make([]byte, 1024)
-	for {
-		n, err := body.Read(buf)
-		if n > 0 {
-			w.Write(buf[:n])
-			flusher.Flush()
-		}
-		if err != nil {
-			break
-		}
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		w.Write(scanner.Bytes())
+		w.Write([]byte("\n"))
+		flusher.Flush()
 	}
 }
 
