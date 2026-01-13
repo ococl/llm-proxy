@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,11 +32,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.URL.Path == "/v1/models" || r.URL.Path == "/models" {
-		p.handleModels(w, r)
-		return
-	}
-
 	cfg := p.configMgr.Get()
 
 	if cfg.ProxyAPIKey != "" {
@@ -46,6 +42,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "无效的 API Key", http.StatusUnauthorized)
 			return
 		}
+	}
+
+	if r.URL.Path == "/v1/models" || r.URL.Path == "/models" {
+		p.handleModels(w, r)
+		return
 	}
 
 	reqID := time.Now().Format("2006-01-02_15-04-05") + "_" + uuid.New().String()[:8]
@@ -114,7 +115,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		logBuilder.WriteString(fmt.Sprintf("\n--- 尝试 %d ---\n", i+1))
 		logBuilder.WriteString(fmt.Sprintf("后端: %s\n模型: %s\n", route.BackendName, route.Model))
-		LogGeneral("DEBUG", "[%s] 尝试后端 %s (模型: %s)", reqID, route.BackendName, route.Model)
+		LogGeneral("INFO", "[%s] 尝试后端 %s (模型: %s)", reqID, route.BackendName, route.Model)
 
 		modifiedBody := make(map[string]interface{})
 		for k, v := range reqBody {
@@ -164,6 +165,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			lastErr = err
 			logBuilder.WriteString(fmt.Sprintf("请求失败: %v\n", err))
 			LogGeneral("WARN", "[%s] 后端 %s 请求失败: %v", reqID, route.BackendName, err)
+
+			// 记录连接错误到独立错误日志
+			errorContent := fmt.Sprintf("================== 错误日志 ==================\n请求ID: %s\n时间: %s\n后端: %s\n模型: %s\n错误: %v\n",
+				reqID, time.Now().Format(time.RFC3339), route.BackendName, route.Model, err)
+			WriteErrorLog(cfg, fmt.Sprintf("%s_%s", reqID, route.BackendName), errorContent)
+
 			key := p.cooldown.Key(route.BackendName, route.Model)
 			p.cooldown.SetCooldown(key, time.Duration(cfg.Fallback.CooldownSeconds)*time.Second)
 			continue
@@ -179,6 +186,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			for k, v := range resp.Header {
 				w.Header()[k] = v
+			}
+
+			if isStream {
+				w.Header().Set("Cache-Control", "no-cache")
+				w.Header().Set("Connection", "keep-alive")
+				w.Header().Set("X-Accel-Buffering", "no")
 			}
 			w.WriteHeader(resp.StatusCode)
 
@@ -198,6 +211,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		logBuilder.WriteString(fmt.Sprintf("状态: %d\n响应: %s\n", resp.StatusCode, lastBody))
 		LogGeneral("WARN", "[%s] 后端 %s 返回错误: 状态=%d", reqID, route.BackendName, resp.StatusCode)
+
+		// 记录每个后端错误到独立错误日志
+		errorContent := fmt.Sprintf("================== 错误日志 ==================\n请求ID: %s\n时间: %s\n后端: %s\n模型: %s\n状态码: %d\n\n--- 响应内容 ---\n%s\n",
+			reqID, time.Now().Format(time.RFC3339), route.BackendName, route.Model, resp.StatusCode, lastBody)
+		WriteErrorLog(cfg, fmt.Sprintf("%s_%s", reqID, route.BackendName), errorContent)
 
 		if p.detector.ShouldFallback(resp.StatusCode, lastBody) {
 			key := p.cooldown.Key(route.BackendName, route.Model)
@@ -237,7 +255,10 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
 		return
 	}
 
-	buf := make([]byte, 4096)
+	rc := http.NewResponseController(w)
+	rc.SetWriteDeadline(time.Time{})
+
+	buf := make([]byte, 1024)
 	for {
 		n, err := body.Read(buf)
 		if n > 0 {
@@ -278,6 +299,11 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 			OwnedBy: "llm-proxy",
 		})
 	}
+
+	// Sort models by ID (name) ascending
+	sort.Slice(models, func(i, j int) bool {
+		return models[i].ID < models[j].ID
+	})
 
 	LogGeneral("DEBUG", "返回 %d 个可用模型", len(models))
 	resp := Response{Object: "list", Data: models}

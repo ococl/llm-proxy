@@ -83,7 +83,11 @@ func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]Re
 		}
 	}
 
-	fallbackRoutes := r.collectFallbackRoutes(alias, visited)
+	visitedCopy := make(map[string]bool, len(visited)+1)
+	for k, v := range visited {
+		visitedCopy[k] = v
+	}
+	fallbackRoutes := r.collectFallbackRoutes(alias, visitedCopy)
 	result = append(result, fallbackRoutes...)
 
 	return result, nil

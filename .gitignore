@@ -6,6 +6,8 @@ dist
 *.swo
 *~
 
-# OS
+# TMEP FILES
 .DS_Store
 Thumbs.db
+nul
+src/*.exe

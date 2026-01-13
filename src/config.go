@@ -52,6 +52,7 @@ type Detection struct {
 
 type Logging struct {
 	Level         string `yaml:"level"`
+	ConsoleLevel  string `yaml:"console_level,omitempty"`
 	RequestDir    string `yaml:"request_dir"`
 	ErrorDir      string `yaml:"error_dir"`
 	GeneralFile   string `yaml:"general_file"`

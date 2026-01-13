@@ -22,22 +22,22 @@ CURRENT_OS=$(detect_os)
 build_windows() {
     echo ""
     echo "[构建 Windows 版本]"
-    GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o "$OUTPUT_DIR/${BINARY_NAME}-windows-amd64.exe" ./src
-    GOOS=windows GOARCH=arm64 go build -ldflags "-s -w" -o "$OUTPUT_DIR/${BINARY_NAME}-windows-arm64.exe" ./src
+    (cd src && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-windows-amd64.exe" .)
+    (cd src && CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-windows-arm64.exe" .)
 }
 
 build_linux() {
     echo ""
     echo "[构建 Linux 版本]"
-    GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o "$OUTPUT_DIR/${BINARY_NAME}-linux-amd64" ./src
-    GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o "$OUTPUT_DIR/${BINARY_NAME}-linux-arm64" ./src
+    (cd src && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-linux-amd64" .)
+    (cd src && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-linux-arm64" .)
 }
 
 build_darwin() {
     echo ""
     echo "[构建 macOS 版本]"
-    GOOS=darwin GOARCH=amd64 go build -ldflags "-s -w" -o "$OUTPUT_DIR/${BINARY_NAME}-darwin-amd64" ./src
-    GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o "$OUTPUT_DIR/${BINARY_NAME}-darwin-arm64" ./src
+    (cd src && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-darwin-amd64" .)
+    (cd src && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-darwin-arm64" .)
 }
 
 build_current() {
@@ -46,15 +46,15 @@ build_current() {
     case "$CURRENT_OS" in
         linux)
             echo "Linux amd64"
-            GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o "$OUTPUT_DIR/${BINARY_NAME}-linux-amd64" ./src
+            (cd src && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-linux-amd64" .)
             ;;
         darwin)
             echo "macOS arm64"
-            GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o "$OUTPUT_DIR/${BINARY_NAME}-darwin-arm64" ./src
+            (cd src && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-darwin-arm64" .)
             ;;
         windows)
             echo "Windows amd64"
-            GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o "$OUTPUT_DIR/${BINARY_NAME}-windows-amd64.exe" ./src
+            (cd src && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-windows-amd64.exe" .)
             ;;
         *)
             echo "不支持的操作系统: $CURRENT_OS"

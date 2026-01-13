@@ -11,17 +11,26 @@ import (
 )
 
 var (
-	generalLogger  *os.File
-	logMu          sync.Mutex
-	logLevel       = "info"
-	testMode       = false
-	currentLogDate string
-	currentLogSize int64
-	maxFileSizeMB  = 100
-	maskSensitive  = true
-	enableMetrics  = false
-	separateFiles  = false
-	loggingConfig  *Logging
+	generalLogger   *os.File
+	logMu           sync.Mutex
+	logLevel        = "info"
+	consoleLogLevel = "info"
+	testMode        = false
+	currentLogDate  string
+	currentLogSize  int64
+	maxFileSizeMB   = 100
+	maskSensitive   = true
+	enableMetrics   = false
+	separateFiles   = false
+	loggingConfig   *Logging
+)
+
+type LogTarget int
+
+const (
+	LogTargetBoth LogTarget = iota
+	LogTargetFile
+	LogTargetConsole
 )
 
 func SetTestMode(enabled bool) {
@@ -47,6 +56,10 @@ func InitLogger(cfg *Config) error {
 	logLevel = strings.ToLower(cfg.Logging.Level)
 	if logLevel == "" {
 		logLevel = "info"
+	}
+	consoleLogLevel = strings.ToLower(cfg.Logging.ConsoleLevel)
+	if consoleLogLevel == "" {
+		consoleLogLevel = "info"
 	}
 	maskSensitive = cfg.Logging.ShouldMaskSensitive()
 	enableMetrics = cfg.Logging.EnableMetrics
@@ -117,13 +130,21 @@ func MaskSensitiveData(s string) string {
 	return result
 }
 
-func LogGeneral(level, format string, args ...interface{}) {
+func logInternal(level string, target LogTarget, format string, args ...interface{}) {
 	if testMode {
 		return
 	}
-	if levelPriority[strings.ToLower(level)] < levelPriority[logLevel] {
+	levelLower := strings.ToLower(level)
+	filePriority := levelPriority[levelLower] >= levelPriority[logLevel]
+	consolePriority := levelPriority[levelLower] >= levelPriority[consoleLogLevel]
+
+	shouldLogFile := (target == LogTargetBoth || target == LogTargetFile) && filePriority
+	shouldLogConsole := (target == LogTargetBoth || target == LogTargetConsole) && consolePriority
+
+	if !shouldLogFile && !shouldLogConsole {
 		return
 	}
+
 	logMu.Lock()
 	defer logMu.Unlock()
 
@@ -133,15 +154,30 @@ func LogGeneral(level, format string, args ...interface{}) {
 	}
 
 	line := fmt.Sprintf("[%s] [%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), strings.ToUpper(level), msg)
-	fmt.Print(line)
 
-	if generalLogger != nil {
+	if shouldLogConsole {
+		fmt.Print(line)
+	}
+
+	if shouldLogFile && generalLogger != nil {
 		if loggingConfig != nil {
 			rotateLogIfNeeded(loggingConfig.GeneralFile)
 		}
 		generalLogger.WriteString(line)
 		currentLogSize += int64(len(line))
 	}
+}
+
+func LogGeneral(level, format string, args ...interface{}) {
+	logInternal(level, LogTargetBoth, format, args...)
+}
+
+func LogFile(level, format string, args ...interface{}) {
+	logInternal(level, LogTargetFile, format, args...)
+}
+
+func LogConsole(level, format string, args ...interface{}) {
+	logInternal(level, LogTargetConsole, format, args...)
 }
 
 func LogRequest(cfg *Config, reqID string, content string) error {
@@ -159,7 +195,7 @@ func LogRequest(cfg *Config, reqID string, content string) error {
 		return os.WriteFile(filename, []byte(maskedContent), 0644)
 	}
 
-	LogGeneral("INFO", "[请求 %s]\n%s", reqID, maskedContent)
+	LogFile("INFO", "[请求 %s]\n%s", reqID, maskedContent)
 	return nil
 }
 
@@ -178,7 +214,7 @@ func LogError(cfg *Config, reqID string, content string) error {
 		return os.WriteFile(filename, []byte(maskedContent), 0644)
 	}
 
-	LogGeneral("ERROR", "[错误 %s]\n%s", reqID, maskedContent)
+	LogFile("ERROR", "[错误 %s]\n%s", reqID, maskedContent)
 	return nil
 }
 

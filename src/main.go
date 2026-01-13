@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -48,10 +50,33 @@ func main() {
 	proxy := NewProxy(configMgr, router, cooldown, detector)
 
 	LogGeneral("INFO", "LLM Proxy %s", Version)
-	LogGeneral("INFO", "访问地址: http://%s", cfg.GetListen())
+	LogGeneral("INFO", "访问地址: http://%s", formatListenAddress(cfg.GetListen()))
 	LogGeneral("INFO", "已加载 %d 个后端，%d 个模型别名", len(cfg.Backends), len(cfg.Models))
 
 	if err := http.ListenAndServe(cfg.GetListen(), proxy); err != nil {
 		log.Fatalf("服务器启动失败: %v", err)
 	}
+}
+
+func formatListenAddress(listen string) string {
+	if strings.HasPrefix(listen, ":") {
+		ip := getLocalIP()
+		return ip + listen
+	}
+	return listen
+}
+
+func getLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "127.0.0.1"
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return "127.0.0.1"
 }
