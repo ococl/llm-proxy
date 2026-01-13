@@ -32,6 +32,9 @@ models:
 fallback:
   cooldown_seconds: 300
   max_retries: 3
+  alias_fallback:
+    "anthropic/claude-sonnet-4":
+      - "openai/gpt-4o"
 
 detection:
   error_codes: ["4xx", "5xx"]

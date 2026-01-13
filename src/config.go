@@ -40,8 +40,9 @@ func (m *ModelAlias) IsEnabled() bool {
 }
 
 type Fallback struct {
-	CooldownSeconds int `yaml:"cooldown_seconds"`
-	MaxRetries      int `yaml:"max_retries"`
+	CooldownSeconds int                 `yaml:"cooldown_seconds"`
+	MaxRetries      int                 `yaml:"max_retries"`
+	AliasFallback   map[string][]string `yaml:"alias_fallback,omitempty"`
 }
 
 type Detection struct {
