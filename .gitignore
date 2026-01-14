@@ -11,3 +11,5 @@ dist
 Thumbs.db
 nul
 src/*.exe
+tmp
+

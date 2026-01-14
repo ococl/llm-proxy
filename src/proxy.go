@@ -193,12 +193,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			lastErr = err
-			logBuilder.WriteString(fmt.Sprintf("请求失败: %v\n", err))
-			LogGeneral("WARN", "[%s] 后端 %s 请求失败: %v", reqID, route.BackendName, err)
+			logBuilder.WriteString(fmt.Sprintf("\n--- 响应详情 ---\n"))
+			logBuilder.WriteString(fmt.Sprintf("错误: %v\n", err))
+			logBuilder.WriteString(fmt.Sprintf("耗时: %dms\n", backendDuration.Milliseconds()))
+			LogGeneral("WARN", "[%s] 后端 %s 请求失败: %v 耗时=%dms", reqID, route.BackendName, err, backendDuration.Milliseconds())
 
-			// 记录连接错误到独立错误日志
-			errorContent := fmt.Sprintf("================== 错误日志 ==================\n请求ID: %s\n时间: %s\n后端: %s\n模型: %s\n错误: %v\n",
-				reqID, time.Now().Format(time.RFC3339), route.BackendName, route.Model, err)
+			errorContent := fmt.Sprintf("================== 错误日志 ==================\n请求ID: %s\n时间: %s\n后端: %s\n模型: %s\n错误: %v\n耗时: %dms\n",
+				reqID, time.Now().Format(time.RFC3339), route.BackendName, route.Model, err, backendDuration.Milliseconds())
 			WriteErrorLog(cfg, fmt.Sprintf("%s_%s", reqID, route.BackendName), errorContent)
 
 			key := p.cooldown.Key(route.BackendName, route.Model)
@@ -206,9 +207,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		logBuilder.WriteString(fmt.Sprintf("\n--- 响应详情 ---\n"))
+		logBuilder.WriteString(fmt.Sprintf("状态码: %d\n", resp.StatusCode))
+		logBuilder.WriteString(fmt.Sprintf("响应头:\n"))
+		for k, v := range resp.Header {
+			logBuilder.WriteString(fmt.Sprintf("  %s: %s\n", k, strings.Join(v, ", ")))
+		}
+		logBuilder.WriteString(fmt.Sprintf("耗时: %dms\n", backendDuration.Milliseconds()))
+
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			logBuilder.WriteString(fmt.Sprintf("状态: %d 成功\n", resp.StatusCode))
-			LogGeneral("INFO", "[%s] 请求成功: 后端=%s 状态=%d 耗时=%dms", reqID, route.BackendName, resp.StatusCode, backendDuration.Milliseconds())
+			logBuilder.WriteString(fmt.Sprintf("结果: 成功\n"))
+			LogGeneral("INFO", "[%s] 请求成功: 后端=%s 状态=%d 耗时=%dms 总尝试=%d", reqID, route.BackendName, resp.StatusCode, backendDuration.Milliseconds(), metrics.Attempts)
 			WriteRequestLog(cfg, reqID, logBuilder.String())
 
 			finalBackend = route.BackendName
@@ -245,7 +254,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lastBody = string(respBody)
 
 		logBuilder.WriteString(fmt.Sprintf("状态: %d\n响应: %s\n", resp.StatusCode, lastBody))
-		LogGeneral("WARN", "[%s] 后端 %s 返回错误: 状态=%d", reqID, route.BackendName, resp.StatusCode)
+		LogGeneral("WARN", "[%s] 后端 %s 返回错误: 状态=%d 耗时=%dms", reqID, route.BackendName, resp.StatusCode, backendDuration.Milliseconds())
 
 		// 记录每个后端错误到独立错误日志
 		errorContent := fmt.Sprintf("================== 错误日志 ==================\n请求ID: %s\n时间: %s\n后端: %s\n模型: %s\n状态码: %d\n\n--- 响应内容 ---\n%s\n",
@@ -273,6 +282,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	WriteRequestLog(cfg, reqID, logBuilder.String())
 	WriteErrorLog(cfg, reqID, logBuilder.String())
 
+	var backendDetails []string
+	for backend, duration := range metrics.BackendTimes {
+		backendDetails = append(backendDetails, fmt.Sprintf("%s=%dms", backend, duration.Milliseconds()))
+	}
+	LogGeneral("ERROR", "[%s] 所有后端均失败: 模型=%s 尝试次数=%d 后端详情=[%s]",
+		reqID, modelAlias, metrics.Attempts, strings.Join(backendDetails, ", "))
+
 	metrics.Finish(false, "")
 
 	if lastErr != nil {
@@ -290,11 +306,14 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
 		return
 	}
 
-	buf := make([]byte, 4096)
+	buf := make([]byte, 32*1024)
 	for {
 		n, err := body.Read(buf)
 		if n > 0 {
-			w.Write(buf[:n])
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				LogGeneral("DEBUG", "写入失败: %v", writeErr)
+				break
+			}
 			flusher.Flush()
 		}
 		if err != nil {
