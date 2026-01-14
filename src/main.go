@@ -42,15 +42,25 @@ func main() {
 	}
 
 	cooldown := NewCooldownManager()
+	shutdownCooldown := make(chan struct{})
 	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
 		for {
-			time.Sleep(time.Minute)
-			cooldown.ClearExpired()
+			select {
+			case <-ticker.C:
+				cooldown.ClearExpired()
+			case <-shutdownCooldown:
+				return
+			}
 		}
 	}()
 	router := NewRouter(configMgr, cooldown)
 	detector := NewDetector(configMgr)
 	proxy := NewProxy(configMgr, router, cooldown, detector)
+
+	rateLimiter := NewRateLimiter(configMgr)
+	concurrencyLimiter := NewConcurrencyLimiter(configMgr)
 
 	printBanner(Version, cfg.GetListen(), len(cfg.Backends), len(cfg.Models))
 
@@ -60,7 +70,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    cfg.GetListen(),
-		Handler: RecoveryMiddleware(proxy),
+		Handler: RecoveryMiddleware(rateLimiter.Middleware(concurrencyLimiter.Middleware(proxy))),
 	}
 
 	go func() {
@@ -74,6 +84,9 @@ func main() {
 	<-quit
 
 	LogGeneral("INFO", "正在关闭服务器...")
+
+	close(shutdownCooldown)
+	ShutdownLogger()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

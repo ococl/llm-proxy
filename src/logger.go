@@ -13,7 +13,7 @@ import (
 var (
 	generalLogger   *os.File
 	logMu           sync.Mutex
-	configMu        sync.RWMutex // 保护日志配置变量
+	configMu        sync.RWMutex
 	logLevel        = "info"
 	consoleLogLevel = "info"
 	testMode        = false
@@ -24,6 +24,8 @@ var (
 	enableMetrics   = false
 	separateFiles   = false
 	loggingConfig   *Logging
+
+	asyncLogger *AsyncLogger
 )
 
 type LogTarget int
@@ -33,6 +35,83 @@ const (
 	LogTargetFile
 	LogTargetConsole
 )
+
+type LogEntry struct {
+	Level    string
+	Target   LogTarget
+	Message  string
+	IsMetric bool
+}
+
+type AsyncLogger struct {
+	entries chan LogEntry
+	done    chan struct{}
+	wg      sync.WaitGroup
+	enabled bool
+}
+
+func NewAsyncLogger(bufferSize int) *AsyncLogger {
+	if bufferSize <= 0 {
+		bufferSize = 10000
+	}
+	return &AsyncLogger{
+		entries: make(chan LogEntry, bufferSize),
+		done:    make(chan struct{}),
+		enabled: true,
+	}
+}
+
+func (al *AsyncLogger) Start() {
+	al.wg.Add(1)
+	go al.worker()
+}
+
+func (al *AsyncLogger) worker() {
+	for {
+		select {
+		case entry := <-al.entries:
+			if al.enabled {
+				logMessage(entry.Level, entry.Target, entry.Message)
+			}
+		case <-al.done:
+			return
+		}
+	}
+}
+
+func (al *AsyncLogger) Stop() {
+	al.enabled = false
+	close(al.done)
+	al.wg.Wait()
+
+	for {
+		select {
+		case entry := <-al.entries:
+			logMessage(entry.Level, entry.Target, entry.Message)
+		default:
+			return
+		}
+	}
+}
+
+func (al *AsyncLogger) Log(level string, target LogTarget, format string, args ...interface{}) {
+	if !al.enabled {
+		return
+	}
+	entry := LogEntry{
+		Level:   level,
+		Target:  target,
+		Message: fmt.Sprintf(format, args...),
+	}
+	select {
+	case al.entries <- entry:
+	default:
+		if loggingConfig != nil && loggingConfig.ShouldDropOnFull() {
+			return
+		}
+		al.entries <- entry
+	}
+}
 
 func SetTestMode(enabled bool) {
 	testMode = enabled
@@ -69,6 +148,11 @@ func InitLogger(cfg *Config) error {
 	if cfg.Logging.MaxFileSizeMB > 0 {
 		maxFileSizeMB = cfg.Logging.MaxFileSizeMB
 	}
+
+	if cfg.Logging.ShouldAsync() {
+		asyncLogger = NewAsyncLogger(cfg.Logging.GetBufferSize())
+		asyncLogger.Start()
+	}
 	configMu.Unlock()
 
 	if separateFiles {
@@ -86,6 +170,12 @@ func InitLogger(cfg *Config) error {
 	}
 
 	return rotateLogIfNeeded(cfg.Logging.GeneralFile)
+}
+
+func ShutdownLogger() {
+	if asyncLogger != nil {
+		asyncLogger.Stop()
+	}
 }
 
 func rotateLogIfNeeded(basePath string) error {
@@ -133,7 +223,7 @@ func MaskSensitiveData(s string) string {
 	return result
 }
 
-func logInternal(level string, target LogTarget, format string, args ...interface{}) {
+func logMessage(level string, target LogTarget, message string) {
 	if testMode {
 		return
 	}
@@ -159,7 +249,8 @@ func logInternal(level string, target LogTarget, format string, args ...interfac
 	logMu.Lock()
 	defer logMu.Unlock()
 
-	msg := fmt.Sprintf(format, args...)
+	msg := message
+
 	if currentMaskSensitive {
 		msg = MaskSensitiveData(msg)
 	}
@@ -185,6 +276,14 @@ func logInternal(level string, target LogTarget, format string, args ...interfac
 		generalLogger.WriteString(fileLine)
 		currentLogSize += int64(len(fileLine))
 	}
+}
+
+func logInternal(level string, target LogTarget, format string, args ...interface{}) {
+	if asyncLogger != nil && asyncLogger.enabled {
+		asyncLogger.Log(level, target, format, args...)
+		return
+	}
+	logMessage(level, target, fmt.Sprintf(format, args...))
 }
 
 func LogGeneral(level, format string, args ...interface{}) {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -61,10 +63,28 @@ type Logging struct {
 	EnableMetrics bool   `yaml:"enable_metrics"`
 	MaxFileSizeMB int    `yaml:"max_file_size_mb"`
 	Colorize      *bool  `yaml:"colorize,omitempty"`
+	Async         bool   `yaml:"async"`
+	BufferSize    int    `yaml:"buffer_size"`
+	DropOnFull    bool   `yaml:"drop_on_full"`
 }
 
 func (l *Logging) ShouldMaskSensitive() bool {
 	return l.MaskSensitive == nil || *l.MaskSensitive
+}
+
+func (l *Logging) ShouldAsync() bool {
+	return l.Async
+}
+
+func (l *Logging) GetBufferSize() int {
+	if l.BufferSize <= 0 {
+		return 10000
+	}
+	return l.BufferSize
+}
+
+func (l *Logging) ShouldDropOnFull() bool {
+	return l.DropOnFull
 }
 
 type Config struct {
@@ -75,6 +95,109 @@ type Config struct {
 	Fallback    Fallback               `yaml:"fallback"`
 	Detection   Detection              `yaml:"detection"`
 	Logging     Logging                `yaml:"logging"`
+	Timeout     TimeoutConfig          `yaml:"timeout"`
+	RateLimit   RateLimitConfig        `yaml:"rate_limit"`
+	Concurrency ConcurrencyConfig      `yaml:"concurrency"`
+}
+
+type TimeoutConfig struct {
+	ConnectTimeout time.Duration `yaml:"connect_timeout"`
+	ReadTimeout    time.Duration `yaml:"read_timeout"`
+	WriteTimeout   time.Duration `yaml:"write_timeout"`
+	TotalTimeout   time.Duration `yaml:"total_timeout"`
+}
+
+type RateLimitConfig struct {
+	Enabled     bool               `yaml:"enabled"`
+	GlobalRPS   float64            `yaml:"global_rps"`
+	PerIPRPS    float64            `yaml:"per_ip_rps"`
+	PerModelRPS map[string]float64 `yaml:"per_model_rps"`
+	BurstFactor float64            `yaml:"burst_factor"`
+}
+
+type ConcurrencyConfig struct {
+	Enabled         bool          `yaml:"enabled"`
+	MaxRequests     int           `yaml:"max_requests"`
+	MaxQueueSize    int           `yaml:"max_queue_size"`
+	QueueTimeout    time.Duration `yaml:"queue_timeout"`
+	PerBackendLimit int           `yaml:"per_backend_limit"`
+}
+
+func (r *RateLimitConfig) GetGlobalRPS() float64 {
+	if r.GlobalRPS <= 0 {
+		return 1000
+	}
+	return r.GlobalRPS
+}
+
+func (r *RateLimitConfig) GetPerIPRPS() float64 {
+	if r.PerIPRPS <= 0 {
+		return 100
+	}
+	return r.PerIPRPS
+}
+
+func (r *RateLimitConfig) GetBurstFactor() float64 {
+	if r.BurstFactor <= 0 {
+		return 1.5
+	}
+	return r.BurstFactor
+}
+
+func (c *ConcurrencyConfig) GetMaxRequests() int {
+	if c.MaxRequests <= 0 {
+		return 500
+	}
+	return c.MaxRequests
+}
+
+func (c *ConcurrencyConfig) GetMaxQueueSize() int {
+	if c.MaxQueueSize <= 0 {
+		return 1000
+	}
+	return c.MaxQueueSize
+}
+
+func (c *ConcurrencyConfig) GetQueueTimeout() time.Duration {
+	if c.QueueTimeout <= 0 {
+		return 30 * time.Second
+	}
+	return c.QueueTimeout
+}
+
+func (c *ConcurrencyConfig) GetPerBackendLimit() int {
+	if c.PerBackendLimit <= 0 {
+		return 100
+	}
+	return c.PerBackendLimit
+}
+
+func (t *TimeoutConfig) GetConnectTimeout() time.Duration {
+	if t.ConnectTimeout <= 0 {
+		return 10 * time.Second
+	}
+	return t.ConnectTimeout
+}
+
+func (t *TimeoutConfig) GetReadTimeout() time.Duration {
+	if t.ReadTimeout <= 0 {
+		return 60 * time.Second
+	}
+	return t.ReadTimeout
+}
+
+func (t *TimeoutConfig) GetWriteTimeout() time.Duration {
+	if t.WriteTimeout <= 0 {
+		return 60 * time.Second
+	}
+	return t.WriteTimeout
+}
+
+func (t *TimeoutConfig) GetTotalTimeout() time.Duration {
+	if t.TotalTimeout <= 0 {
+		return 10 * time.Minute
+	}
+	return t.TotalTimeout
 }
 
 func (c *Config) GetListen() string {
@@ -119,19 +242,20 @@ func (cm *ConfigManager) load() error {
 
 func (cm *ConfigManager) Get() *Config {
 	cm.mu.RLock()
+	cfg := cm.config
+	cm.mu.RUnlock()
+
 	stat, err := os.Stat(cm.configPath)
-	if err != nil || stat.ModTime().Equal(cm.lastMod) {
-		cfg := cm.config
-		cm.mu.RUnlock()
+	if err != nil {
 		return cfg
 	}
-	cm.mu.RUnlock()
+	if stat.ModTime().Equal(cm.lastMod) {
+		return cfg
+	}
 
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	// Double check after acquiring write lock
-	stat, err = os.Stat(cm.configPath)
-	if err != nil {
+	if stat, err = os.Stat(cm.configPath); err != nil {
 		LogGeneral("WARN", "检查配置文件失败: %v，继续使用旧配置", err)
 		return cm.config
 	}
@@ -169,6 +293,175 @@ func (cm *ConfigManager) GetBackend(name string) *Backend {
 		if cfg.Backends[i].Name == name {
 			return &cfg.Backends[i]
 		}
+	}
+	return nil
+}
+
+func ValidateConfig(cfg *Config) []error {
+	var errors []error
+
+	if cfg.Listen == "" {
+		errors = append(errors, fmt.Errorf("listen 地址不能为空"))
+	}
+
+	if len(cfg.Backends) == 0 {
+		errors = append(errors, fmt.Errorf("必须配置至少一个后端"))
+	}
+
+	backendNames := make(map[string]bool)
+	for i, backend := range cfg.Backends {
+		if backend.Name == "" {
+			errors = append(errors, fmt.Errorf("后端 #%d 缺少名称", i+1))
+		} else {
+			if backendNames[backend.Name] {
+				errors = append(errors, fmt.Errorf("后端名称重复: %s", backend.Name))
+			}
+			backendNames[backend.Name] = true
+		}
+
+		if backend.URL == "" {
+			errors = append(errors, fmt.Errorf("后端 %s 缺少 URL", backend.Name))
+		} else {
+			if _, err := url.ParseRequestURI(backend.URL); err != nil {
+				errors = append(errors, fmt.Errorf("后端 %s URL 格式无效: %v", backend.Name, err))
+			}
+		}
+	}
+
+	for alias, modelAlias := range cfg.Models {
+		if modelAlias == nil {
+			continue
+		}
+		for i, route := range modelAlias.Routes {
+			if route.Backend == "" {
+				errors = append(errors, fmt.Errorf("模型别名 %s 的路由 #%d 缺少后端引用", alias, i+1))
+			} else if !backendNames[route.Backend] {
+				errors = append(errors, fmt.Errorf("模型别名 %s 引用的后端 %s 不存在", alias, route.Backend))
+			}
+			if route.Model == "" {
+				errors = append(errors, fmt.Errorf("模型别名 %s 的路由 #%d 缺少模型名称", alias, i+1))
+			}
+		}
+	}
+
+	if cfg.Fallback.CooldownSeconds <= 0 {
+		cfg.Fallback.CooldownSeconds = 60
+	}
+	if cfg.Fallback.MaxRetries <= 0 {
+		cfg.Fallback.MaxRetries = 3
+	}
+
+	if err := validateTimeouts(cfg); err != nil {
+		errors = append(errors, err)
+	}
+	if err := validateNumericRanges(cfg); err != nil {
+		errors = append(errors, err)
+	}
+	if err := validateURLSchemes(cfg); err != nil {
+		errors = append(errors, err)
+	}
+	if err := validateRateLimitConfig(cfg); err != nil {
+		errors = append(errors, err)
+	}
+	if err := validateConcurrencyConfig(cfg); err != nil {
+		errors = append(errors, err)
+	}
+
+	return errors
+}
+
+func validateTimeouts(cfg *Config) error {
+	if cfg.Timeout.ConnectTimeout < 1*time.Second {
+		return fmt.Errorf("connect_timeout 太短: %v (最小 1秒)", cfg.Timeout.ConnectTimeout)
+	}
+	if cfg.Timeout.ConnectTimeout > 5*time.Minute {
+		return fmt.Errorf("connect_timeout 太长: %v (最大 5分钟)", cfg.Timeout.ConnectTimeout)
+	}
+	if cfg.Timeout.ReadTimeout < 1*time.Second {
+		return fmt.Errorf("read_timeout 太短: %v (最小 1秒)", cfg.Timeout.ReadTimeout)
+	}
+	if cfg.Timeout.ReadTimeout > 10*time.Minute {
+		return fmt.Errorf("read_timeout 太长: %v (最大 10分钟)", cfg.Timeout.ReadTimeout)
+	}
+	if cfg.Timeout.TotalTimeout < 1*time.Second {
+		return fmt.Errorf("total_timeout 太短: %v (最小 1秒)", cfg.Timeout.TotalTimeout)
+	}
+	if cfg.Timeout.TotalTimeout > 30*time.Minute {
+		return fmt.Errorf("total_timeout 太长: %v (最大 30分钟)", cfg.Timeout.TotalTimeout)
+	}
+	return nil
+}
+
+func validateNumericRanges(cfg *Config) error {
+	if cfg.RateLimit.Enabled {
+		if cfg.RateLimit.GlobalRPS > 10000 {
+			return fmt.Errorf("global_rps 过大: %v (最大 10000)", cfg.RateLimit.GlobalRPS)
+		}
+		if cfg.RateLimit.GlobalRPS < 1 {
+			return fmt.Errorf("global_rps 过小: %v (最小 1)", cfg.RateLimit.GlobalRPS)
+		}
+		if cfg.RateLimit.PerIPRPS > 1000 {
+			return fmt.Errorf("per_ip_rps 过大: %v (最大 1000)", cfg.RateLimit.PerIPRPS)
+		}
+		if cfg.RateLimit.BurstFactor < 1 || cfg.RateLimit.BurstFactor > 3 {
+			return fmt.Errorf("burst_factor 范围无效: %v (应在 1-3 之间)", cfg.RateLimit.BurstFactor)
+		}
+	}
+	if cfg.Concurrency.Enabled {
+		if cfg.Concurrency.MaxRequests > 10000 {
+			return fmt.Errorf("max_requests 过大: %v (最大 10000)", cfg.Concurrency.MaxRequests)
+		}
+		if cfg.Concurrency.MaxRequests < 1 {
+			return fmt.Errorf("max_requests 过小: %v (最小 1)", cfg.Concurrency.MaxRequests)
+		}
+		if cfg.Concurrency.MaxQueueSize > 100000 {
+			return fmt.Errorf("max_queue_size 过大: %v (最大 100000)", cfg.Concurrency.MaxQueueSize)
+		}
+		if cfg.Concurrency.QueueTimeout < 1*time.Second || cfg.Concurrency.QueueTimeout > 5*time.Minute {
+			return fmt.Errorf("queue_timeout 范围无效: %v (应在 1秒-5分钟之间)", cfg.Concurrency.QueueTimeout)
+		}
+	}
+	return nil
+}
+
+func validateURLSchemes(cfg *Config) error {
+	allowedSchemes := map[string]bool{"http": true, "https": true}
+	for _, backend := range cfg.Backends {
+		u, err := url.Parse(backend.URL)
+		if err != nil {
+			return fmt.Errorf("后端 %s URL 解析失败: %v", backend.Name, err)
+		}
+		if !allowedSchemes[u.Scheme] {
+			return fmt.Errorf("后端 %s URL scheme 不允许: %s (仅允许 http/https)", backend.Name, u.Scheme)
+		}
+	}
+	return nil
+}
+
+func validateRateLimitConfig(cfg *Config) error {
+	if !cfg.RateLimit.Enabled {
+		return nil
+	}
+	for model, rps := range cfg.RateLimit.PerModelRPS {
+		if rps > 5000 {
+			return fmt.Errorf("模型 %s 的 per_model_rps 过大: %v (最大 5000)", model, rps)
+		}
+		if rps < 0.1 {
+			return fmt.Errorf("模型 %s 的 per_model_rps 过小: %v (最小 0.1)", model, rps)
+		}
+	}
+	return nil
+}
+
+func validateConcurrencyConfig(cfg *Config) error {
+	if !cfg.Concurrency.Enabled {
+		return nil
+	}
+	if cfg.Concurrency.PerBackendLimit < 1 {
+		return fmt.Errorf("per_backend_limit 过小: %v (最小 1)", cfg.Concurrency.PerBackendLimit)
+	}
+	if cfg.Concurrency.PerBackendLimit > 1000 {
+		return fmt.Errorf("per_backend_limit 过大: %v (最大 1000)", cfg.Concurrency.PerBackendLimit)
 	}
 	return nil
 }

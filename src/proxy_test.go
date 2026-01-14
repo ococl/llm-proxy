@@ -17,10 +17,11 @@ func TestProxy_HealthEndpoint(t *testing.T) {
 	proxy := NewProxy(cm, router, cd, detector)
 
 	tests := []struct {
-		path string
+		path     string
+		expected string
 	}{
-		{"/health"},
-		{"/healthz"},
+		{"/health", `{"backends":0,"models":0,"status":"healthy"}`},
+		{"/healthz", `{"backends":0,"models":0,"status":"healthy"}`},
 	}
 
 	for _, tt := range tests {
@@ -32,8 +33,14 @@ func TestProxy_HealthEndpoint(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Errorf("%s: expected 200, got %d", tt.path, w.Code)
 		}
-		if w.Body.String() != "ok" {
-			t.Errorf("%s: expected 'ok', got %q", tt.path, w.Body.String())
+		body := w.Body.String()
+		var got map[string]interface{}
+		if err := json.Unmarshal([]byte(body), &got); err != nil {
+			t.Errorf("%s: failed to parse JSON: %v", tt.path, err)
+			continue
+		}
+		if got["status"] != "healthy" {
+			t.Errorf("%s: expected status 'healthy', got %v", tt.path, got["status"])
 		}
 	}
 }

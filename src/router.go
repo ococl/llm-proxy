@@ -75,6 +75,9 @@ func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]Re
 				LogGeneral("DEBUG", "跳过已禁用的后端: %s", route.Backend)
 				continue
 			}
+			if result == nil {
+				result = make([]ResolvedRoute, 0, len(sorted))
+			}
 			result = append(result, ResolvedRoute{
 				BackendName: backend.Name,
 				BackendURL:  backend.URL,
@@ -88,7 +91,13 @@ func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]Re
 		visitedCopy[k] = v
 	}
 	fallbackRoutes := r.collectFallbackRoutes(alias, visitedCopy)
-	result = append(result, fallbackRoutes...)
+	if len(fallbackRoutes) > 0 {
+		if result == nil {
+			result = fallbackRoutes
+		} else {
+			result = append(result, fallbackRoutes...)
+		}
+	}
 
 	return result, nil
 }

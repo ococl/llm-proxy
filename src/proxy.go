@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -30,20 +31,46 @@ func NewProxy(cfg *ConfigManager, router *Router, cd *CooldownManager, det *Dete
 		cooldown:  cd,
 		detector:  det,
 		client: &http.Client{
-			Timeout: 5 * time.Minute,
+			Timeout: 10 * time.Minute,
 			Transport: &http.Transport{
 				MaxIdleConns:        100,
 				MaxIdleConnsPerHost: 10,
 				IdleConnTimeout:     90 * time.Second,
+				DialContext: (&net.Dialer{
+					Timeout:   10 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
 			},
+		},
+	}
+}
+
+func (p *Proxy) createHTTPClient(cfg *Config) *http.Client {
+	timeout := cfg.Timeout.GetTotalTimeout()
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+			DialContext: (&net.Dialer{
+				Timeout:   cfg.Timeout.GetConnectTimeout(),
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
 		},
 	}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/health" || r.URL.Path == "/healthz" {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		cfg := p.configMgr.Get()
+		health := map[string]interface{}{
+			"status":   "healthy",
+			"backends": len(cfg.Backends),
+			"models":   len(cfg.Models),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(health)
 		return
 	}
 
@@ -54,7 +81,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		expected := "Bearer " + cfg.ProxyAPIKey
 		if auth != expected {
 			LogGeneral("WARN", "API Key 验证失败，客户端: %s", r.RemoteAddr)
-			http.Error(w, "无效的 API Key", http.StatusUnauthorized)
+			WriteJSONError(w, ErrUnauthorized, http.StatusUnauthorized, "")
 			return
 		}
 	}
@@ -69,7 +96,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		LogGeneral("ERROR", "[%s] 读取请求体失败: %v", reqID, err)
-		http.Error(w, "读取请求体失败", http.StatusBadRequest)
+		WriteJSONError(w, ErrBadRequest, http.StatusBadRequest, reqID)
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
@@ -77,7 +104,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var reqBody map[string]interface{}
 	if err := json.Unmarshal(body, &reqBody); err != nil {
 		LogGeneral("WARN", "[%s] 解析请求体失败: %v", reqID, err)
-		http.Error(w, "无效的 JSON 请求体", http.StatusBadRequest)
+		WriteJSONError(w, ErrInvalidJSON, http.StatusBadRequest, reqID)
 		return
 	}
 
@@ -87,16 +114,21 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	modelAlias, _ := reqBody["model"].(string)
 	if modelAlias == "" {
 		LogGeneral("WARN", "[%s] 请求缺少 model 字段", reqID)
-		http.Error(w, "缺少 model 字段", http.StatusBadRequest)
+		WriteJSONError(w, ErrMissingModel, http.StatusBadRequest, reqID)
 		return
 	}
 
 	LogGeneral("INFO", "[%s] 收到请求: 模型=%s 客户端=%s", reqID, modelAlias, r.RemoteAddr)
 
-	routes, _ := p.router.Resolve(modelAlias)
+	routes, err := p.router.Resolve(modelAlias)
+	if err != nil {
+		LogGeneral("WARN", "[%s] 解析模型别名失败: %v", reqID, err)
+		WriteJSONErrorWithMsg(w, ErrBadRequest, http.StatusBadRequest, reqID, fmt.Sprintf("解析模型别名失败: %v", err))
+		return
+	}
 	if len(routes) == 0 {
 		LogGeneral("WARN", "[%s] 未知的模型别名: %s", reqID, modelAlias)
-		http.Error(w, fmt.Sprintf("未知的模型别名: %s", modelAlias), http.StatusBadRequest)
+		WriteJSONErrorWithMsg(w, ErrUnknownModel, http.StatusBadRequest, reqID, fmt.Sprintf("未知的模型别名: %s", modelAlias))
 		return
 	}
 
@@ -241,8 +273,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			logBuilder.WriteString(fmt.Sprintf("读取响应体失败: %v\n", err))
+			LogGeneral("WARN", "[%s] 读取响应体失败: %v", reqID, err)
+		}
 		lastStatus = resp.StatusCode
 		lastBody = string(respBody)
 
@@ -278,7 +315,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	metrics.Finish(false, "")
 
 	if lastErr != nil {
-		http.Error(w, fmt.Sprintf("所有后端均失败: %v", lastErr), http.StatusBadGateway)
+		WriteJSONErrorWithMsg(w, ErrNoBackend, http.StatusBadGateway, reqID, fmt.Sprintf("所有后端均失败: %v", lastErr))
 		return
 	}
 	w.WriteHeader(lastStatus)
@@ -292,7 +329,17 @@ func (p *Proxy) streamResponse(ctx context.Context, w http.ResponseWriter, body 
 	go func() {
 		select {
 		case <-ctx.Done():
-			body.Close()
+			// 使用带超时的关闭，防止 body.Close() 阻塞导致 goroutine 泄漏
+			closeDone := make(chan struct{})
+			go func() {
+				body.Close()
+				close(closeDone)
+			}()
+			select {
+			case <-closeDone:
+			case <-time.After(5 * time.Second):
+				// 超时后放弃等待，避免 goroutine 永久阻塞
+			}
 		case <-done:
 		}
 	}()

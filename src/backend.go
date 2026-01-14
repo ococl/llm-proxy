@@ -33,7 +33,23 @@ func (cm *CooldownManager) SetCooldown(key CooldownKey, duration time.Duration) 
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	cm.cooldowns[key] = time.Now().Add(duration)
-	LogGeneral("INFO", "设置冷却: %s 直到 %v", key, cm.cooldowns[key].Format(time.RFC3339))
+}
+
+func (cm *CooldownManager) Cleanup() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	now := time.Now()
+	for key, expiry := range cm.cooldowns {
+		if now.After(expiry) {
+			delete(cm.cooldowns, key)
+		}
+	}
+}
+
+func (cm *CooldownManager) Len() int {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return len(cm.cooldowns)
 }
 
 func (cm *CooldownManager) ClearExpired() {
