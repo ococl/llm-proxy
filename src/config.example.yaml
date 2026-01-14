@@ -45,13 +45,42 @@ detection:
     - "billing"
     - "quota"
 
+# 日志配置
 logging:
-  level: "info"
-  colorize: true
-  general_file: "./logs/proxy.log"
-  separate_files: false
+  # 日志级别
+  level: "info"                      # 文件日志级别: debug/info/warn/error
+  console_level: "info"              # 控制台日志级别（默认继承level）
+  
+  # 输出目录（相对于应用同目录）
+  base_dir: "./logs"                 # 日志根目录
+  
+  # 轮转策略
+  max_file_size_mb: 100              # 单个文件最大100MB
+  max_age_days: 7                    # 日志保留7天后删除
+  max_backups: 21                    # 最多保留21个备份
+  compress: true                     # 压缩旧日志为.gz
+  
+  # 输出格式
+  format: "json"                     # json格式（机器可读）
+  
+  # 控制台着色
+  colorize: true                     # 启用控制台着色
+  console_style: "compact"           # 输出风格: compact/verbose
+  
+  # 调试模式（开发时true，发行时false）
+  debug_mode: true                   # true时输出llm_debug日志
+  
+  # 异步日志
+  async: true                        # 异步写入
+  buffer_size: 10000                 # 缓冲区大小
+  flush_interval: 5                  # 5秒自动刷新
+  
+  # 敏感信息
+  mask_sensitive: true               # 脱敏API Key、Token
+
+  # 独立请求/错误日志目录（兼容旧配置）
   request_dir: "./logs/requests"
   error_dir: "./logs/errors"
-  mask_sensitive: true
+  general_file: "./logs/general.log"
+  separate_files: false
   enable_metrics: false
-  max_file_size_mb: 100

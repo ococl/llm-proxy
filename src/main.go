@@ -12,6 +12,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-isatty"
 )
 
 var (
@@ -22,7 +25,9 @@ var (
 func main() {
 	configPath := flag.String("config", "config.yaml", "配置文件路径")
 	showVersion := flag.Bool("version", false, "显示版本信息")
+	disableColor := flag.Bool("no-color", false, "禁用控制台颜色输出")
 	flag.BoolVar(showVersion, "v", false, "显示版本信息（简写）")
+	flag.BoolVar(disableColor, "disable-color", false, "禁用控制台颜色输出")
 	flag.Parse()
 
 	if *showVersion {
@@ -37,6 +42,13 @@ func main() {
 	}
 
 	cfg := configMgr.Get()
+
+	// 应用命令行选项：禁用颜色
+	if *disableColor {
+		falseValue := false
+		cfg.Logging.Colorize = &falseValue
+	}
+
 	if err := InitLogger(cfg); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
@@ -64,9 +76,12 @@ func main() {
 
 	printBanner(Version, cfg.GetListen(), len(cfg.Backends), len(cfg.Models))
 
-	LogGeneral("INFO", "LLM Proxy %s", Version)
-	LogGeneral("INFO", "访问地址: http://%s", formatListenAddress(cfg.GetListen()))
-	LogGeneral("INFO", "已加载 %d 个后端，%d 个模型别名", len(cfg.Backends), len(cfg.Models))
+	GeneralSugar.Infow("LLM Proxy started",
+		"version", Version,
+		"address", formatListenAddress(cfg.GetListen()),
+		"backends", len(cfg.Backends),
+		"models", len(cfg.Models),
+	)
 
 	server := &http.Server{
 		Addr:    cfg.GetListen(),
@@ -83,7 +98,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	LogGeneral("INFO", "正在关闭服务器...")
+	GeneralSugar.Info("正在关闭服务器...")
 
 	close(shutdownCooldown)
 	ShutdownLogger()
@@ -92,10 +107,10 @@ func main() {
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		LogGeneral("ERROR", "服务器关闭失败: %v", err)
+		GeneralSugar.Errorw("服务器关闭失败", "error", err)
 	}
 
-	LogGeneral("INFO", "服务器已关闭")
+	GeneralSugar.Info("服务器已关闭")
 }
 
 func formatListenAddress(listen string) string {
@@ -119,4 +134,34 @@ func getLocalIP() string {
 		}
 	}
 	return "127.0.0.1"
+}
+
+func printBanner(version, listen string, backends, models int) {
+	if testMode || !shouldUseColor() {
+		return
+	}
+
+	banner := `
+ ╦  ╦  ╔╦╗  ╔═╗┬─┐┌─┐─┐ ┬┬ ┬
+ ║  ║  ║║║  ╠═╝├┬┘│ │┌┴┬┘└┬┘
+ ╩═╝╩═╝╩ ╩  ╩  ┴└─└─┘┴ └─ ┴ `
+
+	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#BD93F9")).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
+	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B"))
+
+	fmt.Println(titleStyle.Render(banner))
+	fmt.Println()
+	fmt.Println(labelStyle.Render("  Version:  ") + valueStyle.Render(version))
+	fmt.Println(labelStyle.Render("  Listen:   ") + valueStyle.Render(listen))
+	fmt.Println(labelStyle.Render("  Backends: ") + valueStyle.Render(fmt.Sprintf("%d loaded", backends)))
+	fmt.Println(labelStyle.Render("  Models:   ") + valueStyle.Render(fmt.Sprintf("%d aliases", models)))
+	fmt.Println()
+}
+
+func shouldUseColor() bool {
+	if loggingConfig != nil && loggingConfig.Colorize != nil && !*loggingConfig.Colorize {
+		return false
+	}
+	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
 }

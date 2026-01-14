@@ -27,7 +27,7 @@ func (r *Router) Resolve(alias string) ([]ResolvedRoute, error) {
 
 func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]ResolvedRoute, error) {
 	if visited[alias] {
-		LogGeneral("WARN", "检测到循环回退: 别名=%s", alias)
+		ProxySugar.Warnw("检测到循环回退", "alias", alias)
 		return nil, nil
 	}
 	visited[alias] = true
@@ -63,16 +63,16 @@ func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]Re
 			}
 			key := r.cooldown.Key(route.Backend, route.Model)
 			if r.cooldown.IsCoolingDown(key) {
-				LogGeneral("DEBUG", "跳过冷却中的后端: %s", key)
+				ProxySugar.Debugw("跳过冷却中的后端", "key", key)
 				continue
 			}
 			backend := r.configMgr.GetBackend(route.Backend)
 			if backend == nil {
-				LogGeneral("WARN", "后端不存在: %s", route.Backend)
+				ProxySugar.Warnw("后端不存在", "backend", route.Backend)
 				continue
 			}
 			if !backend.IsEnabled() {
-				LogGeneral("DEBUG", "跳过已禁用的后端: %s", route.Backend)
+				ProxySugar.Debugw("跳过已禁用的后端", "backend", route.Backend)
 				continue
 			}
 			if result == nil {
@@ -113,11 +113,11 @@ func (r *Router) collectFallbackRoutes(alias string, visited map[string]bool) []
 	for _, fallbackAlias := range fallbacks {
 		routes, err := r.resolveWithVisited(fallbackAlias, visited)
 		if err != nil {
-			LogGeneral("WARN", "解析回退别名 %s 失败: %v", fallbackAlias, err)
+			ProxySugar.Warnw("解析回退别名失败", "fallbackAlias", alias, "error", err)
 			continue
 		}
 		if len(routes) > 0 {
-			LogGeneral("DEBUG", "添加回退路由: %s -> %s", alias, fallbackAlias)
+			ProxySugar.Debugw("添加回退路由", "alias", alias, "fallbackAlias", fallbackAlias)
 			result = append(result, routes...)
 		}
 	}

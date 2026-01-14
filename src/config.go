@@ -55,6 +55,7 @@ type Detection struct {
 type Logging struct {
 	Level         string `yaml:"level"`
 	ConsoleLevel  string `yaml:"console_level,omitempty"`
+	BaseDir       string `yaml:"base_dir,omitempty"`
 	RequestDir    string `yaml:"request_dir"`
 	ErrorDir      string `yaml:"error_dir"`
 	GeneralFile   string `yaml:"general_file"`
@@ -62,9 +63,16 @@ type Logging struct {
 	MaskSensitive *bool  `yaml:"mask_sensitive,omitempty"`
 	EnableMetrics bool   `yaml:"enable_metrics"`
 	MaxFileSizeMB int    `yaml:"max_file_size_mb"`
+	MaxAgeDays    int    `yaml:"max_age_days,omitempty"`
+	MaxBackups    int    `yaml:"max_backups,omitempty"`
+	Compress      bool   `yaml:"compress,omitempty"`
+	Format        string `yaml:"format,omitempty"`
 	Colorize      *bool  `yaml:"colorize,omitempty"`
+	ConsoleStyle  string `yaml:"console_style,omitempty"`
+	DebugMode     bool   `yaml:"debug_mode,omitempty"`
 	Async         bool   `yaml:"async"`
 	BufferSize    int    `yaml:"buffer_size"`
+	FlushInterval int    `yaml:"flush_interval,omitempty"`
 	DropOnFull    bool   `yaml:"drop_on_full"`
 }
 
@@ -85,6 +93,66 @@ func (l *Logging) GetBufferSize() int {
 
 func (l *Logging) ShouldDropOnFull() bool {
 	return l.DropOnFull
+}
+
+func (l *Logging) GetBaseDir() string {
+	if l.BaseDir == "" {
+		return "./logs"
+	}
+	return l.BaseDir
+}
+
+func (l *Logging) GetMaxFileSizeMB() int {
+	if l.MaxFileSizeMB <= 0 {
+		return 100
+	}
+	return l.MaxFileSizeMB
+}
+
+func (l *Logging) GetMaxAgeDays() int {
+	if l.MaxAgeDays <= 0 {
+		return 7
+	}
+	return l.MaxAgeDays
+}
+
+func (l *Logging) GetMaxBackups() int {
+	if l.MaxBackups <= 0 {
+		return 21
+	}
+	return l.MaxBackups
+}
+
+func (l *Logging) GetFormat() string {
+	if l.Format == "" {
+		return "json"
+	}
+	return l.Format
+}
+
+func (l *Logging) GetConsoleStyle() string {
+	if l.ConsoleStyle == "" {
+		return "compact"
+	}
+	return l.ConsoleStyle
+}
+
+func (l *Logging) GetLevel() string {
+	if l.Level == "" {
+		return "info"
+	}
+	return l.Level
+}
+
+func (l *Logging) GetConsoleLevel() string {
+	if l.ConsoleLevel == "" {
+		return l.GetLevel()
+	}
+	return l.ConsoleLevel
+}
+
+func (l *Logging) GetColorize() bool {
+	return l.Colorize == nil || *l.Colorize
 }
 
 type Config struct {
@@ -256,14 +324,14 @@ func (cm *ConfigManager) Get() *Config {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	if stat, err = os.Stat(cm.configPath); err != nil {
-		LogGeneral("WARN", "检查配置文件失败: %v，继续使用旧配置", err)
+		SystemSugar.Warnw("检查配置文件失败，继续使用旧配置", "error", err)
 		return cm.config
 	}
 	if stat.ModTime().Equal(cm.lastMod) {
 		return cm.config
 	}
 	if err := cm.tryReload(); err != nil {
-		LogGeneral("WARN", "配置重载失败: %v，继续使用旧配置", err)
+		SystemSugar.Warnw("配置重载失败，继续使用旧配置", "error", err)
 	}
 	return cm.config
 }
@@ -283,7 +351,7 @@ func (cm *ConfigManager) tryReload() error {
 	}
 	cm.config = &cfg
 	cm.lastMod = stat.ModTime()
-	LogGeneral("INFO", "配置重载成功")
+	SystemSugar.Info("配置重载成功")
 	return nil
 }
 

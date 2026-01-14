@@ -164,15 +164,15 @@ func InitLogger(cfg *Config) error {
 		}
 	}
 
-	dir := filepath.Dir(cfg.Logging.GeneralFile)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	return rotateLogIfNeeded(cfg.Logging.GeneralFile)
+	// 调用新的zap Logger初始化工厂
+	return InitLoggers(cfg)
 }
 
 func ShutdownLogger() {
+	// 关闭zap Logger
+	ShutdownLoggers()
+
+	// 关闭旧的asyncLogger（如果存在）
 	if asyncLogger != nil {
 		asyncLogger.Stop()
 	}
@@ -261,8 +261,8 @@ func logMessage(level string, target LogTarget, message string) {
 	fileLine := fmt.Sprintf("[%s] [%s] %s\n", fileTime, strings.ToUpper(level), msg)
 
 	if shouldLogConsole {
-		if shouldUseColor() {
-			consoleLine := fmt.Sprintf("%s  %s  %s\n", colorTimeStr(consoleTime), colorLevel(level), highlightRequestID(msg))
+		if shouldUseColorLogger() {
+			consoleLine := fmt.Sprintf("%s  %s  %s\n", colorTimeStrSimple(consoleTime), colorLevelSimple(level), highlightRequestIDSimple(msg))
 			fmt.Print(consoleLine)
 		} else {
 			fmt.Print(fileLine)
@@ -286,16 +286,39 @@ func logInternal(level string, target LogTarget, format string, args ...interfac
 	logMessage(level, target, fmt.Sprintf(format, args...))
 }
 
+// Deprecated: 使用各自领域的Sugar Logger替代 - GeneralSugar, NetworkSugar, ProxySugar, SystemSugar, DebugSugar
 func LogGeneral(level, format string, args ...interface{}) {
 	logInternal(level, LogTargetBoth, format, args...)
 }
 
+// Deprecated: 不再使用，改用各自的Sugar Logger
 func LogFile(level, format string, args ...interface{}) {
 	logInternal(level, LogTargetFile, format, args...)
 }
 
+// Deprecated: 不再使用，改用各自的Sugar Logger
 func LogConsole(level, format string, args ...interface{}) {
 	logInternal(level, LogTargetConsole, format, args...)
+}
+
+// 旧系统的简化着色函数 - 仅用于向后兼容
+// 这些函数将被移除，暂时提供基本实现
+var simpleColorEnabled = true
+
+func shouldUseColorLogger() bool {
+	return simpleColorEnabled && (loggingConfig == nil || loggingConfig.Colorize == nil || *loggingConfig.Colorize)
+}
+
+func colorLevelSimple(level string) string {
+	return level
+}
+
+func colorTimeStrSimple(t string) string {
+	return t
+}
+
+func highlightRequestIDSimple(msg string) string {
+	return msg
 }
 
 func LogRequest(cfg *Config, reqID string, content string) error {

@@ -126,14 +126,43 @@ detection:
 
 # 日志配置
 logging:
-  level: "info"                          # debug/info/warn/error
-  general_file: "./logs/proxy.log"       # 日志文件路径
-  separate_files: false                  # 是否为每个请求创建独立文件
-  request_dir: "./logs/requests"         # 独立请求日志目录
-  error_dir: "./logs/errors"             # 独立错误日志目录
-  mask_sensitive: true                   # 敏感信息脱敏（API Key 等）
-  enable_metrics: false                  # 性能指标记录
-  max_file_size_mb: 100                  # 单个日志文件最大大小（MB）
+  # 日志级别
+  level: "info"                      # 文件日志级别: debug/info/warn/error
+  console_level: "info"              # 控制台日志级别（默认继承level）
+  
+  # 输出目录（相对于应用同目录）
+  base_dir: "./logs"                 # 日志根目录
+  
+  # 轮转策略
+  max_file_size_mb: 100              # 单个文件最大100MB
+  max_age_days: 7                    # 日志保留7天后删除
+  max_backups: 21                    # 最多保留21个备份
+  compress: true                     # 压缩旧日志为.gz
+  
+  # 输出格式
+  format: "json"                     # json格式（机器可读）
+  
+  # 控制台着色
+  colorize: true                     # 启用控制台着色
+  console_style: "compact"           # 输出风格: compact/verbose
+  
+  # 调试模式（开发时true，发行时false）
+  debug_mode: true                   # true时输出llm_debug日志
+  
+  # 异步日志
+  async: true                        # 异步写入
+  buffer_size: 10000                 # 缓冲区大小
+  flush_interval: 5                  # 5秒自动刷新
+  
+  # 敏感信息
+  mask_sensitive: true               # 脱敏API Key、Token
+
+  # 兼容旧配置
+  general_file: "./logs/general.log" # 通用日志文件路径（兼容）
+  separate_files: false              # 是否为每个请求创建独立文件（兼容）
+  request_dir: "./logs/requests"     # 独立请求日志目录（兼容）
+  error_dir: "./logs/errors"         # 独立错误日志目录（兼容）
+  enable_metrics: false              # 性能指标记录（兼容）
 ```
 
 ## 回退策略
@@ -174,31 +203,100 @@ routes:
 
 ## 日志
 
+LLM Proxy 现在使用高性能的 zap 日志框架，支持多目录结构化日志和智能脱敏。
+
+### 日志目录结构
+
+```
+logs/
+├── general.log               # 通用日志（启动、关闭、性能指标）
+├── system/                   # 系统和配置类日志
+│   ├── system.log            # 配置加载、验证、panic
+│   ├── startup.log           # 启动日志
+│   └── shutdown.log          # 关闭日志
+├── network/                  # 网络和HTTP异常日志
+│   ├── network.log           # 连接错误、超时等
+│   ├── http_errors.log       # HTTP 4xx/5xx错误
+│   └── api_validation.log    # API Key验证失败
+├── proxy/                    # 代理业务逻辑日志
+│   ├── requests.log          # 请求开始/完成
+│   ├── routing.log           # 路由解析、回退
+│   ├── backend.log           # 后端请求、响应
+│   └── fallback.log          # 回退策略执行
+├── llm_debug/                # 大模型调试日志（debug_mode控制）
+│   ├── system_prompt.log     # system_prompt注入调试
+│   ├── request_body.log      # 请求体详情（调试阶段）
+│   └── response_body.log     # 响应体详情（调试阶段）
+└── archive/                  # 轮转清理的旧日志（7天自动清理）
+```
+
 ### 日志级别
 
-| 级别 | 内容 |
-|------|------|
-| ERROR | 严重错误（所有后端失败、配置加载失败） |
-| WARN | 潜在问题（API Key 验证失败、后端返回错误） |
-| INFO | 关键业务事件（请求开始/完成、后端切换） |
-| DEBUG | 调试信息（路由解析、跳过原因） |
+| 级别 | 内容 | 使用场景 |
+|------|------|----------|
+| ERROR | 严重错误（所有后端失败、配置加载失败） | SystemLogger, NetworkLogger |
+| WARN | 潜在问题（API Key 验证失败、后端返回错误） | NetworkLogger, SystemLogger |
+| INFO | 关键业务事件（请求开始/完成、后端切换） | GeneralLogger, ProxyLogger |
+| DEBUG | 调试信息（路由解析、跳过原因） | DebugLogger, ProxyLogger |
+
+### 新特性
+
+- **多目录日志**: 不同类型的日志分贝存储，便于查找和分析
+- **JSON格式文件**: 机器可读，便于日志分析工具处理
+- **按日期+大小自动轮转**: 避免单个日志文件过大
+- **7天自动清理**: 自动删除过期日志文件
+- **控制台Markdown着色**: 支持彩色输出，可通过 `-no-color` 禁用
+- **敏感信息脱敏**: API Key、Token等自动脱敏
+- **调试模式开关**: 通过 `debug_mode` 控制详细调试日志
+
+### 命令行选项
+
+```bash
+# 禁用控制台颜色输出
+./llm-proxy -no-color -config config.yaml
+
+# 或使用长选项
+./llm-proxy --disable-color -config config.yaml
+```
 
 ### 日志示例
 
+**控制台输出（带颜色）:**
 ```
-[2026-01-13 09:41:00] [INFO] LLM Proxy 启动，监听地址: :8080
-[2026-01-13 09:41:00] [INFO] 已加载 4 个后端，13 个模型别名
-[2026-01-13 09:41:05] [INFO] [req_abc123] 收到请求: 模型=anthropic/claude-opus-4-5 客户端=127.0.0.1
-[2026-01-13 09:41:06] [INFO] [req_abc123] 请求成功: 后端=provider-a 状态=200 耗时=1234ms
+15:41:00  INFO  LLM Proxy 启动，监听地址: :8080
+15:41:00  INFO  已加载 4 个后端，13 个模型别名
+15:41:05  INFO  [req_abc123] 收到请求: 模型=anthropic/claude-opus-4-5 客户端=127.0.0.1
+15:41:06  INFO  [req_abc123] 请求成功: 后端=provider-a 状态=200 耗时=1234ms
+```
+
+**JSON文件格式:**
+```json
+{
+  "timestamp": "2026-01-14T16:41:00.123+0800",
+  "level": "info",
+  "logger": "general",
+  "msg": "LLM Proxy 启动，监听地址: :8080",
+  "caller": "main.go:79"
+}
 ```
 
 ### 敏感信息脱敏
 
-启用 `mask_sensitive: true` 后，API Key 会显示为：
+启用 `mask_sensitive: true` 后，敏感信息会自动脱敏：
 
-```
-sk-ab****cdef
-```
+- API Key: `sk-abc1234567890defghijkl` → `sk-a****ijkl`
+- Bearer Token: `Bearer sk-test1234567890` → `Bearer sk-t****7890`
+- Authorization Header: `Authorization: Bearer sk-key1234567890` → `Authorization: Bearer sk-k****7890`
+
+### 调试模式
+
+设置 `debug_mode: true` 可以启用详细的调试信息，包括：
+- system_prompt 注入详情
+- 请求体完整内容
+- 响应体完整内容
+- 详细的路由解析过程
+
+**注意**: 调试模式仅建议在开发时使用，生产环境应关闭以避免敏感信息泄露。
 
 ## 构建
 

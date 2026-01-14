@@ -44,7 +44,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		expected := "Bearer " + cfg.ProxyAPIKey
 		if auth != expected {
-			LogGeneral("WARN", "API Key 验证失败，客户端: %s", r.RemoteAddr)
+			NetworkSugar.Warnw("API Key验证失败", "client", r.RemoteAddr)
 			WriteJSONError(w, ErrUnauthorized, http.StatusUnauthorized, "")
 			return
 		}
@@ -59,7 +59,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		LogGeneral("ERROR", "[%s] 读取请求体失败: %v", reqID, err)
+		NetworkSugar.Errorw("读取请求体失败", "reqID", reqID, "error", err)
 		WriteJSONError(w, ErrBadRequest, http.StatusBadRequest, reqID)
 		return
 	}
@@ -67,7 +67,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var reqBody map[string]interface{}
 	if err := json.Unmarshal(body, &reqBody); err != nil {
-		LogGeneral("WARN", "[%s] 解析请求体失败: %v", reqID, err)
+		NetworkSugar.Warnw("解析请求体失败", "reqID", reqID, "error", err)
 		WriteJSONError(w, ErrInvalidJSON, http.StatusBadRequest, reqID)
 		return
 	}
@@ -77,26 +77,26 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	modelAlias, _ := reqBody["model"].(string)
 	if modelAlias == "" {
-		LogGeneral("WARN", "[%s] 请求缺少 model 字段", reqID)
+		NetworkSugar.Warnw("请求缺少model字段", "reqID", reqID)
 		WriteJSONError(w, ErrMissingModel, http.StatusBadRequest, reqID)
 		return
 	}
 
-	LogGeneral("INFO", "[%s] 收到请求: 模型=%s 客户端=%s", reqID, modelAlias, r.RemoteAddr)
+	ProxySugar.Infow("收到请求", "reqID", reqID, "model", modelAlias, "client", r.RemoteAddr)
 
 	routes, err := p.router.Resolve(modelAlias)
 	if err != nil {
-		LogGeneral("WARN", "[%s] 解析模型别名失败: %v", reqID, err)
+		ProxySugar.Warnw("解析模型别名失败", "reqID", reqID, "error", err)
 		WriteJSONErrorWithMsg(w, ErrBadRequest, http.StatusBadRequest, reqID, fmt.Sprintf("解析模型别名失败: %v", err))
 		return
 	}
 	if len(routes) == 0 {
-		LogGeneral("WARN", "[%s] 未知的模型别名: %s", reqID, modelAlias)
+		ProxySugar.Warnw("未知的模型别名", "reqID", reqID, "model", modelAlias)
 		WriteJSONErrorWithMsg(w, ErrUnknownModel, http.StatusBadRequest, reqID, fmt.Sprintf("未知的模型别名: %s", modelAlias))
 		return
 	}
 
-	LogGeneral("DEBUG", "[%s] 解析到 %d 个可用路由", reqID, len(routes))
+	ProxySugar.Debugw("解析到可用路由", "reqID", reqID, "count", len(routes))
 
 	isStream := false
 	if s, ok := reqBody["stream"].(bool); ok {
@@ -133,7 +133,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		logBuilder.WriteString(fmt.Sprintf("\n--- 尝试 %d ---\n", i+1))
 		logBuilder.WriteString(fmt.Sprintf("后端: %s\n模型: %s\n", route.BackendName, route.Model))
-		LogGeneral("INFO", "[%s] 尝试后端 %s (模型: %s)", reqID, route.BackendName, route.Model)
+		ProxySugar.Infow("尝试后端", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
 
 		modifiedBody := make(map[string]interface{})
 		for k, v := range reqBody {
@@ -145,7 +145,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			lastErr = err
 			logBuilder.WriteString(fmt.Sprintf("序列化请求体失败: %v\n", err))
-			LogGeneral("ERROR", "[%s] 序列化请求体失败: %v", reqID, err)
+			ProxySugar.Errorw("序列化请求体失败", "reqID", reqID, "error", err)
 			continue
 		}
 
@@ -153,7 +153,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			lastErr = err
 			logBuilder.WriteString(fmt.Sprintf("解析后端URL失败: %v\n", err))
-			LogGeneral("ERROR", "[%s] 解析后端URL失败: %v", reqID, err)
+			ProxySugar.Errorw("解析后端URL失败", "reqID", reqID, "error", err)
 			continue
 		}
 
@@ -172,7 +172,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			lastErr = err
 			logBuilder.WriteString(fmt.Sprintf("创建代理请求失败: %v\n", err))
-			LogGeneral("ERROR", "[%s] 创建代理请求失败: %v", reqID, err)
+			ProxySugar.Errorw("创建代理请求失败", "reqID", reqID, "error", err)
 			continue
 		}
 		for k, v := range r.Header {
@@ -196,7 +196,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			logBuilder.WriteString(fmt.Sprintf("\n--- 响应详情 ---\n"))
 			logBuilder.WriteString(fmt.Sprintf("错误: %v\n", err))
 			logBuilder.WriteString(fmt.Sprintf("耗时: %dms\n", backendDuration.Milliseconds()))
-			LogGeneral("WARN", "[%s] 后端 %s 请求失败: %v 耗时=%dms", reqID, route.BackendName, err, backendDuration.Milliseconds())
+			NetworkSugar.Warnw("后端请求失败", "reqID", reqID, "backend", route.BackendName, "error", err, "duration_ms", backendDuration.Milliseconds())
 
 			errorContent := fmt.Sprintf("================== 错误日志 ==================\n请求ID: %s\n时间: %s\n后端: %s\n模型: %s\n错误: %v\n耗时: %dms\n",
 				reqID, time.Now().Format(time.RFC3339), route.BackendName, route.Model, err, backendDuration.Milliseconds())
@@ -217,7 +217,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			logBuilder.WriteString(fmt.Sprintf("结果: 成功\n"))
-			LogGeneral("INFO", "[%s] 请求成功: 后端=%s 状态=%d 耗时=%dms 总尝试=%d", reqID, route.BackendName, resp.StatusCode, backendDuration.Milliseconds(), metrics.Attempts)
+			ProxySugar.Infow("请求成功", "reqID", reqID, "backend", route.BackendName, "status", resp.StatusCode, "duration_ms", backendDuration.Milliseconds(), "attempts", metrics.Attempts)
 			WriteRequestLog(cfg, reqID, logBuilder.String())
 
 			finalBackend = route.BackendName
@@ -248,13 +248,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			lastErr = err
 			logBuilder.WriteString(fmt.Sprintf("读取响应体失败: %v\n", err))
-			LogGeneral("WARN", "[%s] 读取响应体失败: %v", reqID, err)
+			NetworkSugar.Warnw("读取响应体失败", "reqID", reqID, "error", err)
 		}
 		lastStatus = resp.StatusCode
 		lastBody = string(respBody)
 
 		logBuilder.WriteString(fmt.Sprintf("状态: %d\n响应: %s\n", resp.StatusCode, lastBody))
-		LogGeneral("WARN", "[%s] 后端 %s 返回错误: 状态=%d 耗时=%dms", reqID, route.BackendName, resp.StatusCode, backendDuration.Milliseconds())
+		NetworkSugar.Warnw("后端返回错误", "reqID", reqID, "backend", route.BackendName, "status", resp.StatusCode, "duration_ms", backendDuration.Milliseconds())
 
 		// 记录每个后端错误到独立错误日志
 		errorContent := fmt.Sprintf("================== 错误日志 ==================\n请求ID: %s\n时间: %s\n后端: %s\n模型: %s\n状态码: %d\n\n--- 响应内容 ---\n%s\n",
@@ -265,7 +265,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			key := p.cooldown.Key(route.BackendName, route.Model)
 			p.cooldown.SetCooldown(key, time.Duration(cfg.Fallback.CooldownSeconds)*time.Second)
 			logBuilder.WriteString(fmt.Sprintf("操作: 冷却 %s，尝试下一个后端\n", key))
-			LogGeneral("INFO", "[%s] 触发回退: %s 进入冷却", reqID, key)
+			ProxySugar.Infow("触发回退", "reqID", reqID, "backend", key, "action", "进入冷却")
 			continue
 		}
 
@@ -278,7 +278,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logBuilder.WriteString("\n--- 最终结果 ---\n所有后端均失败\n")
-	LogGeneral("ERROR", "[%s] 所有后端均失败", reqID)
+	NetworkSugar.Errorw("所有后端均失败", "reqID", reqID)
 	WriteRequestLog(cfg, reqID, logBuilder.String())
 	WriteErrorLog(cfg, reqID, logBuilder.String())
 
@@ -286,8 +286,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for backend, duration := range metrics.BackendTimes {
 		backendDetails = append(backendDetails, fmt.Sprintf("%s=%dms", backend, duration.Milliseconds()))
 	}
-	LogGeneral("ERROR", "[%s] 所有后端均失败: 模型=%s 尝试次数=%d 后端详情=[%s]",
-		reqID, modelAlias, metrics.Attempts, strings.Join(backendDetails, ", "))
+	NetworkSugar.Errorw("所有后端均失败详情", "reqID", reqID, "model", modelAlias, "attempts", metrics.Attempts, "backend_details", strings.Join(backendDetails, ", "))
 
 	metrics.Finish(false, "")
 
@@ -311,7 +310,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
 		n, err := body.Read(buf)
 		if n > 0 {
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				LogGeneral("DEBUG", "写入失败: %v", writeErr)
+				ProxySugar.Debugw("写入失败", "error", writeErr)
 				break
 			}
 			flusher.Flush()
@@ -324,7 +323,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
 
 func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 	cfg := p.configMgr.Get()
-	LogGeneral("DEBUG", "收到模型列表请求: 客户端=%s", r.RemoteAddr)
+	ProxySugar.Debugw("收到模型列表请求", "client", r.RemoteAddr)
 
 	type Model struct {
 		ID      string `json:"id"`
@@ -356,7 +355,7 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 		return models[i].ID < models[j].ID
 	})
 
-	LogGeneral("DEBUG", "返回 %d 个可用模型", len(models))
+	ProxySugar.Debugw("返回可用模型", "count", len(models))
 	resp := Response{Object: "list", Data: models}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

@@ -123,7 +123,7 @@ func parseSystemPrompt(data string) (*SystemPromptConfig, string) {
 		yamlPart := data[:idx]
 		content = strings.TrimSpace(data[idx+4:])
 		if err := yaml.Unmarshal([]byte(yamlPart), config); err != nil {
-			LogGeneral("WARN", "解析 system prompt 配置失败: %v，使用默认配置", err)
+			DebugSugar.Warnw("解析system prompt配置失败，使用默认配置", "error", err)
 		}
 	}
 
