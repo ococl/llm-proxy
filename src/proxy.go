@@ -2,11 +2,9 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -21,44 +19,10 @@ type Proxy struct {
 	router    *Router
 	cooldown  *CooldownManager
 	detector  *Detector
-	client    *http.Client
 }
 
 func NewProxy(cfg *ConfigManager, router *Router, cd *CooldownManager, det *Detector) *Proxy {
-	return &Proxy{
-		configMgr: cfg,
-		router:    router,
-		cooldown:  cd,
-		detector:  det,
-		client: &http.Client{
-			Timeout: 10 * time.Minute,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-				DialContext: (&net.Dialer{
-					Timeout:   10 * time.Second,
-					KeepAlive: 30 * time.Second,
-				}).DialContext,
-			},
-		},
-	}
-}
-
-func (p *Proxy) createHTTPClient(cfg *Config) *http.Client {
-	timeout := cfg.Timeout.GetTotalTimeout()
-	return &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-			DialContext: (&net.Dialer{
-				Timeout:   cfg.Timeout.GetConnectTimeout(),
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-		},
-	}
+	return &Proxy{configMgr: cfg, router: router, cooldown: cd, detector: det}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -221,8 +185,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			proxyReq.Header.Set("Authorization", "Bearer "+backend.APIKey)
 		}
 
+		client := &http.Client{Timeout: 5 * time.Minute}
 		backendStart := time.Now()
-		resp, err := p.client.Do(proxyReq)
+		resp, err := client.Do(proxyReq)
 		backendDuration := time.Since(backendStart)
 		metrics.RecordBackendTime(route.BackendName, backendDuration)
 
@@ -261,15 +226,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(resp.StatusCode)
 
 			if isStream {
-				if !p.streamResponse(r.Context(), w, resp.Body) {
-					resp.Body.Close()
-				}
+				p.streamResponse(w, resp.Body)
 			} else {
-				if _, err := io.Copy(w, resp.Body); err != nil {
-					LogGeneral("DEBUG", "[%s] 写入响应失败: %v", reqID, err)
-				}
-				resp.Body.Close()
+				io.Copy(w, resp.Body)
 			}
+			resp.Body.Close()
 			return
 		}
 
@@ -322,53 +283,22 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(lastBody))
 }
 
-func (p *Proxy) streamResponse(ctx context.Context, w http.ResponseWriter, body io.ReadCloser) (closed bool) {
-	done := make(chan struct{})
-	defer close(done)
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			// 使用带超时的关闭，防止 body.Close() 阻塞导致 goroutine 泄漏
-			closeDone := make(chan struct{})
-			go func() {
-				body.Close()
-				close(closeDone)
-			}()
-			select {
-			case <-closeDone:
-			case <-time.After(5 * time.Second):
-				// 超时后放弃等待，避免 goroutine 永久阻塞
-			}
-		case <-done:
-		}
-	}()
-
+func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		io.Copy(w, body)
-		return ctx.Err() != nil
+		return
 	}
 
-	rc := http.NewResponseController(w)
-	rc.SetWriteDeadline(time.Time{})
-
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, 4096)
 	for {
-		n, readErr := body.Read(buf)
+		n, err := body.Read(buf)
 		if n > 0 {
-			_, writeErr := w.Write(buf[:n])
-			if writeErr != nil {
-				LogGeneral("DEBUG", "写入客户端失败: %v", writeErr)
-				return ctx.Err() != nil
-			}
+			w.Write(buf[:n])
 			flusher.Flush()
 		}
-		if readErr != nil {
-			if readErr != io.EOF && ctx.Err() == nil {
-				LogGeneral("DEBUG", "读取后端响应结束: %v", readErr)
-			}
-			return ctx.Err() != nil
+		if err != nil {
+			break
 		}
 	}
 }
