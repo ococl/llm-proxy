@@ -8,17 +8,19 @@ import (
 )
 
 var (
-	GeneralLogger *zap.Logger
-	SystemLogger  *zap.Logger
-	NetworkLogger *zap.Logger
-	ProxyLogger   *zap.Logger
-	DebugLogger   *zap.Logger
+	GeneralLogger  *zap.Logger
+	SystemLogger   *zap.Logger
+	NetworkLogger  *zap.Logger
+	ProxyLogger    *zap.Logger
+	DebugLogger    *zap.Logger
+	FileOnlyLogger *zap.Logger
 
-	GeneralSugar *zap.SugaredLogger
-	SystemSugar  *zap.SugaredLogger
-	NetworkSugar *zap.SugaredLogger
-	ProxySugar   *zap.SugaredLogger
-	DebugSugar   *zap.SugaredLogger
+	GeneralSugar  *zap.SugaredLogger
+	SystemSugar   *zap.SugaredLogger
+	NetworkSugar  *zap.SugaredLogger
+	ProxySugar    *zap.SugaredLogger
+	DebugSugar    *zap.SugaredLogger
+	FileOnlySugar *zap.SugaredLogger
 
 	flushTicker *time.Ticker
 	flushDone   chan struct{}

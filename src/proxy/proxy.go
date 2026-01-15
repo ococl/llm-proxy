@@ -242,7 +242,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			if isStream {
 				logging.ProxySugar.Infow("开始流式传输", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
-				logging.ProxySugar.Debugw("后端响应头部", "reqID", reqID, "backend", route.BackendName, "headers", resp.Header)
+				logging.FileOnlySugar.Debugw("后端响应头部", "reqID", reqID, "backend", route.BackendName, "headers", resp.Header)
 				p.streamResponse(w, resp.Body, route.BackendName)
 				logging.ProxySugar.Infow("完成流式传输", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
 			} else {
@@ -334,7 +334,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 		chunksReceived++
 		if n > 0 {
 			bytesProcessed += n
-			logging.ProxySugar.Debugw("接收SSE数据块", "chunk_number", chunksReceived, "size", n, "total_bytes", bytesProcessed, "backend", backendName, "needs_special_handling", needsSpecialHandling)
+			logging.FileOnlySugar.Debugw("接收SSE数据块", "chunk_number", chunksReceived, "size", n, "total_bytes", bytesProcessed, "backend", backendName, "needs_special_handling", needsSpecialHandling)
 
 			var processedChunk []byte
 			if needsSpecialHandling {
@@ -348,11 +348,11 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 				break
 			}
 			flusher.Flush()
-			logging.ProxySugar.Debugw("刷新响应", "chunk_number", chunksReceived)
+			logging.FileOnlySugar.Debugw("刷新响应", "chunk_number", chunksReceived)
 		}
 		if err != nil {
 			if err == io.EOF {
-				logging.ProxySugar.Debugw("SSE流结束", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
+				logging.FileOnlySugar.Debugw("SSE流结束", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
 				break
 			} else {
 				logging.ProxySugar.Errorw("读取SSE流错误", "error", err, "chunk_number", chunksReceived, "backend", backendName)
@@ -360,7 +360,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 			}
 		}
 	}
-	logging.ProxySugar.Infow("SSE流传输完成", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
+	logging.FileOnlySugar.Infow("SSE流传输完成", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
 }
 
 func detectSpecialHandlingNeeded(backendName string, cfg *config.Config) bool {

@@ -256,6 +256,11 @@ func Init(cfg *config.Config) error {
 		}
 	}
 
+	FileOnlyLogger, FileOnlySugar, err = createFileOnlyLogger(cfg, "fileonly", filepath.Join(baseDir, "proxy", "verbose.log"))
+	if err != nil {
+		return fmt.Errorf("初始化FileOnlyLogger失败: %w", err)
+	}
+
 	if err := initRequestErrorLoggers(cfg); err != nil {
 		return err
 	}
@@ -313,7 +318,7 @@ func startFlushTicker(interval int) {
 }
 
 func syncAllLoggers() {
-	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger}
+	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger, FileOnlyLogger}
 	for _, logger := range loggers {
 		if logger != nil {
 			_ = logger.Sync()
@@ -420,6 +425,51 @@ func createNoOpLogger() (*zap.Logger, *zap.SugaredLogger) {
 	nopCore := zapcore.NewNopCore()
 	logger := zap.New(nopCore)
 	return logger, logger.Sugar()
+}
+
+func createFileOnlyLogger(cfg *config.Config, name, filePath string) (*zap.Logger, *zap.SugaredLogger, error) {
+	fw := &lumberjack.Logger{
+		Filename:   filePath,
+		MaxSize:    cfg.Logging.GetMaxFileSizeMB(),
+		MaxAge:     cfg.Logging.GetMaxAgeDays(),
+		MaxBackups: cfg.Logging.GetMaxBackups(),
+		Compress:   cfg.Logging.Compress,
+	}
+
+	fileEncoderCfg := zapcore.EncoderConfig{
+		TimeKey:        "timestamp",
+		LevelKey:       "level",
+		NameKey:        "logger",
+		CallerKey:      "caller",
+		FunctionKey:    zapcore.OmitKey,
+		MessageKey:     "msg",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.LowercaseLevelEncoder,
+		EncodeTime:     zapcore.ISO8601TimeEncoder,
+		EncodeDuration: zapcore.StringDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+
+	var fileEncoder zapcore.Encoder
+	if cfg.Logging.GetFormat() == "text" {
+		fileEncoder = zapcore.NewConsoleEncoder(fileEncoderCfg)
+	} else {
+		fileEncoder = zapcore.NewJSONEncoder(fileEncoderCfg)
+	}
+
+	fileLevel := parseLevel(cfg.Logging.GetLevel())
+	fileCore := zapcore.NewCore(fileEncoder, zapcore.AddSync(fw), fileLevel)
+
+	var core zapcore.Core
+	if cfg.Logging.ShouldMaskSensitive() {
+		core = &maskingCore{Core: fileCore, masker: NewSensitiveDataMasker()}
+	} else {
+		core = fileCore
+	}
+
+	logger := zap.New(core, zap.AddCaller(), zap.Fields(zap.String("logger", name)))
+	return logger, logger.Sugar(), nil
 }
 
 func parseLevel(levelStr string) zapcore.Level {

@@ -121,7 +121,7 @@ func (r *Router) collectFallbackRoutes(alias string, visited map[string]bool) []
 			continue
 		}
 		if len(routes) > 0 {
-			logging.ProxySugar.Debugw("添加回退路由", "alias", alias, "fallbackAlias", fallbackAlias)
+			logging.FileOnlySugar.Debugw("添加回退路由", "alias", alias, "fallbackAlias", fallbackAlias)
 			result = append(result, routes...)
 		}
 	}

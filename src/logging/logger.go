@@ -28,6 +28,7 @@ func InitTestLoggers() {
 	NetworkLogger, NetworkSugar = createNoOpLogger()
 	ProxyLogger, ProxySugar = createNoOpLogger()
 	DebugLogger, DebugSugar = createNoOpLogger()
+	FileOnlyLogger, FileOnlySugar = createNoOpLogger()
 }
 
 var sensitivePatterns = []*regexp.Regexp{
