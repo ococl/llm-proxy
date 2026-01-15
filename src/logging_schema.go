@@ -2,11 +2,11 @@ package main
 
 import (
 	"regexp"
+	"time"
 
 	"go.uber.org/zap"
 )
 
-// LoggerType 日志器类型枚举
 type LoggerType string
 
 const (
@@ -17,29 +17,21 @@ const (
 	DebugLoggerType   LoggerType = "debug"
 )
 
-// 全局Logger实例
 var (
-	// GeneralLogger - 通用日志：启动、关闭、性能指标
 	GeneralLogger *zap.Logger
-
-	// SystemLogger - 系统日志：配置加载、验证、panic
-	SystemLogger *zap.Logger
-
-	// NetworkLogger - 网络日志：HTTP异常、连接错误、验证失败
+	SystemLogger  *zap.Logger
 	NetworkLogger *zap.Logger
+	ProxyLogger   *zap.Logger
+	DebugLogger   *zap.Logger
 
-	// ProxyLogger - 代理日志：请求、路由、后端、回退
-	ProxyLogger *zap.Logger
-
-	// DebugLogger - 调试日志：system_prompt注入详情（debug_mode控制）
-	DebugLogger *zap.Logger
-
-	// Sugar接口（便捷的printf风格）
 	GeneralSugar *zap.SugaredLogger
 	SystemSugar  *zap.SugaredLogger
 	NetworkSugar *zap.SugaredLogger
 	ProxySugar   *zap.SugaredLogger
 	DebugSugar   *zap.SugaredLogger
+
+	flushTicker *time.Ticker
+	flushDone   chan struct{}
 )
 
 // LevelPriority 日志级别优先级映射

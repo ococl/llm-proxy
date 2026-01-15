@@ -20,6 +20,7 @@ func TestLoggerInitialization(t *testing.T) {
 			Level:         "debug",
 			ConsoleLevel:  "info",
 			BaseDir:       tempDir,
+			SeparateFiles: true,
 			MaxFileSizeMB: 1,
 			MaxAgeDays:    7,
 			MaxBackups:    3,
@@ -265,9 +266,10 @@ func TestLoggersShutdown(t *testing.T) {
 
 	cfg := &Config{
 		Logging: Logging{
-			Level:    "info",
-			BaseDir:  tempDir,
-			Colorize: boolPtr(false),
+			Level:         "info",
+			BaseDir:       tempDir,
+			Colorize:      boolPtr(false),
+			SeparateFiles: true,
 		},
 	}
 

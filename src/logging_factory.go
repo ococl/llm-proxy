@@ -15,6 +15,13 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+var (
+	requestLogger  *zap.SugaredLogger
+	errorLogger    *zap.SugaredLogger
+	metricsEnabled bool
+	loggingCfg     *Logging
+)
+
 // markdownConsoleEncoder 自定义的Markdown风格控制台编码器
 type markdownConsoleEncoder struct {
 	zapcore.Encoder
@@ -22,8 +29,33 @@ type markdownConsoleEncoder struct {
 	consoleStyle string
 }
 
-// reqIDPattern 匹配请求ID的正则表达式
 var reqIDPattern = regexp.MustCompile(`\[req_[a-zA-Z0-9]+\]`)
+
+type maskingCore struct {
+	zapcore.Core
+	masker *SensitiveDataMasker
+}
+
+func (c *maskingCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
+	entry.Message = c.masker.Mask(entry.Message)
+	for i := range fields {
+		if fields[i].Type == zapcore.StringType {
+			fields[i].String = c.masker.Mask(fields[i].String)
+		}
+	}
+	return c.Core.Write(entry, fields)
+}
+
+func (c *maskingCore) With(fields []zapcore.Field) zapcore.Core {
+	return &maskingCore{Core: c.Core.With(fields), masker: c.masker}
+}
+
+func (c *maskingCore) Check(entry zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	if c.Enabled(entry.Level) {
+		return ce.AddCore(entry, c)
+	}
+	return ce
+}
 
 // newMarkdownConsoleEncoder 创建Markdown风格的控制台编码器
 func newMarkdownConsoleEncoder(cfg zapcore.EncoderConfig, colored bool, consoleStyle string) zapcore.Encoder {
@@ -205,35 +237,30 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 
 // InitLoggers 初始化所有Logger实例
 func InitLoggers(cfg *Config) error {
-	baseDir := cfg.Logging.BaseDir
-	if baseDir == "" {
-		baseDir = "./logs"
-	}
+	baseDir := cfg.Logging.GetBaseDir()
 
-	// 确保日志根目录存在
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("创建日志根目录失败 %s: %w", baseDir, err)
 	}
 
-	// 如果启用详细脱敏，则更新全局敏感模式
 	if cfg.Logging.ShouldUseDetailedMasking() {
 		updateSensitivePatterns()
 	}
 
 	var err error
 
-	// 根据配置决定是使用单一日志文件还是分离文件
-	generalLogPath := filepath.Join(baseDir, "general.log")
+	generalLogPath := cfg.Logging.GeneralFile
+	if generalLogPath == "" {
+		generalLogPath = filepath.Join(baseDir, "general.log")
+	}
+
 	if cfg.Logging.SeparateFiles {
-		// 保留分离文件的逻辑以保持向后兼容性
-		// 创建各子目录
 		dirs := []string{
 			filepath.Join(baseDir, "system"),
 			filepath.Join(baseDir, "network"),
 			filepath.Join(baseDir, "proxy"),
 			filepath.Join(baseDir, "llm_debug"),
 		}
-
 		for _, dir := range dirs {
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				return fmt.Errorf("创建日志子目录失败 %s: %w", dir, err)
@@ -244,45 +271,108 @@ func InitLoggers(cfg *Config) error {
 		if err != nil {
 			return fmt.Errorf("初始化GeneralLogger失败: %w", err)
 		}
-
 		SystemLogger, SystemSugar, err = createLogger(cfg, "system", filepath.Join(baseDir, "system", "system.log"))
 		if err != nil {
 			return fmt.Errorf("初始化SystemLogger失败: %w", err)
 		}
-
 		NetworkLogger, NetworkSugar, err = createLogger(cfg, "network", filepath.Join(baseDir, "network", "network.log"))
 		if err != nil {
 			return fmt.Errorf("初始化NetworkLogger失败: %w", err)
 		}
-
 		ProxyLogger, ProxySugar, err = createLogger(cfg, "proxy", filepath.Join(baseDir, "proxy", "proxy.log"))
 		if err != nil {
 			return fmt.Errorf("初始化ProxyLogger失败: %w", err)
 		}
-
-		DebugLogger, DebugSugar, err = createLogger(cfg, "debug", filepath.Join(baseDir, "llm_debug", "debug.log"))
-		if err != nil {
-			return fmt.Errorf("初始化DebugLogger失败: %w", err)
+		if cfg.Logging.DebugMode {
+			DebugLogger, DebugSugar, err = createLogger(cfg, "debug", filepath.Join(baseDir, "llm_debug", "debug.log"))
+			if err != nil {
+				return fmt.Errorf("初始化DebugLogger失败: %w", err)
+			}
+		} else {
+			DebugLogger, DebugSugar = createNoOpLogger()
 		}
 	} else {
-		// 使用单一日志文件，通过字段区分类型
 		GeneralLogger, GeneralSugar, err = createLogger(cfg, "general", generalLogPath)
 		if err != nil {
 			return fmt.Errorf("初始化GeneralLogger失败: %w", err)
 		}
-
-		// 为其他日志类型创建带有特定字段的logger
 		SystemLogger = GeneralLogger.With(zap.String("category", "system"))
 		SystemSugar = SystemLogger.Sugar()
 		NetworkLogger = GeneralLogger.With(zap.String("category", "network"))
 		NetworkSugar = NetworkLogger.Sugar()
 		ProxyLogger = GeneralLogger.With(zap.String("category", "proxy"))
 		ProxySugar = ProxyLogger.Sugar()
-		DebugLogger = GeneralLogger.With(zap.String("category", "debug"))
-		DebugSugar = DebugLogger.Sugar()
+		if cfg.Logging.DebugMode {
+			DebugLogger = GeneralLogger.With(zap.String("category", "debug"))
+			DebugSugar = DebugLogger.Sugar()
+		} else {
+			DebugLogger, DebugSugar = createNoOpLogger()
+		}
 	}
 
+	if err := initRequestErrorLoggers(cfg); err != nil {
+		return err
+	}
+
+	if cfg.Logging.EnableMetrics {
+		metricsEnabled = true
+	}
+	loggingCfg = &cfg.Logging
+
+	startFlushTicker(cfg.Logging.GetFlushInterval())
 	return nil
+}
+
+func initRequestErrorLoggers(cfg *Config) error {
+	baseDir := cfg.Logging.GetBaseDir()
+	reqDir := cfg.Logging.RequestDir
+	if reqDir == "" {
+		reqDir = filepath.Join(baseDir, "requests")
+	}
+	errDir := cfg.Logging.ErrorDir
+	if errDir == "" {
+		errDir = filepath.Join(baseDir, "errors")
+	}
+
+	if cfg.Logging.SeparateFiles {
+		if err := os.MkdirAll(reqDir, 0755); err != nil {
+			return fmt.Errorf("创建请求日志目录失败: %w", err)
+		}
+		if err := os.MkdirAll(errDir, 0755); err != nil {
+			return fmt.Errorf("创建错误日志目录失败: %w", err)
+		}
+	}
+
+	_, requestLogger, _ = createLogger(cfg, "request", filepath.Join(reqDir, "requests.log"))
+	_, errorLogger, _ = createLogger(cfg, "error", filepath.Join(errDir, "errors.log"))
+	return nil
+}
+
+func startFlushTicker(interval int) {
+	if interval <= 0 {
+		return
+	}
+	flushDone = make(chan struct{})
+	flushTicker = time.NewTicker(time.Duration(interval) * time.Second)
+	go func() {
+		for {
+			select {
+			case <-flushTicker.C:
+				syncAllLoggers()
+			case <-flushDone:
+				return
+			}
+		}
+	}()
+}
+
+func syncAllLoggers() {
+	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger}
+	for _, logger := range loggers {
+		if logger != nil {
+			_ = logger.Sync()
+		}
+	}
 }
 
 // updateSensitivePatterns 更新敏感信息正则模式以包含更详细的模式
@@ -303,9 +393,7 @@ func updateSensitivePatterns() {
 	SensitivePatterns = append(SensitivePatterns, extraPatterns...)
 }
 
-// createLogger 创建单个Logger实例
 func createLogger(cfg *Config, name, filePath string) (*zap.Logger, *zap.SugaredLogger, error) {
-	// 创建日志轮转配置
 	fw := &lumberjack.Logger{
 		Filename:   filePath,
 		MaxSize:    cfg.Logging.GetMaxFileSizeMB(),
@@ -314,8 +402,7 @@ func createLogger(cfg *Config, name, filePath string) (*zap.Logger, *zap.Sugared
 		Compress:   cfg.Logging.Compress,
 	}
 
-	// 文件编码器（JSON格式）
-	fileEncoder := zapcore.NewJSONEncoder(zapcore.EncoderConfig{
+	fileEncoderCfg := zapcore.EncoderConfig{
 		TimeKey:        "timestamp",
 		LevelKey:       "level",
 		NameKey:        "logger",
@@ -328,7 +415,14 @@ func createLogger(cfg *Config, name, filePath string) (*zap.Logger, *zap.Sugared
 		EncodeTime:     zapcore.ISO8601TimeEncoder,
 		EncodeDuration: zapcore.StringDurationEncoder,
 		EncodeCaller:   zapcore.ShortCallerEncoder,
-	})
+	}
+
+	var fileEncoder zapcore.Encoder
+	if cfg.Logging.GetFormat() == "text" {
+		fileEncoder = zapcore.NewConsoleEncoder(fileEncoderCfg)
+	} else {
+		fileEncoder = zapcore.NewJSONEncoder(fileEncoderCfg)
+	}
 
 	consoleEncoderCfg := zapcore.EncoderConfig{
 		TimeKey:        "timestamp",
@@ -352,17 +446,29 @@ func createLogger(cfg *Config, name, filePath string) (*zap.Logger, *zap.Sugared
 
 	var consoleCore zapcore.Core
 	if cfg.Logging.GetColorize() {
-		consoleEncoder := newMarkdownConsoleEncoder(consoleEncoderCfg, true, cfg.Logging.GetConsoleStyle())
-		consoleCore = zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), consoleLevel)
+		if cfg.Logging.GetConsoleFormat() == "plain" {
+			consoleCore = zapcore.NewCore(zapcore.NewConsoleEncoder(consoleEncoderCfg), zapcore.AddSync(os.Stdout), consoleLevel)
+		} else {
+			consoleEncoder := newMarkdownConsoleEncoder(consoleEncoderCfg, true, cfg.Logging.GetConsoleStyle())
+			consoleCore = zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), consoleLevel)
+		}
 	} else {
-		consoleEncoder := newMarkdownConsoleEncoder(consoleEncoderCfg, false, cfg.Logging.GetConsoleStyle())
-		consoleCore = zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), consoleLevel)
+		if cfg.Logging.GetConsoleFormat() == "plain" {
+			consoleCore = zapcore.NewCore(zapcore.NewConsoleEncoder(consoleEncoderCfg), zapcore.AddSync(os.Stdout), consoleLevel)
+		} else {
+			consoleEncoder := newMarkdownConsoleEncoder(consoleEncoderCfg, false, cfg.Logging.GetConsoleStyle())
+			consoleCore = zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), consoleLevel)
+		}
 	}
 
-	// 组合多个Core（同时输出到文件和控制台）
-	core := zapcore.NewTee(fileCore, consoleCore)
+	var core zapcore.Core
+	teeCore := zapcore.NewTee(fileCore, consoleCore)
+	if cfg.Logging.ShouldMaskSensitive() {
+		core = &maskingCore{Core: teeCore, masker: NewSensitiveDataMasker()}
+	} else {
+		core = teeCore
+	}
 
-	// 创建Logger
 	logger := zap.New(core,
 		zap.AddCaller(),
 		zap.AddStacktrace(zap.ErrorLevel),
@@ -372,6 +478,12 @@ func createLogger(cfg *Config, name, filePath string) (*zap.Logger, *zap.Sugared
 	)
 
 	return logger, logger.Sugar(), nil
+}
+
+func createNoOpLogger() (*zap.Logger, *zap.SugaredLogger) {
+	nopCore := zapcore.NewNopCore()
+	logger := zap.New(nopCore)
+	return logger, logger.Sugar()
 }
 
 // parseLevel 解析日志级别字符串
@@ -421,6 +533,13 @@ func encodeTimeColor(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 
 // ShutdownLoggers 关闭所有Logger
 func ShutdownLoggers() error {
+	if flushTicker != nil {
+		flushTicker.Stop()
+		close(flushDone)
+		flushTicker = nil
+		flushDone = nil
+	}
+
 	loggers := []*zap.Logger{
 		GeneralLogger,
 		SystemLogger,
@@ -432,7 +551,6 @@ func ShutdownLoggers() error {
 	for _, logger := range loggers {
 		if logger != nil {
 			if err := logger.Sync(); err != nil {
-				// 忽略标准输出同步错误
 				errStr := err.Error()
 				if !strings.Contains(errStr, "sync /dev/stdout") &&
 					!strings.Contains(errStr, "invalid argument") &&
@@ -444,4 +562,41 @@ func ShutdownLoggers() error {
 	}
 
 	return nil
+}
+
+func WriteRequestLogZap(reqID, content string) {
+	if requestLogger == nil {
+		return
+	}
+	requestLogger.Infow("请求日志", "reqID", reqID, "content", content)
+}
+
+func WriteErrorLogZap(reqID, content string) {
+	if errorLogger == nil {
+		return
+	}
+	errorLogger.Errorw("错误日志", "reqID", reqID, "content", content)
+}
+
+func LogMetrics(reqID, modelAlias, status, finalBackend string, attempts int, totalLatencyMs int64, backendDetails string) {
+	if !metricsEnabled || GeneralSugar == nil {
+		return
+	}
+	GeneralSugar.Infow("性能指标",
+		"reqID", reqID,
+		"model", modelAlias,
+		"status", status,
+		"backend", finalBackend,
+		"attempts", attempts,
+		"total_latency_ms", totalLatencyMs,
+		"backend_details", backendDetails,
+	)
+}
+
+func IsMetricsEnabled() bool {
+	return metricsEnabled
+}
+
+func GetLoggingConfig() *Logging {
+	return loggingCfg
 }

@@ -160,7 +160,8 @@ func printBanner(version, listen string, backends, models int) {
 }
 
 func shouldUseColor() bool {
-	if loggingConfig != nil && loggingConfig.Colorize != nil && !*loggingConfig.Colorize {
+	cfg := GetLoggingConfig()
+	if cfg != nil && cfg.Colorize != nil && !*cfg.Colorize {
 		return false
 	}
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())

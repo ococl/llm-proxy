@@ -107,8 +107,22 @@ func (l *Logging) GetConsoleFormat() string {
 	return l.ConsoleFormat
 }
 
+func (l *Logging) GetFormat() string {
+	if l.Format == "" {
+		return "json"
+	}
+	return l.Format
+}
+
 func (l *Logging) ShouldDropOnFull() bool {
 	return l.DropOnFull
+}
+
+func (l *Logging) GetFlushInterval() int {
+	if l.FlushInterval <= 0 {
+		return 5
+	}
+	return l.FlushInterval
 }
 
 func (l *Logging) GetMaxFileSizeMB() int {
@@ -377,10 +391,64 @@ func (cm *ConfigManager) tryReload() error {
 	if err != nil {
 		return err
 	}
+
+	// 检测日志配置是否变化，需要重新初始化日志器
+	oldCfg := cm.config
+	loggingChanged := oldCfg == nil || loggingConfigChanged(&oldCfg.Logging, &cfg.Logging)
+
 	cm.config = &cfg
 	cm.lastMod = stat.ModTime()
+
+	if loggingChanged {
+		if err := reinitializeLoggers(&cfg); err != nil {
+			SystemSugar.Warnw("日志配置重载失败", "error", err)
+		} else {
+			SystemSugar.Info("日志配置已重载")
+		}
+	}
+
 	SystemSugar.Info("配置重载成功")
 	return nil
+}
+
+// loggingConfigChanged 检测日志配置是否发生变化
+func loggingConfigChanged(old, new *Logging) bool {
+	if old.Level != new.Level || old.ConsoleLevel != new.ConsoleLevel {
+		return true
+	}
+	if old.DebugMode != new.DebugMode {
+		return true
+	}
+	if old.GetColorize() != new.GetColorize() {
+		return true
+	}
+	if old.ConsoleStyle != new.ConsoleStyle || old.ConsoleFormat != new.ConsoleFormat {
+		return true
+	}
+	if old.Format != new.Format || old.BaseDir != new.BaseDir {
+		return true
+	}
+	if old.ShouldMaskSensitive() != new.ShouldMaskSensitive() {
+		return true
+	}
+	if old.ShouldUseDetailedMasking() != new.ShouldUseDetailedMasking() {
+		return true
+	}
+	if old.MaxFileSizeMB != new.MaxFileSizeMB || old.MaxAgeDays != new.MaxAgeDays {
+		return true
+	}
+	if old.MaxBackups != new.MaxBackups || old.Compress != new.Compress {
+		return true
+	}
+	return false
+}
+
+// reinitializeLoggers 重新初始化日志器
+func reinitializeLoggers(cfg *Config) error {
+	// 先关闭旧的日志器
+	ShutdownLoggers()
+	// 重新初始化
+	return InitLoggers(cfg)
 }
 
 func (cm *ConfigManager) GetBackend(name string) *Backend {
