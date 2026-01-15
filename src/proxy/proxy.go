@@ -31,6 +31,21 @@ func NewProxy(cfg *config.Manager, router *Router, cd *backend.CooldownManager, 
 	return &Proxy{configMgr: cfg, router: router, cooldown: cd, detector: det}
 }
 
+var hopByHopHeaders = map[string]bool{
+	"Connection":          true,
+	"Keep-Alive":          true,
+	"Proxy-Authenticate":  true,
+	"Proxy-Authorization": true,
+	"Te":                  true,
+	"Trailer":             true,
+	"Transfer-Encoding":   true,
+	"Upgrade":             true,
+}
+
+func isHopByHopHeader(header string) bool {
+	return hopByHopHeaders[header]
+}
+
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/health" || r.URL.Path == "/healthz" {
 		cfg := p.configMgr.Get()
@@ -229,14 +244,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			metrics.Finish(true, finalBackend)
 
 			for k, v := range resp.Header {
+				if isHopByHopHeader(k) {
+					continue
+				}
 				w.Header()[k] = v
 			}
 
 			if isStream {
 				w.Header().Set("Cache-Control", "no-cache")
-				w.Header().Set("Connection", "keep-alive")
 				w.Header().Set("X-Accel-Buffering", "no")
-				w.Header().Set("Transfer-Encoding", "chunked")
 			}
 			w.WriteHeader(resp.StatusCode)
 
@@ -322,37 +338,38 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 		return
 	}
 
-	cfg := p.configMgr.Get()
-	needsSpecialHandling := detectSpecialHandlingNeeded(backendName, cfg)
-
-	buf := make([]byte, 4*1024)
+	buf := make([]byte, 32*1024)
 	bytesProcessed := 0
 	chunksReceived := 0
+	sawDone := false
 
 	for {
 		n, err := body.Read(buf)
 		chunksReceived++
 		if n > 0 {
 			bytesProcessed += n
-			logging.FileOnlySugar.Debugw("接收SSE数据块", "chunk_number", chunksReceived, "size", n, "total_bytes", bytesProcessed, "backend", backendName, "needs_special_handling", needsSpecialHandling)
+			chunk := buf[:n]
 
-			var processedChunk []byte
-			if needsSpecialHandling {
-				processedChunk = p.processChunkWithVendorSpecificHandling(buf[:n], backendName)
-			} else {
-				processedChunk = buf[:n]
+			if bytes.Contains(chunk, []byte("[DONE]")) {
+				sawDone = true
 			}
 
-			if _, writeErr := w.Write(processedChunk); writeErr != nil {
+			logging.FileOnlySugar.Debugw("接收SSE数据块", "chunk_number", chunksReceived, "size", n, "total_bytes", bytesProcessed, "backend", backendName)
+
+			if _, writeErr := w.Write(chunk); writeErr != nil {
 				logging.ProxySugar.Errorw("写入响应失败", "error", writeErr, "chunk_number", chunksReceived)
 				break
 			}
 			flusher.Flush()
-			logging.FileOnlySugar.Debugw("刷新响应", "chunk_number", chunksReceived)
 		}
 		if err != nil {
 			if err == io.EOF {
-				logging.FileOnlySugar.Debugw("SSE流结束", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
+				if !sawDone {
+					logging.ProxySugar.Warnw("后端未发送[DONE]标识，自动补足", "backend", backendName, "total_bytes", bytesProcessed)
+					w.Write([]byte("\n\ndata: [DONE]\n\n"))
+					flusher.Flush()
+				}
+				logging.FileOnlySugar.Debugw("SSE流结束", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName, "saw_done", sawDone)
 				break
 			} else {
 				logging.ProxySugar.Errorw("读取SSE流错误", "error", err, "chunk_number", chunksReceived, "backend", backendName)
@@ -360,39 +377,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 			}
 		}
 	}
-	logging.FileOnlySugar.Infow("SSE流传输完成", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
-}
-
-func detectSpecialHandlingNeeded(backendName string, cfg *config.Config) bool {
-	if cfg.Logging.DebugMode {
-		logging.ProxySugar.Debugw("调试模式：检测特殊处理需求", "backend", backendName)
-	}
-
-	specialBackends := make(map[string]bool)
-	for _, bkend := range cfg.Logging.ProblematicBackends {
-		specialBackends[bkend] = true
-	}
-
-	defaultProblematic := []string{"special-vendor", "problematic-provider"}
-	for _, bkend := range defaultProblematic {
-		specialBackends[bkend] = true
-	}
-
-	result := specialBackends[backendName]
-	if result && cfg.Logging.DebugMode {
-		logging.ProxySugar.Debugw("检测到需要特殊处理的后端", "backend", backendName)
-	}
-
-	return result
-}
-
-func (p *Proxy) processChunkWithVendorSpecificHandling(chunk []byte, backendName string) []byte {
-	cfg := p.configMgr.Get()
-	if !detectSpecialHandlingNeeded(backendName, cfg) {
-		return chunk
-	}
-	logging.ProxySugar.Debugw("应用特殊处理", "backend", backendName)
-	return chunk
+	logging.FileOnlySugar.Infow("SSE流传输完成", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName, "saw_done", sawDone)
 }
 
 func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
