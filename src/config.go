@@ -81,6 +81,8 @@ type Logging struct {
 	TimeRotation string `yaml:"time_rotation,omitempty"`
 	// 详细脱敏配置
 	DetailedMasking *bool `yaml:"detailed_masking,omitempty"`
+	// 特殊处理配置
+	ProblematicBackends []string `yaml:"problematic_backends,omitempty"` // 针对特定供应商的特殊处理
 }
 
 func (l *Logging) ShouldMaskSensitive() bool {

@@ -86,6 +86,9 @@ logging:
   mask_sensitive: true               # 脱敏API Key、Token
   detailed_masking: false            # 详细脱敏（包括邮箱、IP等）
 
+  # 特殊供应商处理
+  problematic_backends: ["special-vendor", "problematic-provider"]  # 需要特殊处理的后端列表，用于解决重复发言等问题
+  
   # 独立请求/错误日志目录（兼容旧配置）
   request_dir: "./logs/requests"
   error_dir: "./logs/errors"

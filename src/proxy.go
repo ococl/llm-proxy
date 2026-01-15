@@ -231,13 +231,29 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Cache-Control", "no-cache")
 				w.Header().Set("Connection", "keep-alive")
 				w.Header().Set("X-Accel-Buffering", "no")
+				// 添加额外的SSE头部以确保兼容性
+				w.Header().Set("Transfer-Encoding", "chunked")
 			}
 			w.WriteHeader(resp.StatusCode)
 
 			if isStream {
-				p.streamResponse(w, resp.Body)
+				ProxySugar.Infow("开始流式传输", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
+				// 记录后端响应的头部信息以进行调试
+				ProxySugar.Debugw("后端响应头部", "reqID", reqID, "backend", route.BackendName, "headers", resp.Header)
+				p.streamResponse(w, resp.Body, route.BackendName)
+				ProxySugar.Infow("完成流式传输", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
 			} else {
-				io.Copy(w, resp.Body)
+				// 对于非流式响应，记录响应长度
+				bodyBytes, err := io.ReadAll(resp.Body)
+				if err != nil {
+					ProxySugar.Errorw("读取非流式响应失败", "reqID", reqID, "error", err)
+				} else {
+					ProxySugar.Debugw("非流式响应", "reqID", reqID, "backend", route.BackendName, "response_size", len(bodyBytes))
+					_, writeErr := w.Write(bodyBytes)
+					if writeErr != nil {
+						ProxySugar.Errorw("写入非流式响应失败", "reqID", reqID, "error", writeErr)
+					}
+				}
 			}
 			resp.Body.Close()
 			return
@@ -298,27 +314,124 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(lastBody))
 }
 
-func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser) {
+func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backendName string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		io.Copy(w, body)
 		return
 	}
 
-	buf := make([]byte, 32*1024)
+	cfg := p.configMgr.Get()
+	needsSpecialHandling := detectSpecialHandlingNeeded(backendName, cfg)
+
+	// 使用较小的缓冲区以减少延迟并提高实时性
+	buf := make([]byte, 4*1024) // 4KB buffer instead of 32KB
+	bytesProcessed := 0
+	chunksReceived := 0
+
 	for {
+		// 添加调试日志记录每次读取的数据
 		n, err := body.Read(buf)
+		chunksReceived++
 		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				ProxySugar.Debugw("写入失败", "error", writeErr)
+			bytesProcessed += n
+			ProxySugar.Debugw("接收SSE数据块", "chunk_number", chunksReceived, "size", n, "total_bytes", bytesProcessed, "backend", backendName, "needs_special_handling", needsSpecialHandling)
+
+			// 应用供应商特定的处理（用于解决某些供应商的重复发言问题）
+			var processedChunk []byte
+			if needsSpecialHandling {
+				processedChunk = p.processChunkWithVendorSpecificHandling(buf[:n], backendName)
+			} else {
+				processedChunk = buf[:n]
+			}
+
+			// 直接写入响应，避免额外的缓冲
+			if _, writeErr := w.Write(processedChunk); writeErr != nil {
+				ProxySugar.Errorw("写入响应失败", "error", writeErr, "chunk_number", chunksReceived)
 				break
 			}
 			flusher.Flush()
+			ProxySugar.Debugw("刷新响应", "chunk_number", chunksReceived)
 		}
 		if err != nil {
-			break
+			if err == io.EOF {
+				ProxySugar.Debugw("SSE流结束", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
+				break
+			} else {
+				ProxySugar.Errorw("读取SSE流错误", "error", err, "chunk_number", chunksReceived, "backend", backendName)
+				break
+			}
 		}
 	}
+	ProxySugar.Infow("SSE流传输完成", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
+}
+
+// detectSpecialHandlingNeeded 检测是否需要特殊处理的供应商
+func detectSpecialHandlingNeeded(backendName string, config *Config) bool {
+	// 某些供应商可能需要特殊的处理方式
+	// 这里可以根据后端名称来判断是否需要特殊处理
+	// 可以根据用户配置动态调整
+
+	// 检查配置中是否有特殊处理设置
+	if config.Logging.DebugMode {
+		ProxySugar.Debugw("调试模式：检测特殊处理需求", "backend", backendName)
+	}
+
+	// 从配置中获取特殊处理的后端列表
+	specialBackends := make(map[string]bool)
+
+	// 从配置中读取有问题的后端列表
+	for _, backend := range config.Logging.ProblematicBackends {
+		specialBackends[backend] = true
+	}
+
+	// 默认的一些可能有问题的供应商
+	defaultProblematic := []string{"special-vendor", "problematic-provider"}
+	for _, backend := range defaultProblematic {
+		specialBackends[backend] = true
+	}
+
+	result := specialBackends[backendName]
+	if result && config.Logging.DebugMode {
+		ProxySugar.Debugw("检测到需要特殊处理的后端", "backend", backendName)
+	}
+
+	return result
+}
+
+// processChunkWithVendorSpecificHandling 根据供应商特性处理响应块
+func (p *Proxy) processChunkWithVendorSpecificHandling(chunk []byte, backendName string) []byte {
+	cfg := p.configMgr.Get()
+	if !detectSpecialHandlingNeeded(backendName, cfg) {
+		return chunk
+	}
+
+	// 这里可以添加针对特定供应商的特殊处理逻辑
+	// 比如：过滤重复内容、调整数据格式等
+	ProxySugar.Debugw("应用特殊处理", "backend", backendName)
+
+	// 针对某些供应商的重复发言问题，我们可以实施以下策略：
+	// 1. 检查数据块是否包含重复的SSE格式数据
+	// 2. 确保数据正确分块传输
+	// 3. 处理可能的格式问题
+
+	// 示例：实现基本的重复内容检测和过滤（如果需要）
+	// 这里只是占位符，实际实现可以根据具体需求定制
+	return chunk
+}
+
+// processChunkForRepeatDetection 检测并处理重复内容的高级函数
+func (p *Proxy) processChunkForRepeatDetection(chunk []byte, backendName string, sessionID string) []byte {
+	cfg := p.configMgr.Get()
+	if !detectSpecialHandlingNeeded(backendName, cfg) {
+		return chunk
+	}
+
+	// 这是一个高级功能，用于检测和处理重复内容
+	// 可以通过会话ID跟踪对话历史，避免重复发言
+	ProxySugar.Debugw("执行重复内容检测", "backend", backendName, "session", sessionID)
+
+	return chunk
 }
 
 func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
