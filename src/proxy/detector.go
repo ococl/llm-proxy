@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"llm-proxy/config"
+	"llm-proxy/logging"
 )
 
 type Detector struct {
@@ -20,14 +21,21 @@ func (d *Detector) ShouldFallback(statusCode int, body string) bool {
 
 	for _, pattern := range cfg.Detection.ErrorCodes {
 		if d.matchStatusCode(statusCode, pattern) {
+			logging.ProxySugar.Debugw("检测到错误状态码", "statusCode", statusCode, "pattern", pattern)
 			return true
 		}
 	}
 
 	for _, pattern := range cfg.Detection.ErrorPatterns {
 		if strings.Contains(body, pattern) {
+			logging.ProxySugar.Debugw("检测到错误模式", "statusCode", statusCode, "pattern", pattern)
 			return true
 		}
+	}
+
+	if strings.Contains(body, `"__type":"com.amazon.aws.codewhisperer#`) && strings.Contains(body, `Exception"`) {
+		logging.ProxySugar.Warnw("检测到AWS风格错误", "statusCode", statusCode, "body", body)
+		return true
 	}
 
 	return false

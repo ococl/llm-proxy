@@ -294,8 +294,8 @@ func initRequestErrorLoggers(cfg *config.Config) error {
 		}
 	}
 
-	_, requestLogger, _ = createLogger(cfg, "request", filepath.Join(reqDir, "requests.log"))
-	_, errorLogger, _ = createLogger(cfg, "error", filepath.Join(errDir, "errors.log"))
+	_, requestLogger, _ = createFileOnlyLogger(cfg, "request", filepath.Join(reqDir, "requests.log"))
+	_, errorLogger, _ = createFileOnlyLogger(cfg, "error", filepath.Join(errDir, "errors.log"))
 	return nil
 }
 
