@@ -1,15 +1,17 @@
-package main
+package proxy
 
 import (
 	"strconv"
 	"strings"
+
+	"llm-proxy/config"
 )
 
 type Detector struct {
-	configMgr *ConfigManager
+	configMgr *config.Manager
 }
 
-func NewDetector(cfg *ConfigManager) *Detector {
+func NewDetector(cfg *config.Manager) *Detector {
 	return &Detector{configMgr: cfg}
 }
 

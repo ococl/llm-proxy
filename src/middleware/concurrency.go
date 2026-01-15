@@ -1,19 +1,22 @@
-package main
+package middleware
 
 import (
 	"context"
 	"net/http"
 	"sync/atomic"
+
+	"llm-proxy/config"
+	"llm-proxy/errors"
 )
 
 type ConcurrencyLimiter struct {
 	global    chan struct{}
 	queueSize int64
 	maxQueue  int
-	configMgr *ConfigManager
+	configMgr *config.Manager
 }
 
-func NewConcurrencyLimiter(configMgr *ConfigManager) *ConcurrencyLimiter {
+func NewConcurrencyLimiter(configMgr *config.Manager) *ConcurrencyLimiter {
 	cfg := configMgr.Get().Concurrency
 	cl := &ConcurrencyLimiter{
 		configMgr: configMgr,
@@ -66,7 +69,7 @@ func (cl *ConcurrencyLimiter) Middleware(next http.Handler) http.Handler {
 		defer cancel()
 
 		if err := cl.Acquire(ctx); err != nil {
-			WriteJSONError(w, ErrConcurrencyLimit, http.StatusServiceUnavailable, "")
+			errors.WriteJSONError(w, errors.ErrConcurrencyLimit, http.StatusServiceUnavailable, "")
 			return
 		}
 		defer cl.Release()

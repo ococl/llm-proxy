@@ -1,17 +1,21 @@
-package main
+package proxy
 
 import (
 	"math/rand"
 	"sort"
 	"time"
+
+	"llm-proxy/backend"
+	"llm-proxy/config"
+	"llm-proxy/logging"
 )
 
 type Router struct {
-	configMgr *ConfigManager
-	cooldown  *CooldownManager
+	configMgr *config.Manager
+	cooldown  *backend.CooldownManager
 }
 
-func NewRouter(cfg *ConfigManager, cd *CooldownManager) *Router {
+func NewRouter(cfg *config.Manager, cd *backend.CooldownManager) *Router {
 	return &Router{configMgr: cfg, cooldown: cd}
 }
 
@@ -27,7 +31,7 @@ func (r *Router) Resolve(alias string) ([]ResolvedRoute, error) {
 
 func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]ResolvedRoute, error) {
 	if visited[alias] {
-		ProxySugar.Warnw("检测到循环回退", "alias", alias)
+		logging.ProxySugar.Warnw("检测到循环回退", "alias", alias)
 		return nil, nil
 	}
 	visited[alias] = true
@@ -37,7 +41,7 @@ func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]Re
 
 	modelAlias, exists := cfg.Models[alias]
 	if exists && modelAlias != nil && modelAlias.IsEnabled() {
-		sorted := make([]ModelRoute, len(modelAlias.Routes))
+		sorted := make([]config.ModelRoute, len(modelAlias.Routes))
 		copy(sorted, modelAlias.Routes)
 		sort.Slice(sorted, func(i, j int) bool {
 			return sorted[i].Priority < sorted[j].Priority
@@ -63,24 +67,24 @@ func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]Re
 			}
 			key := r.cooldown.Key(route.Backend, route.Model)
 			if r.cooldown.IsCoolingDown(key) {
-				ProxySugar.Debugw("跳过冷却中的后端", "key", key)
+				logging.ProxySugar.Debugw("跳过冷却中的后端", "key", key)
 				continue
 			}
-			backend := r.configMgr.GetBackend(route.Backend)
-			if backend == nil {
-				ProxySugar.Warnw("后端不存在", "backend", route.Backend)
+			bkend := r.configMgr.GetBackend(route.Backend)
+			if bkend == nil {
+				logging.ProxySugar.Warnw("后端不存在", "backend", route.Backend)
 				continue
 			}
-			if !backend.IsEnabled() {
-				ProxySugar.Debugw("跳过已禁用的后端", "backend", route.Backend)
+			if !bkend.IsEnabled() {
+				logging.ProxySugar.Debugw("跳过已禁用的后端", "backend", route.Backend)
 				continue
 			}
 			if result == nil {
 				result = make([]ResolvedRoute, 0, len(sorted))
 			}
 			result = append(result, ResolvedRoute{
-				BackendName: backend.Name,
-				BackendURL:  backend.URL,
+				BackendName: bkend.Name,
+				BackendURL:  bkend.URL,
 				Model:       route.Model,
 			})
 		}
@@ -113,11 +117,11 @@ func (r *Router) collectFallbackRoutes(alias string, visited map[string]bool) []
 	for _, fallbackAlias := range fallbacks {
 		routes, err := r.resolveWithVisited(fallbackAlias, visited)
 		if err != nil {
-			ProxySugar.Warnw("解析回退别名失败", "fallbackAlias", alias, "error", err)
+			logging.ProxySugar.Warnw("解析回退别名失败", "fallbackAlias", alias, "error", err)
 			continue
 		}
 		if len(routes) > 0 {
-			ProxySugar.Debugw("添加回退路由", "alias", alias, "fallbackAlias", fallbackAlias)
+			logging.ProxySugar.Debugw("添加回退路由", "alias", alias, "fallbackAlias", fallbackAlias)
 			result = append(result, routes...)
 		}
 	}

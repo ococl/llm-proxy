@@ -1,9 +1,11 @@
-package main
+package middleware
 
 import (
 	"fmt"
 	"net/http"
 	"runtime/debug"
+
+	"llm-proxy/logging"
 )
 
 func extractRequestID(r *http.Request) string {
@@ -24,7 +26,7 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 				if len(stackStr) > 500 {
 					stackStr = stackStr[:500] + "..."
 				}
-				SystemSugar.Errorw("Panic recovered", "reqID", reqID, "error", err, "stack", stackStr)
+				logging.SystemSugar.Errorw("Panic recovered", "reqID", reqID, "error", err, "stack", stackStr)
 				http.Error(w, fmt.Sprintf("Internal Server Error"), http.StatusInternalServerError)
 			}
 		}()

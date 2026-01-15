@@ -1,4 +1,4 @@
-package main
+package middleware
 
 import (
 	"bytes"
@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"sync"
 
+	"llm-proxy/config"
+	"llm-proxy/errors"
+
 	"golang.org/x/time/rate"
 )
 
@@ -16,11 +19,11 @@ type RateLimiter struct {
 	perIP     map[string]*rate.Limiter
 	perModel  map[string]*rate.Limiter
 	mu        sync.RWMutex
-	config    *RateLimitConfig
-	configMgr *ConfigManager
+	config    *config.RateLimitConfig
+	configMgr *config.Manager
 }
 
-func NewRateLimiter(configMgr *ConfigManager) *RateLimiter {
+func NewRateLimiter(configMgr *config.Manager) *RateLimiter {
 	cfg := configMgr.Get().RateLimit
 	rl := &RateLimiter{
 		perIP:     make(map[string]*rate.Limiter),
@@ -104,28 +107,19 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 从请求体中提取模型信息
-		ip := extractIP(r)
+		ip := ExtractIP(r)
 
-		// 对于某些路径，我们可能无法直接获得模型信息，因此只对特定路径进行模型级限流
 		var model string
 		if r.URL.Path == "/v1/chat/completions" || r.URL.Path == "/v1/completions" {
-			// 读取请求体以提取模型信息
 			bodyBytes, err := io.ReadAll(r.Body)
 			if err != nil {
-				WriteJSONError(w, ErrBadRequest, http.StatusBadRequest, "")
+				errors.WriteJSONError(w, errors.ErrBadRequest, http.StatusBadRequest, "")
 				return
 			}
-
-			// 重新设置请求体
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
-			// 解析模型
 			var reqBody map[string]interface{}
-			if err := json.Unmarshal(bodyBytes, &reqBody); err != nil {
-				// 如果无法解析请求体，仍然进行全局和IP限流
-				model = ""
-			} else {
+			if err := json.Unmarshal(bodyBytes, &reqBody); err == nil {
 				if modelVal, ok := reqBody["model"].(string); ok {
 					model = modelVal
 				}
@@ -133,14 +127,14 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 		}
 
 		if !rl.Allow(ip, model) {
-			WriteJSONError(w, ErrRateLimited, http.StatusTooManyRequests, "")
+			errors.WriteJSONError(w, errors.ErrRateLimited, http.StatusTooManyRequests, "")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
-func extractIP(r *http.Request) string {
+func ExtractIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		return xff
 	}

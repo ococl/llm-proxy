@@ -1,4 +1,4 @@
-package main
+package logging
 
 import (
 	"fmt"
@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"llm-proxy/config"
 )
 
 var (
@@ -18,6 +20,14 @@ var (
 
 func SetTestMode(enabled bool) {
 	testMode = enabled
+}
+
+func InitTestLoggers() {
+	GeneralLogger, GeneralSugar = createNoOpLogger()
+	SystemLogger, SystemSugar = createNoOpLogger()
+	NetworkLogger, NetworkSugar = createNoOpLogger()
+	ProxyLogger, ProxySugar = createNoOpLogger()
+	DebugLogger, DebugSugar = createNoOpLogger()
 }
 
 var sensitivePatterns = []*regexp.Regexp{
@@ -31,15 +41,15 @@ var sensitivePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(secret["\s:=]+)([a-zA-Z0-9\-_]{16,})`),
 }
 
-func InitLogger(cfg *Config) error {
+func InitLogger(cfg *config.Config) error {
 	configMu.Lock()
 	maskSensitive = cfg.Logging.ShouldMaskSensitive()
 	configMu.Unlock()
-	return InitLoggers(cfg)
+	return Init(cfg)
 }
 
 func ShutdownLogger() {
-	ShutdownLoggers()
+	Shutdown()
 }
 
 func MaskSensitiveData(s string) string {
@@ -72,7 +82,7 @@ func getExtendedSensitivePatterns() []*regexp.Regexp {
 	}
 }
 
-func WriteRequestLog(cfg *Config, reqID string, content string) error {
+func WriteRequestLogFile(cfg *config.Config, reqID string, content string) error {
 	if testMode {
 		return nil
 	}
@@ -84,11 +94,11 @@ func WriteRequestLog(cfg *Config, reqID string, content string) error {
 		filename := filepath.Join(cfg.Logging.RequestDir, reqID+".log")
 		return os.WriteFile(filename, []byte(maskedContent), 0644)
 	}
-	WriteRequestLogZap(reqID, maskedContent)
+	WriteRequestLog(reqID, maskedContent)
 	return nil
 }
 
-func WriteErrorLog(cfg *Config, reqID string, content string) error {
+func WriteErrorLogFile(cfg *config.Config, reqID string, content string) error {
 	if testMode {
 		return nil
 	}
@@ -100,7 +110,7 @@ func WriteErrorLog(cfg *Config, reqID string, content string) error {
 		filename := filepath.Join(cfg.Logging.ErrorDir, reqID+".log")
 		return os.WriteFile(filename, []byte(maskedContent), 0644)
 	}
-	WriteErrorLogZap(reqID, maskedContent)
+	WriteErrorLog(reqID, maskedContent)
 	return nil
 }
 

@@ -13,6 +13,12 @@ import (
 	"syscall"
 	"time"
 
+	"llm-proxy/backend"
+	"llm-proxy/config"
+	"llm-proxy/logging"
+	"llm-proxy/middleware"
+	"llm-proxy/proxy"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 )
@@ -20,6 +26,7 @@ import (
 var (
 	Version   = "dev"
 	BuildTime = "unknown"
+	testMode  = false
 )
 
 func main() {
@@ -36,24 +43,28 @@ func main() {
 		os.Exit(0)
 	}
 
-	configMgr, err := NewConfigManager(*configPath)
+	configMgr, err := config.NewManager(*configPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
 	cfg := configMgr.Get()
 
-	// 应用命令行选项：禁用颜色
 	if *disableColor {
 		falseValue := false
 		cfg.Logging.Colorize = &falseValue
 	}
 
-	if err := InitLogger(cfg); err != nil {
+	if err := logging.InitLogger(cfg); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
 
-	cooldown := NewCooldownManager()
+	config.LoggingConfigChangedFunc = func(c *config.Config) error {
+		logging.ShutdownLogger()
+		return logging.InitLogger(c)
+	}
+
+	cooldown := backend.NewCooldownManager()
 	shutdownCooldown := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(time.Minute)
@@ -67,16 +78,17 @@ func main() {
 			}
 		}
 	}()
-	router := NewRouter(configMgr, cooldown)
-	detector := NewDetector(configMgr)
-	proxy := NewProxy(configMgr, router, cooldown, detector)
 
-	rateLimiter := NewRateLimiter(configMgr)
-	concurrencyLimiter := NewConcurrencyLimiter(configMgr)
+	router := proxy.NewRouter(configMgr, cooldown)
+	detector := proxy.NewDetector(configMgr)
+	p := proxy.NewProxy(configMgr, router, cooldown, detector)
+
+	rateLimiter := middleware.NewRateLimiter(configMgr)
+	concurrencyLimiter := middleware.NewConcurrencyLimiter(configMgr)
 
 	printBanner(Version, cfg.GetListen(), len(cfg.Backends), len(cfg.Models))
 
-	GeneralSugar.Infow("LLM Proxy started",
+	logging.GeneralSugar.Infow("LLM Proxy started",
 		"version", Version,
 		"address", formatListenAddress(cfg.GetListen()),
 		"backends", len(cfg.Backends),
@@ -85,7 +97,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    cfg.GetListen(),
-		Handler: RecoveryMiddleware(rateLimiter.Middleware(concurrencyLimiter.Middleware(proxy))),
+		Handler: middleware.RecoveryMiddleware(rateLimiter.Middleware(concurrencyLimiter.Middleware(p))),
 	}
 
 	go func() {
@@ -98,19 +110,19 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	GeneralSugar.Info("正在关闭服务器...")
+	logging.GeneralSugar.Info("正在关闭服务器...")
 
 	close(shutdownCooldown)
-	ShutdownLogger()
+	logging.ShutdownLogger()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		GeneralSugar.Errorw("服务器关闭失败", "error", err)
+		logging.GeneralSugar.Errorw("服务器关闭失败", "error", err)
 	}
 
-	GeneralSugar.Info("服务器已关闭")
+	logging.GeneralSugar.Info("服务器已关闭")
 }
 
 func formatListenAddress(listen string) string {
@@ -160,7 +172,7 @@ func printBanner(version, listen string, backends, models int) {
 }
 
 func shouldUseColor() bool {
-	cfg := GetLoggingConfig()
+	cfg := logging.GetLoggingConfig()
 	if cfg != nil && cfg.Colorize != nil && !*cfg.Colorize {
 		return false
 	}

@@ -1,8 +1,12 @@
-package main
+package config
 
 import (
 	"testing"
 )
+
+func boolPtr(b bool) *bool {
+	return &b
+}
 
 func TestBackend_IsEnabled(t *testing.T) {
 	tests := []struct {
@@ -67,14 +71,18 @@ func TestModelAlias_IsEnabled(t *testing.T) {
 	}
 }
 
-func TestConfigManager_GetBackend(t *testing.T) {
+func newTestManager(cfg *Config) *Manager {
+	return &Manager{config: cfg}
+}
+
+func TestManager_GetBackend(t *testing.T) {
 	cfg := &Config{
 		Backends: []Backend{
 			{Name: "backend1", URL: "http://b1.com"},
 			{Name: "backend2", URL: "http://b2.com"},
 		},
 	}
-	cm := newTestConfigManager(cfg)
+	cm := newTestManager(cfg)
 
 	tests := []struct {
 		name     string

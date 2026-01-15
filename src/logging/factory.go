@@ -1,4 +1,4 @@
-package main
+package logging
 
 import (
 	"bytes"
@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"llm-proxy/config"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/buffer"
@@ -19,10 +21,9 @@ var (
 	requestLogger  *zap.SugaredLogger
 	errorLogger    *zap.SugaredLogger
 	metricsEnabled bool
-	loggingCfg     *Logging
+	loggingCfg     *config.Logging
 )
 
-// markdownConsoleEncoder 自定义的Markdown风格控制台编码器
 type markdownConsoleEncoder struct {
 	zapcore.Encoder
 	colored      bool
@@ -57,7 +58,6 @@ func (c *maskingCore) Check(entry zapcore.Entry, ce *zapcore.CheckedEntry) *zapc
 	return ce
 }
 
-// newMarkdownConsoleEncoder 创建Markdown风格的控制台编码器
 func newMarkdownConsoleEncoder(cfg zapcore.EncoderConfig, colored bool, consoleStyle string) zapcore.Encoder {
 	return &markdownConsoleEncoder{
 		Encoder:      zapcore.NewConsoleEncoder(cfg),
@@ -66,7 +66,6 @@ func newMarkdownConsoleEncoder(cfg zapcore.EncoderConfig, colored bool, consoleS
 	}
 }
 
-// Clone 克隆编码器
 func (enc *markdownConsoleEncoder) Clone() zapcore.Encoder {
 	return &markdownConsoleEncoder{
 		Encoder:      enc.Encoder.Clone(),
@@ -78,7 +77,6 @@ func (enc *markdownConsoleEncoder) Clone() zapcore.Encoder {
 func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	line := bytes.NewBuffer(nil)
 
-	// 时间部分
 	timeStr := entry.Time.Format("15:04:05")
 	if enc.colored {
 		line.WriteString("\033[90m")
@@ -89,7 +87,6 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 	}
 	line.WriteString(" | ")
 
-	// 日志级别
 	levelStr := entry.Level.CapitalString()
 	if enc.colored {
 		switch entry.Level {
@@ -109,7 +106,6 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 	}
 	line.WriteString(" | ")
 
-	// 请求ID高亮
 	msg := entry.Message
 	if enc.colored {
 		msg = reqIDPattern.ReplaceAllStringFunc(msg, func(match string) string {
@@ -118,114 +114,8 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 	}
 	line.WriteString(msg)
 
-	// 字段部分
 	if len(fields) > 0 {
-		if enc.consoleStyle == "compact" {
-			// 紧凑格式
-			line.WriteString(" [")
-			firstField := true
-			for _, field := range fields {
-				if field.Key == "logger" {
-					continue
-				}
-				if !firstField {
-					line.WriteString(", ")
-				}
-				firstField = false
-
-				if enc.colored {
-					line.WriteString("\033[90m")
-					line.WriteString(field.Key)
-					line.WriteString("\033[0m=\033[33m")
-					switch field.Type {
-					case zapcore.StringType:
-						line.WriteString(field.String)
-					case zapcore.Int64Type, zapcore.Int32Type, zapcore.Int16Type, zapcore.Int8Type:
-						line.WriteString(fmt.Sprintf("%d", field.Integer))
-					case zapcore.Uint64Type, zapcore.Uint32Type, zapcore.Uint16Type, zapcore.Uint8Type:
-						line.WriteString(fmt.Sprintf("%d", field.Integer))
-					case zapcore.BoolType:
-						if field.Integer == 1 {
-							line.WriteString("true")
-						} else {
-							line.WriteString("false")
-						}
-					default:
-						line.WriteString(field.String)
-					}
-					line.WriteString("\033[0m")
-				} else {
-					line.WriteString(field.Key)
-					line.WriteString("=")
-					switch field.Type {
-					case zapcore.StringType:
-						line.WriteString(field.String)
-					case zapcore.Int64Type, zapcore.Int32Type, zapcore.Int16Type, zapcore.Int8Type:
-						line.WriteString(fmt.Sprintf("%d", field.Integer))
-					case zapcore.Uint64Type, zapcore.Uint32Type, zapcore.Uint16Type, zapcore.Uint8Type:
-						line.WriteString(fmt.Sprintf("%d", field.Integer))
-					case zapcore.BoolType:
-						if field.Integer == 1 {
-							line.WriteString("true")
-						} else {
-							line.WriteString("false")
-						}
-					default:
-						line.WriteString(field.String)
-					}
-				}
-			}
-			line.WriteString("]")
-		} else {
-			// 详细格式
-			for _, field := range fields {
-				if field.Key == "logger" {
-					continue
-				}
-				line.WriteString("\n  ")
-				if enc.colored {
-					line.WriteString("\033[90m")
-					line.WriteString(field.Key)
-					line.WriteString("\033[0m=\033[33m")
-					switch field.Type {
-					case zapcore.StringType:
-						line.WriteString(field.String)
-					case zapcore.Int64Type, zapcore.Int32Type, zapcore.Int16Type, zapcore.Int8Type:
-						line.WriteString(fmt.Sprintf("%d", field.Integer))
-					case zapcore.Uint64Type, zapcore.Uint32Type, zapcore.Uint16Type, zapcore.Uint8Type:
-						line.WriteString(fmt.Sprintf("%d", field.Integer))
-					case zapcore.BoolType:
-						if field.Integer == 1 {
-							line.WriteString("true")
-						} else {
-							line.WriteString("false")
-						}
-					default:
-						line.WriteString(field.String)
-					}
-					line.WriteString("\033[0m")
-				} else {
-					line.WriteString(field.Key)
-					line.WriteString("=")
-					switch field.Type {
-					case zapcore.StringType:
-						line.WriteString(field.String)
-					case zapcore.Int64Type, zapcore.Int32Type, zapcore.Int16Type, zapcore.Int8Type:
-						line.WriteString(fmt.Sprintf("%d", field.Integer))
-					case zapcore.Uint64Type, zapcore.Uint32Type, zapcore.Uint16Type, zapcore.Uint8Type:
-						line.WriteString(fmt.Sprintf("%d", field.Integer))
-					case zapcore.BoolType:
-						if field.Integer == 1 {
-							line.WriteString("true")
-						} else {
-							line.WriteString("false")
-						}
-					default:
-						line.WriteString(field.String)
-					}
-				}
-			}
-		}
+		enc.encodeFields(line, fields)
 	}
 
 	line.WriteString("\n")
@@ -235,8 +125,64 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 	return buf, nil
 }
 
-// InitLoggers 初始化所有Logger实例
-func InitLoggers(cfg *Config) error {
+func (enc *markdownConsoleEncoder) encodeFields(line *bytes.Buffer, fields []zapcore.Field) {
+	if enc.consoleStyle == "compact" {
+		line.WriteString(" [")
+		firstField := true
+		for _, field := range fields {
+			if field.Key == "logger" {
+				continue
+			}
+			if !firstField {
+				line.WriteString(", ")
+			}
+			firstField = false
+			enc.writeField(line, field)
+		}
+		line.WriteString("]")
+	} else {
+		for _, field := range fields {
+			if field.Key == "logger" {
+				continue
+			}
+			line.WriteString("\n  ")
+			enc.writeField(line, field)
+		}
+	}
+}
+
+func (enc *markdownConsoleEncoder) writeField(line *bytes.Buffer, field zapcore.Field) {
+	if enc.colored {
+		line.WriteString("\033[90m")
+		line.WriteString(field.Key)
+		line.WriteString("\033[0m=\033[33m")
+		line.WriteString(fieldValueString(field))
+		line.WriteString("\033[0m")
+	} else {
+		line.WriteString(field.Key)
+		line.WriteString("=")
+		line.WriteString(fieldValueString(field))
+	}
+}
+
+func fieldValueString(field zapcore.Field) string {
+	switch field.Type {
+	case zapcore.StringType:
+		return field.String
+	case zapcore.Int64Type, zapcore.Int32Type, zapcore.Int16Type, zapcore.Int8Type,
+		zapcore.Uint64Type, zapcore.Uint32Type, zapcore.Uint16Type, zapcore.Uint8Type:
+		return fmt.Sprintf("%d", field.Integer)
+	case zapcore.BoolType:
+		if field.Integer == 1 {
+			return "true"
+		}
+		return "false"
+	default:
+		return field.String
+	}
+}
+
+func Init(cfg *config.Config) error {
 	baseDir := cfg.Logging.GetBaseDir()
 
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
@@ -323,7 +269,7 @@ func InitLoggers(cfg *Config) error {
 	return nil
 }
 
-func initRequestErrorLoggers(cfg *Config) error {
+func initRequestErrorLoggers(cfg *config.Config) error {
 	baseDir := cfg.Logging.GetBaseDir()
 	reqDir := cfg.Logging.RequestDir
 	if reqDir == "" {
@@ -375,25 +321,17 @@ func syncAllLoggers() {
 	}
 }
 
-// updateSensitivePatterns 更新敏感信息正则模式以包含更详细的模式
 func updateSensitivePatterns() {
-	// 添加额外的敏感模式
 	extraPatterns := []*regexp.Regexp{
-		// Email addresses
 		regexp.MustCompile(`(?i)([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})`),
-		// Credit card numbers
 		regexp.MustCompile(`\b(?:\d{4}[-\s]?){3}\d{4}\b`),
-		// IP addresses
 		regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`),
-		// Phone numbers
 		regexp.MustCompile(`\b(\+?\d[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b`),
 	}
-
-	// 合并原始和新敏感模式
 	SensitivePatterns = append(SensitivePatterns, extraPatterns...)
 }
 
-func createLogger(cfg *Config, name, filePath string) (*zap.Logger, *zap.SugaredLogger, error) {
+func createLogger(cfg *config.Config, name, filePath string) (*zap.Logger, *zap.SugaredLogger, error) {
 	fw := &lumberjack.Logger{
 		Filename:   filePath,
 		MaxSize:    cfg.Logging.GetMaxFileSizeMB(),
@@ -472,9 +410,7 @@ func createLogger(cfg *Config, name, filePath string) (*zap.Logger, *zap.Sugared
 	logger := zap.New(core,
 		zap.AddCaller(),
 		zap.AddStacktrace(zap.ErrorLevel),
-		zap.Fields(
-			zap.String("logger", name),
-		),
+		zap.Fields(zap.String("logger", name)),
 	)
 
 	return logger, logger.Sugar(), nil
@@ -486,7 +422,6 @@ func createNoOpLogger() (*zap.Logger, *zap.SugaredLogger) {
 	return logger, logger.Sugar()
 }
 
-// parseLevel 解析日志级别字符串
 func parseLevel(levelStr string) zapcore.Level {
 	switch strings.ToLower(levelStr) {
 	case "debug":
@@ -508,31 +443,28 @@ func parseLevel(levelStr string) zapcore.Level {
 	}
 }
 
-// encodeLevelColor 带颜色的级别编码器（控制台）
 func encodeLevelColor(l zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
 	switch l {
 	case zapcore.DebugLevel:
-		enc.AppendString("\033[35mDEBUG\033[0m") // 紫色
+		enc.AppendString("\033[35mDEBUG\033[0m")
 	case zapcore.InfoLevel:
-		enc.AppendString("\033[32mINFO\033[0m") // 绿色
+		enc.AppendString("\033[32mINFO\033[0m")
 	case zapcore.WarnLevel:
-		enc.AppendString("\033[33mWARN\033[0m") // 黄色
+		enc.AppendString("\033[33mWARN\033[0m")
 	case zapcore.ErrorLevel:
-		enc.AppendString("\033[31mERROR\033[0m") // 红色
+		enc.AppendString("\033[31mERROR\033[0m")
 	case zapcore.DPanicLevel, zapcore.PanicLevel, zapcore.FatalLevel:
-		enc.AppendString("\033[31mFATAL\033[0m") // 红色
+		enc.AppendString("\033[31mFATAL\033[0m")
 	default:
 		enc.AppendString(l.String())
 	}
 }
 
-// encodeTimeColor 带颜色和简化格式的时间编码器
 func encodeTimeColor(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 	enc.AppendString(t.Format("15:04:05"))
 }
 
-// ShutdownLoggers 关闭所有Logger
-func ShutdownLoggers() error {
+func Shutdown() error {
 	if flushTicker != nil {
 		flushTicker.Stop()
 		close(flushDone)
@@ -540,14 +472,7 @@ func ShutdownLoggers() error {
 		flushDone = nil
 	}
 
-	loggers := []*zap.Logger{
-		GeneralLogger,
-		SystemLogger,
-		NetworkLogger,
-		ProxyLogger,
-		DebugLogger,
-	}
-
+	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger}
 	for _, logger := range loggers {
 		if logger != nil {
 			if err := logger.Sync(); err != nil {
@@ -560,18 +485,17 @@ func ShutdownLoggers() error {
 			}
 		}
 	}
-
 	return nil
 }
 
-func WriteRequestLogZap(reqID, content string) {
+func WriteRequestLog(reqID, content string) {
 	if requestLogger == nil {
 		return
 	}
 	requestLogger.Infow("请求日志", "reqID", reqID, "content", content)
 }
 
-func WriteErrorLogZap(reqID, content string) {
+func WriteErrorLog(reqID, content string) {
 	if errorLogger == nil {
 		return
 	}
@@ -597,6 +521,6 @@ func IsMetricsEnabled() bool {
 	return metricsEnabled
 }
 
-func GetLoggingConfig() *Logging {
+func GetLoggingConfig() *config.Logging {
 	return loggingCfg
 }

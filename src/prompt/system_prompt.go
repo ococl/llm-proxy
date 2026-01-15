@@ -1,4 +1,4 @@
-package main
+package prompt
 
 import (
 	"os"
@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"llm-proxy/logging"
 
 	"gopkg.in/yaml.v3"
 )
@@ -123,7 +125,7 @@ func parseSystemPrompt(data string) (*SystemPromptConfig, string) {
 		yamlPart := data[:idx]
 		content = strings.TrimSpace(data[idx+4:])
 		if err := yaml.Unmarshal([]byte(yamlPart), config); err != nil {
-			DebugSugar.Warnw("解析system prompt配置失败，使用默认配置", "error", err)
+			logging.DebugSugar.Warnw("解析system prompt配置失败，使用默认配置", "error", err)
 		}
 	}
 

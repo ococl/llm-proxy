@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"fmt"
@@ -53,44 +53,37 @@ type Detection struct {
 }
 
 type Logging struct {
-	Level         string `yaml:"level"`
-	ConsoleLevel  string `yaml:"console_level,omitempty"`
-	BaseDir       string `yaml:"base_dir,omitempty"`
-	RequestDir    string `yaml:"request_dir"`
-	ErrorDir      string `yaml:"error_dir"`
-	GeneralFile   string `yaml:"general_file"`
-	SeparateFiles bool   `yaml:"separate_files"`
-	MaskSensitive *bool  `yaml:"mask_sensitive,omitempty"`
-	EnableMetrics bool   `yaml:"enable_metrics"`
-	MaxFileSizeMB int    `yaml:"max_file_size_mb"`
-	MaxAgeDays    int    `yaml:"max_age_days,omitempty"`
-	MaxBackups    int    `yaml:"max_backups,omitempty"`
-	Compress      bool   `yaml:"compress,omitempty"`
-	Format        string `yaml:"format,omitempty"`
-	Colorize      *bool  `yaml:"colorize,omitempty"`
-	ConsoleStyle  string `yaml:"console_style,omitempty"`
-	ConsoleFormat string `yaml:"console_format,omitempty"`
-	DebugMode     bool   `yaml:"debug_mode,omitempty"`
-	Async         bool   `yaml:"async"`
-	BufferSize    int    `yaml:"buffer_size"`
-	FlushInterval int    `yaml:"flush_interval,omitempty"`
-	DropOnFull    bool   `yaml:"drop_on_full"`
-	// 日志轮转配置
-	RotateBySize bool   `yaml:"rotate_by_size,omitempty"`
-	RotateByTime bool   `yaml:"rotate_by_time,omitempty"`
-	TimeRotation string `yaml:"time_rotation,omitempty"`
-	// 详细脱敏配置
-	DetailedMasking *bool `yaml:"detailed_masking,omitempty"`
-	// 特殊处理配置
-	ProblematicBackends []string `yaml:"problematic_backends,omitempty"` // 针对特定供应商的特殊处理
+	Level               string   `yaml:"level"`
+	ConsoleLevel        string   `yaml:"console_level,omitempty"`
+	BaseDir             string   `yaml:"base_dir,omitempty"`
+	RequestDir          string   `yaml:"request_dir"`
+	ErrorDir            string   `yaml:"error_dir"`
+	GeneralFile         string   `yaml:"general_file"`
+	SeparateFiles       bool     `yaml:"separate_files"`
+	MaskSensitive       *bool    `yaml:"mask_sensitive,omitempty"`
+	EnableMetrics       bool     `yaml:"enable_metrics"`
+	MaxFileSizeMB       int      `yaml:"max_file_size_mb"`
+	MaxAgeDays          int      `yaml:"max_age_days,omitempty"`
+	MaxBackups          int      `yaml:"max_backups,omitempty"`
+	Compress            bool     `yaml:"compress,omitempty"`
+	Format              string   `yaml:"format,omitempty"`
+	Colorize            *bool    `yaml:"colorize,omitempty"`
+	ConsoleStyle        string   `yaml:"console_style,omitempty"`
+	ConsoleFormat       string   `yaml:"console_format,omitempty"`
+	DebugMode           bool     `yaml:"debug_mode,omitempty"`
+	Async               bool     `yaml:"async"`
+	BufferSize          int      `yaml:"buffer_size"`
+	FlushInterval       int      `yaml:"flush_interval,omitempty"`
+	DropOnFull          bool     `yaml:"drop_on_full"`
+	RotateBySize        bool     `yaml:"rotate_by_size,omitempty"`
+	RotateByTime        bool     `yaml:"rotate_by_time,omitempty"`
+	TimeRotation        string   `yaml:"time_rotation,omitempty"`
+	DetailedMasking     *bool    `yaml:"detailed_masking,omitempty"`
+	ProblematicBackends []string `yaml:"problematic_backends,omitempty"`
 }
 
 func (l *Logging) ShouldMaskSensitive() bool {
 	return l.MaskSensitive == nil || *l.MaskSensitive
-}
-
-func (l *Logging) ShouldAsync() bool {
-	return l.Async
 }
 
 func (l *Logging) GetBufferSize() int {
@@ -144,21 +137,6 @@ func (l *Logging) GetMaxBackups() int {
 		return 10
 	}
 	return l.MaxBackups
-}
-
-func (l *Logging) ShouldRotateBySize() bool {
-	return l.RotateBySize || l.MaxFileSizeMB > 0
-}
-
-func (l *Logging) ShouldRotateByTime() bool {
-	return l.RotateByTime || l.MaxAgeDays > 0
-}
-
-func (l *Logging) GetTimeRotation() string {
-	if l.TimeRotation == "" {
-		return "daily"
-	}
-	return l.TimeRotation
 }
 
 func (l *Logging) ShouldUseDetailedMasking() bool {
@@ -317,22 +295,29 @@ func (c *Config) GetListen() string {
 	return c.Listen
 }
 
-type ConfigManager struct {
+// LoggingConfigChangedFunc is a callback for logging config changes
+var LoggingConfigChangedFunc func(*Config) error
+
+type Manager struct {
 	config     *Config
 	configPath string
 	lastMod    time.Time
 	mu         sync.RWMutex
 }
 
-func NewConfigManager(path string) (*ConfigManager, error) {
-	cm := &ConfigManager{configPath: path}
+func (cm *Manager) SetConfigForTest(cfg *Config) {
+	cm.config = cfg
+}
+
+func NewManager(path string) (*Manager, error) {
+	cm := &Manager{configPath: path}
 	if err := cm.load(); err != nil {
 		return nil, err
 	}
 	return cm, nil
 }
 
-func (cm *ConfigManager) load() error {
+func (cm *Manager) load() error {
 	data, err := os.ReadFile(cm.configPath)
 	if err != nil {
 		return err
@@ -350,7 +335,7 @@ func (cm *ConfigManager) load() error {
 	return nil
 }
 
-func (cm *ConfigManager) Get() *Config {
+func (cm *Manager) Get() *Config {
 	cm.mu.RLock()
 	cfg := cm.config
 	cm.mu.RUnlock()
@@ -366,52 +351,40 @@ func (cm *ConfigManager) Get() *Config {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	if stat, err = os.Stat(cm.configPath); err != nil {
-		SystemSugar.Warnw("检查配置文件失败，继续使用旧配置", "error", err)
 		return cm.config
 	}
 	if stat.ModTime().Equal(cm.lastMod) {
 		return cm.config
 	}
-	if err := cm.tryReload(); err != nil {
-		SystemSugar.Warnw("配置重载失败，继续使用旧配置", "error", err)
-	}
+	cm.tryReload()
 	return cm.config
 }
 
-func (cm *ConfigManager) tryReload() error {
+func (cm *Manager) tryReload() {
 	data, err := os.ReadFile(cm.configPath)
 	if err != nil {
-		return err
+		return
 	}
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return err
+		return
 	}
 	stat, err := os.Stat(cm.configPath)
 	if err != nil {
-		return err
+		return
 	}
 
-	// 检测日志配置是否变化，需要重新初始化日志器
 	oldCfg := cm.config
 	loggingChanged := oldCfg == nil || loggingConfigChanged(&oldCfg.Logging, &cfg.Logging)
 
 	cm.config = &cfg
 	cm.lastMod = stat.ModTime()
 
-	if loggingChanged {
-		if err := reinitializeLoggers(&cfg); err != nil {
-			SystemSugar.Warnw("日志配置重载失败", "error", err)
-		} else {
-			SystemSugar.Info("日志配置已重载")
-		}
+	if loggingChanged && LoggingConfigChangedFunc != nil {
+		LoggingConfigChangedFunc(&cfg)
 	}
-
-	SystemSugar.Info("配置重载成功")
-	return nil
 }
 
-// loggingConfigChanged 检测日志配置是否发生变化
 func loggingConfigChanged(old, new *Logging) bool {
 	if old.Level != new.Level || old.ConsoleLevel != new.ConsoleLevel {
 		return true
@@ -443,15 +416,7 @@ func loggingConfigChanged(old, new *Logging) bool {
 	return false
 }
 
-// reinitializeLoggers 重新初始化日志器
-func reinitializeLoggers(cfg *Config) error {
-	// 先关闭旧的日志器
-	ShutdownLoggers()
-	// 重新初始化
-	return InitLoggers(cfg)
-}
-
-func (cm *ConfigManager) GetBackend(name string) *Backend {
+func (cm *Manager) GetBackend(name string) *Backend {
 	cfg := cm.Get()
 	for i := range cfg.Backends {
 		if cfg.Backends[i].Name == name {
@@ -461,7 +426,7 @@ func (cm *ConfigManager) GetBackend(name string) *Backend {
 	return nil
 }
 
-func ValidateConfig(cfg *Config) []error {
+func Validate(cfg *Config) []error {
 	var errors []error
 
 	if cfg.Listen == "" {
@@ -515,117 +480,5 @@ func ValidateConfig(cfg *Config) []error {
 		cfg.Fallback.MaxRetries = 3
 	}
 
-	if err := validateTimeouts(cfg); err != nil {
-		errors = append(errors, err)
-	}
-	if err := validateNumericRanges(cfg); err != nil {
-		errors = append(errors, err)
-	}
-	if err := validateURLSchemes(cfg); err != nil {
-		errors = append(errors, err)
-	}
-	if err := validateRateLimitConfig(cfg); err != nil {
-		errors = append(errors, err)
-	}
-	if err := validateConcurrencyConfig(cfg); err != nil {
-		errors = append(errors, err)
-	}
-
 	return errors
-}
-
-func validateTimeouts(cfg *Config) error {
-	if cfg.Timeout.ConnectTimeout < 1*time.Second {
-		return fmt.Errorf("connect_timeout 太短: %v (最小 1秒)", cfg.Timeout.ConnectTimeout)
-	}
-	if cfg.Timeout.ConnectTimeout > 5*time.Minute {
-		return fmt.Errorf("connect_timeout 太长: %v (最大 5分钟)", cfg.Timeout.ConnectTimeout)
-	}
-	if cfg.Timeout.ReadTimeout < 1*time.Second {
-		return fmt.Errorf("read_timeout 太短: %v (最小 1秒)", cfg.Timeout.ReadTimeout)
-	}
-	if cfg.Timeout.ReadTimeout > 10*time.Minute {
-		return fmt.Errorf("read_timeout 太长: %v (最大 10分钟)", cfg.Timeout.ReadTimeout)
-	}
-	if cfg.Timeout.TotalTimeout < 1*time.Second {
-		return fmt.Errorf("total_timeout 太短: %v (最小 1秒)", cfg.Timeout.TotalTimeout)
-	}
-	if cfg.Timeout.TotalTimeout > 30*time.Minute {
-		return fmt.Errorf("total_timeout 太长: %v (最大 30分钟)", cfg.Timeout.TotalTimeout)
-	}
-	return nil
-}
-
-func validateNumericRanges(cfg *Config) error {
-	if cfg.RateLimit.Enabled {
-		if cfg.RateLimit.GlobalRPS > 10000 {
-			return fmt.Errorf("global_rps 过大: %v (最大 10000)", cfg.RateLimit.GlobalRPS)
-		}
-		if cfg.RateLimit.GlobalRPS < 1 {
-			return fmt.Errorf("global_rps 过小: %v (最小 1)", cfg.RateLimit.GlobalRPS)
-		}
-		if cfg.RateLimit.PerIPRPS > 1000 {
-			return fmt.Errorf("per_ip_rps 过大: %v (最大 1000)", cfg.RateLimit.PerIPRPS)
-		}
-		if cfg.RateLimit.BurstFactor < 1 || cfg.RateLimit.BurstFactor > 3 {
-			return fmt.Errorf("burst_factor 范围无效: %v (应在 1-3 之间)", cfg.RateLimit.BurstFactor)
-		}
-	}
-	if cfg.Concurrency.Enabled {
-		if cfg.Concurrency.MaxRequests > 10000 {
-			return fmt.Errorf("max_requests 过大: %v (最大 10000)", cfg.Concurrency.MaxRequests)
-		}
-		if cfg.Concurrency.MaxRequests < 1 {
-			return fmt.Errorf("max_requests 过小: %v (最小 1)", cfg.Concurrency.MaxRequests)
-		}
-		if cfg.Concurrency.MaxQueueSize > 100000 {
-			return fmt.Errorf("max_queue_size 过大: %v (最大 100000)", cfg.Concurrency.MaxQueueSize)
-		}
-		if cfg.Concurrency.QueueTimeout < 1*time.Second || cfg.Concurrency.QueueTimeout > 5*time.Minute {
-			return fmt.Errorf("queue_timeout 范围无效: %v (应在 1秒-5分钟之间)", cfg.Concurrency.QueueTimeout)
-		}
-	}
-	return nil
-}
-
-func validateURLSchemes(cfg *Config) error {
-	allowedSchemes := map[string]bool{"http": true, "https": true}
-	for _, backend := range cfg.Backends {
-		u, err := url.Parse(backend.URL)
-		if err != nil {
-			return fmt.Errorf("后端 %s URL 解析失败: %v", backend.Name, err)
-		}
-		if !allowedSchemes[u.Scheme] {
-			return fmt.Errorf("后端 %s URL scheme 不允许: %s (仅允许 http/https)", backend.Name, u.Scheme)
-		}
-	}
-	return nil
-}
-
-func validateRateLimitConfig(cfg *Config) error {
-	if !cfg.RateLimit.Enabled {
-		return nil
-	}
-	for model, rps := range cfg.RateLimit.PerModelRPS {
-		if rps > 5000 {
-			return fmt.Errorf("模型 %s 的 per_model_rps 过大: %v (最大 5000)", model, rps)
-		}
-		if rps < 0.1 {
-			return fmt.Errorf("模型 %s 的 per_model_rps 过小: %v (最小 0.1)", model, rps)
-		}
-	}
-	return nil
-}
-
-func validateConcurrencyConfig(cfg *Config) error {
-	if !cfg.Concurrency.Enabled {
-		return nil
-	}
-	if cfg.Concurrency.PerBackendLimit < 1 {
-		return fmt.Errorf("per_backend_limit 过小: %v (最小 1)", cfg.Concurrency.PerBackendLimit)
-	}
-	if cfg.Concurrency.PerBackendLimit > 1000 {
-		return fmt.Errorf("per_backend_limit 过大: %v (最大 1000)", cfg.Concurrency.PerBackendLimit)
-	}
-	return nil
 }
