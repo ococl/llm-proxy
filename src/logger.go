@@ -125,10 +125,20 @@ var levelPriority = map[string]int{
 }
 
 var sensitivePatterns = []*regexp.Regexp{
+	// API Keys
 	regexp.MustCompile(`(?i)(sk-[a-zA-Z0-9]{20,})`),
+	regexp.MustCompile(`(?i)(pk-[a-zA-Z0-9]{20,})`),
+	// Authorization headers
 	regexp.MustCompile(`(?i)(bearer\s+)([a-zA-Z0-9\-_]{20,})`),
+	// Generic API keys
 	regexp.MustCompile(`(?i)(api[_-]?key["\s:=]+)([a-zA-Z0-9\-_]{16,})`),
 	regexp.MustCompile(`(?i)(authorization["\s:=]+)([a-zA-Z0-9\-_]{16,})`),
+	// Passwords in URLs or configs
+	regexp.MustCompile(`(?i)(password["\s:=]+)([a-zA-Z0-9\-_!@#$%^&*()]{8,})`),
+	// Tokens
+	regexp.MustCompile(`(?i)(token["\s:=]+)([a-zA-Z0-9\-_]{16,})`),
+	// Secret keys
+	regexp.MustCompile(`(?i)(secret["\s:=]+)([a-zA-Z0-9\-_]{16,})`),
 }
 
 func InitLogger(cfg *Config) error {
@@ -153,6 +163,12 @@ func InitLogger(cfg *Config) error {
 		asyncLogger = NewAsyncLogger(cfg.Logging.GetBufferSize())
 		asyncLogger.Start()
 	}
+
+	// 设置日志轮转配置
+	if cfg.Logging.ShouldRotateBySize() {
+		maxFileSizeMB = cfg.Logging.GetMaxFileSizeMB()
+	}
+
 	configMu.Unlock()
 
 	if separateFiles {
@@ -179,16 +195,45 @@ func ShutdownLogger() {
 }
 
 func rotateLogIfNeeded(basePath string) error {
-	today := time.Now().Format("2006-01-02")
+	configMu.RLock()
+	currentLoggingConfig := loggingConfig
+	configMu.RUnlock()
+
+	// 如果没有配置或未启用分离文件模式，则不执行轮换
+	if currentLoggingConfig == nil || !separateFiles {
+		return nil
+	}
+
+	// 根据配置决定轮转策略
+	shouldRotate := false
+
+	// 检查时间轮转
+	if currentLoggingConfig.ShouldRotateByTime() {
+		today := time.Now().Format("2006-01-02")
+		if currentLogDate != today {
+			shouldRotate = true
+		}
+	}
+
+	// 检查大小轮转
+	if currentLoggingConfig.ShouldRotateBySize() && currentLogSize >= int64(currentLoggingConfig.GetMaxFileSizeMB())*1024*1024 {
+		shouldRotate = true
+	}
+
+	if !shouldRotate {
+		return nil
+	}
 
 	if generalLogger != nil {
-		if currentLogDate == today && currentLogSize < int64(maxFileSizeMB)*1024*1024 {
-			return nil
-		}
 		generalLogger.Close()
 	}
 
-	logPath := getRotatedLogPath(basePath, today)
+	logPath := basePath
+	if currentLoggingConfig.ShouldRotateByTime() {
+		// 如果启用时间轮转，添加日期后缀
+		logPath = getRotatedLogPath(basePath, time.Now().Format("2006-01-02"))
+	}
+
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -196,7 +241,7 @@ func rotateLogIfNeeded(basePath string) error {
 
 	stat, _ := f.Stat()
 	currentLogSize = stat.Size()
-	currentLogDate = today
+	currentLogDate = time.Now().Format("2006-01-02")
 	generalLogger = f
 	return nil
 }
@@ -211,8 +256,22 @@ func MaskSensitiveData(s string) string {
 	if !maskSensitive {
 		return s
 	}
+
 	result := s
-	for _, pattern := range sensitivePatterns {
+
+	// 获取当前配置以确定是否使用详细脱敏
+	configMu.RLock()
+	currentLoggingConfig := loggingConfig
+	configMu.RUnlock()
+
+	// 根据配置决定使用哪些模式
+	patterns := sensitivePatterns
+	if currentLoggingConfig != nil && currentLoggingConfig.ShouldUseDetailedMasking() {
+		// 如果启用详细脱敏，合并使用扩展的模式
+		patterns = append(sensitivePatterns, getExtendedSensitivePatterns()...)
+	}
+
+	for _, pattern := range patterns {
 		result = pattern.ReplaceAllStringFunc(result, func(match string) string {
 			if len(match) > 8 {
 				return match[:4] + "****" + match[len(match)-4:]
@@ -221,6 +280,20 @@ func MaskSensitiveData(s string) string {
 		})
 	}
 	return result
+}
+
+// getExtendedSensitivePatterns 返回扩展的敏感信息模式
+func getExtendedSensitivePatterns() []*regexp.Regexp {
+	return []*regexp.Regexp{
+		// Email addresses
+		regexp.MustCompile(`(?i)([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})`),
+		// Credit card numbers
+		regexp.MustCompile(`\b(?:\d{4}[-\s]?){3}\d{4}\b`),
+		// IP addresses
+		regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`),
+		// Phone numbers
+		regexp.MustCompile(`\b(\+?\d[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b`),
+	}
 }
 
 func logMessage(level string, target LogTarget, message string) {
@@ -306,7 +379,16 @@ func LogConsole(level, format string, args ...interface{}) {
 var simpleColorEnabled = true
 
 func shouldUseColorLogger() bool {
-	return simpleColorEnabled && (loggingConfig == nil || loggingConfig.Colorize == nil || *loggingConfig.Colorize)
+	if loggingConfig == nil {
+		return simpleColorEnabled
+	}
+
+	if loggingConfig.Colorize != nil {
+		return *loggingConfig.Colorize
+	}
+
+	// 默认启用颜色
+	return true
 }
 
 func colorLevelSimple(level string) string {

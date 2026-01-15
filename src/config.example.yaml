@@ -66,6 +66,7 @@ logging:
   # 控制台着色
   colorize: true                     # 启用控制台着色
   console_style: "compact"           # 输出风格: compact/verbose
+  console_format: "markdown"         # 控制台输出格式: markdown/plain
   
   # 调试模式（开发时true，发行时false）
   debug_mode: true                   # true时输出llm_debug日志
@@ -74,9 +75,16 @@ logging:
   async: true                        # 异步写入
   buffer_size: 10000                 # 缓冲区大小
   flush_interval: 5                  # 5秒自动刷新
+  drop_on_full: false                # 缓冲区满时丢弃日志
+  
+  # 日志轮转配置
+  rotate_by_size: true               # 按大小轮转
+  rotate_by_time: false              # 按时间轮转
+  time_rotation: "daily"             # 时间轮转策略: daily/hourly
   
   # 敏感信息
   mask_sensitive: true               # 脱敏API Key、Token
+  detailed_masking: false            # 详细脱敏（包括邮箱、IP等）
 
   # 独立请求/错误日志目录（兼容旧配置）
   request_dir: "./logs/requests"

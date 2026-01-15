@@ -69,11 +69,18 @@ type Logging struct {
 	Format        string `yaml:"format,omitempty"`
 	Colorize      *bool  `yaml:"colorize,omitempty"`
 	ConsoleStyle  string `yaml:"console_style,omitempty"`
+	ConsoleFormat string `yaml:"console_format,omitempty"`
 	DebugMode     bool   `yaml:"debug_mode,omitempty"`
 	Async         bool   `yaml:"async"`
 	BufferSize    int    `yaml:"buffer_size"`
 	FlushInterval int    `yaml:"flush_interval,omitempty"`
 	DropOnFull    bool   `yaml:"drop_on_full"`
+	// 日志轮转配置
+	RotateBySize bool   `yaml:"rotate_by_size,omitempty"`
+	RotateByTime bool   `yaml:"rotate_by_time,omitempty"`
+	TimeRotation string `yaml:"time_rotation,omitempty"`
+	// 详细脱敏配置
+	DetailedMasking *bool `yaml:"detailed_masking,omitempty"`
 }
 
 func (l *Logging) ShouldMaskSensitive() bool {
@@ -91,15 +98,15 @@ func (l *Logging) GetBufferSize() int {
 	return l.BufferSize
 }
 
-func (l *Logging) ShouldDropOnFull() bool {
-	return l.DropOnFull
+func (l *Logging) GetConsoleFormat() string {
+	if l.ConsoleFormat == "" {
+		return "markdown"
+	}
+	return l.ConsoleFormat
 }
 
-func (l *Logging) GetBaseDir() string {
-	if l.BaseDir == "" {
-		return "./logs"
-	}
-	return l.BaseDir
+func (l *Logging) ShouldDropOnFull() bool {
+	return l.DropOnFull
 }
 
 func (l *Logging) GetMaxFileSizeMB() int {
@@ -118,23 +125,35 @@ func (l *Logging) GetMaxAgeDays() int {
 
 func (l *Logging) GetMaxBackups() int {
 	if l.MaxBackups <= 0 {
-		return 21
+		return 10
 	}
 	return l.MaxBackups
 }
 
-func (l *Logging) GetFormat() string {
-	if l.Format == "" {
-		return "json"
-	}
-	return l.Format
+func (l *Logging) ShouldRotateBySize() bool {
+	return l.RotateBySize || l.MaxFileSizeMB > 0
 }
 
-func (l *Logging) GetConsoleStyle() string {
-	if l.ConsoleStyle == "" {
-		return "compact"
+func (l *Logging) ShouldRotateByTime() bool {
+	return l.RotateByTime || l.MaxAgeDays > 0
+}
+
+func (l *Logging) GetTimeRotation() string {
+	if l.TimeRotation == "" {
+		return "daily"
 	}
-	return l.ConsoleStyle
+	return l.TimeRotation
+}
+
+func (l *Logging) ShouldUseDetailedMasking() bool {
+	return l.DetailedMasking != nil && *l.DetailedMasking
+}
+
+func (l *Logging) GetBaseDir() string {
+	if l.BaseDir == "" {
+		return "./logs"
+	}
+	return l.BaseDir
 }
 
 func (l *Logging) GetLevel() string {
@@ -153,6 +172,13 @@ func (l *Logging) GetConsoleLevel() string {
 
 func (l *Logging) GetColorize() bool {
 	return l.Colorize == nil || *l.Colorize
+}
+
+func (l *Logging) GetConsoleStyle() string {
+	if l.ConsoleStyle == "" {
+		return "compact"
+	}
+	return l.ConsoleStyle
 }
 
 type Config struct {

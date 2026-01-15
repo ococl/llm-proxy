@@ -52,10 +52,20 @@ var LevelPriority = map[string]int{
 
 // SensitivePatterns 敏感信息正则模式
 var SensitivePatterns = []*regexp.Regexp{
+	// API Keys
 	regexp.MustCompile(`(?i)(sk-[a-zA-Z0-9]{20,})`),
+	regexp.MustCompile(`(?i)(pk-[a-zA-Z0-9]{20,})`),
+	// Authorization headers
 	regexp.MustCompile(`(?i)(bearer\s+)([a-zA-Z0-9\-_]{20,})`),
+	// Generic API keys
 	regexp.MustCompile(`(?i)(api[_-]?key["\s:=]+)([a-zA-Z0-9\-_]{16,})`),
 	regexp.MustCompile(`(?i)(authorization["\s:=]+)([a-zA-Z0-9\-_]{16,})`),
+	// Passwords in URLs or configs
+	regexp.MustCompile(`(?i)(password["\s:=]+)([a-zA-Z0-9\-_!@#$%^&*()]{8,})`),
+	// Tokens
+	regexp.MustCompile(`(?i)(token["\s:=]+)([a-zA-Z0-9\-_]{16,})`),
+	// Secret keys
+	regexp.MustCompile(`(?i)(secret["\s:=]+)([a-zA-Z0-9\-_]{16,})`),
 }
 
 // SensitiveDataMasker 敏感信息脱敏处理器
