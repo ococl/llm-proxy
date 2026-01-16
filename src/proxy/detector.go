@@ -19,7 +19,13 @@ func NewDetector(cfg *config.Manager) *Detector {
 func (d *Detector) ShouldFallback(statusCode int, body string) bool {
 	cfg := d.configMgr.Get()
 
-	for _, pattern := range cfg.Detection.ErrorCodes {
+	errorCodes := cfg.Detection.ErrorCodes
+	// Use default error codes if not configured
+	if len(errorCodes) == 0 {
+		errorCodes = []string{"4xx", "5xx"}
+	}
+
+	for _, pattern := range errorCodes {
 		if d.matchStatusCode(statusCode, pattern) {
 			logging.ProxySugar.Debugw("检测到错误状态码", "statusCode", statusCode, "pattern", pattern)
 			return true
