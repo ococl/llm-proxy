@@ -1,372 +1,431 @@
-# LLM Proxy
+# LLM-Proxy - 企业级 LLM API 代理服务
 
-轻量级 LLM API 代理服务器，支持多提供商负载均衡、多级自动回退和异常检测。
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/go-1.25.5-blue.svg)](https://golang.org/dl/)
 
-[![CI/CD](https://github.com/ococl/llm-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/ococl/llm-proxy/actions/workflows/ci.yml)
+**LLM-Proxy** 是一个高性能、可扩展的大语言模型 API 代理服务,为企业提供统一的 LLM 访问入口,支持负载均衡、自动故障转移、限流控制、并发管理等生产级特性。
 
-## 功能特性
+---
 
-- **统一 API Key**：用户只需配置一个端点和密钥，代理自动处理后端认证
-- **多对多模型别名**：统一不同提供商的模型命名（如 `anthropic/claude-opus-4-5`）
-- **多级回退策略**：
-  - L1：别名内后端优先级回退
-  - L2：别名间跨模型回退
-- **负载均衡**：同优先级后端自动随机分配
-- **灵活启用控制**：后端、别名、路由三级 `enabled` 开关
-- **冷却机制**：失败后端自动冷却，可配置时长
-- **错误码通配符**：支持 `4xx`、`5xx` 等通配符匹配
-- **完全透传**：Headers、Body 完全透传，支持 SSE 流式响应
-- **配置热加载**：修改配置后下次请求自动生效
-- **滚动日志**：按日期自动分割，支持敏感信息脱敏
-- **性能指标**：可选记录请求耗时、后端耗时等指标
-- **多平台支持**：Windows、Linux、macOS (amd64/arm64)
+## ✨ 核心特性
 
-## 快速开始
+### 🚀 高可用架构
+- **多后端负载均衡**: 支持多个 LLM 服务商并发调用,智能分发请求
+- **自动故障转移**: 双层回退机制 (L1/L2),检测失败自动切换备用后端
+- **冷却机制**: 失败后端自动进入冷却期,避免雪崩效应
+- **健康检查**: 实时监控后端状态,动态调整路由策略
 
-### 下载
+### 🎯 流量控制
+- **多级限流**: 全局/IP/模型三层限流,基于 Token Bucket 算法
+- **并发控制**: 请求队列管理,支持队列超时和溢出策略
+- **优先级路由**: 基于优先级的后端选择,同级随机负载均衡
 
-从 [Releases](https://github.com/ococl/llm-proxy/releases) 下载对应平台的二进制文件。
+### 🔧 灵活配置
+- **热重载配置**: 修改配置文件自动生效,无需重启服务
+- **模型别名**: 统一模型命名,屏蔽底层供应商差异
+- **系统提示词注入**: 自动注入系统级提示词,实现统一的行为控制
+- **错误检测规则**: 可自定义 HTTP 状态码和响应体模式触发回退
 
-### 运行
+### 📊 可观测性
+- **结构化日志**: 基于 Zap 的高性能日志,支持多种输出格式
+- **请求追踪**: 全链路 Trace ID,快速定位问题
+- **敏感信息脱敏**: 自动脱敏 API Key、Token 等敏感字段
+- **性能指标**: 请求时长、重试次数、后端状态等关键指标
 
+---
+
+## 📦 快速开始
+
+### 环境要求
+- Go 1.25.5 或更高版本
+- 支持平台: Windows, Linux, macOS (AMD64/ARM64)
+
+### 安装
+
+#### 从源码构建
 ```bash
-# 1. 解压并进入目录
-unzip llm-proxy-linux-amd64.zip
+# 克隆项目
+git clone https://github.com/ococl/llm-proxy.git
 cd llm-proxy
 
-# 2. 复制并编辑配置
-cp config.example.yaml config.yaml
-vim config.yaml
+# 快速构建 (当前平台)
+make dev
 
-# 3. 启动代理
-./llm-proxy-linux-amd64 -config config.yaml
-```
-
-### 客户端使用
-
-```bash
-# 使用统一 API Key 请求
-curl http://localhost:8080/v1/chat/completions \
-  -H "Authorization: Bearer sk-your-unified-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "anthropic/claude-opus-4-5",
-    "messages": [{"role": "user", "content": "Hello"}],
-    "stream": true
-  }'
-
-# 查看可用模型
-curl http://localhost:8080/v1/models
-
-# 健康检查
-curl http://localhost:8080/health
-```
-
-## 配置说明
-
-```yaml
-listen: ":8080"
-
-proxy_api_key: "sk-your-unified-api-key"
-
-proxy:
-  enable_system_prompt: false
-  forward_client_ip: true
-
-backends:
-  - name: "provider-a"
-    url: "https://api.provider-a.com/v1"
-    api_key: "sk-real-api-key-a"        # 实际后端密钥
-    enabled: true                        # 可选，默认 true
-
-  - name: "provider-b"
-    url: "https://api.provider-b.com/v1"
-    api_key: "sk-real-api-key-b"
-    enabled: false                       # 临时停用
-
-# 模型别名（多对多映射）
-models:
-  "anthropic/claude-opus-4-5":
-    enabled: true                        # 别名级开关，默认 true
-    routes:
-      - backend: "provider-a"
-        model: "claude-opus-4-5"         # 后端实际模型名
-        priority: 1                      # 优先级（数字越小越优先）
-        enabled: true                    # 路由级开关，默认 true
-      - backend: "provider-b"
-        model: "claude-opus-4-5"
-        priority: 2
-
-  "anthropic/claude-sonnet-4-5":
-    routes:
-      - backend: "provider-a"
-        model: "claude-sonnet-4-5"
-        priority: 1
-
-# 回退配置
-fallback:
-  cooldown_seconds: 300                  # 冷却时间（秒）
-  max_retries: 3                         # 单次请求最大尝试次数（0=不限制）
-  
-  # L2 别名间回退（当主别名所有后端不可用时）
-  alias_fallback:
-    "anthropic/claude-opus-4-5":
-      - "anthropic/claude-sonnet-4-5"    # 回退到 sonnet
-      - "google/gemini-3-pro-preview"    # 再回退到 gemini
-    "anthropic/claude-sonnet-4-5":
-      - "google/gemini-3-pro-preview"
-
-# 异常检测
-detection:
-  error_codes: ["4xx", "5xx"]            # 支持通配符
-  error_patterns:
-    - "insufficient_quota"
-    - "rate_limit"
-    - "exceeded"
-    - "billing"
-    - "quota"
-
-# 日志配置
-logging:
-  # 日志级别
-  level: "info"                      # 文件日志级别: debug/info/warn/error
-  console_level: "info"              # 控制台日志级别（默认继承level）
-  
-  # 输出目录（相对于应用同目录）
-  base_dir: "./logs"                 # 日志根目录
-  
-  # 轮转策略
-  max_file_size_mb: 100              # 单个文件最大100MB
-  max_age_days: 7                    # 日志保留7天后删除
-  max_backups: 21                    # 最多保留21个备份
-  compress: true                     # 压缩旧日志为.gz
-  
-  # 输出格式
-  format: "json"                     # json格式（机器可读）
-  
-  # 控制台着色
-  colorize: true                     # 启用控制台着色
-  console_style: "compact"           # 输出风格: compact/verbose
-  
-  # 调试模式（开发时true，发行时false）
-  debug_mode: true                   # true时输出llm_debug日志
-  
-  # 异步日志
-  async: true                        # 异步写入
-  buffer_size: 10000                 # 缓冲区大小
-  flush_interval: 5                  # 5秒自动刷新
-  
-  # 敏感信息
-  mask_sensitive: true               # 脱敏API Key、Token
-
-  # 兼容旧配置
-  general_file: "./logs/general.log" # 通用日志文件路径（兼容）
-  separate_files: false              # 是否为每个请求创建独立文件（兼容）
-  request_dir: "./logs/requests"     # 独立请求日志目录（兼容）
-  error_dir: "./logs/errors"         # 独立错误日志目录（兼容）
-  enable_metrics: false              # 性能指标记录（兼容）
-```
-
-## 回退策略
-
-### L1：别名内回退
-
-```
-请求 anthropic/claude-opus-4-5
-  → provider-a (priority 1) → 失败 → 冷却
-  → provider-b (priority 2) → 失败 → 冷却
-  → 触发 L2 回退
-```
-
-### L2：别名间回退
-
-```
-anthropic/claude-opus-4-5 所有后端不可用
-  → 回退到 anthropic/claude-sonnet-4-5
-    → provider-a → 成功！
-```
-
-### 负载均衡
-
-同优先级的多个后端会随机选择，实现负载均衡：
-
-```yaml
-routes:
-  - backend: "provider-a"
-    model: "model-x"
-    priority: 1              # 同优先级
-  - backend: "provider-b"
-    model: "model-x"
-    priority: 1              # 随机选择 a 或 b
-  - backend: "provider-c"
-    model: "model-x"
-    priority: 2              # 仅当 priority 1 都不可用时使用
-```
-
-## 日志
-
-LLM Proxy 现在使用高性能的 zap 日志框架，支持多目录结构化日志和智能脱敏。
-
-### 日志目录结构
-
-```
-logs/
-├── general.log               # 通用日志（启动、关闭、性能指标）
-├── system/                   # 系统和配置类日志
-│   ├── system.log            # 配置加载、验证、panic
-│   ├── startup.log           # 启动日志
-│   └── shutdown.log          # 关闭日志
-├── network/                  # 网络和HTTP异常日志
-│   ├── network.log           # 连接错误、超时等
-│   ├── http_errors.log       # HTTP 4xx/5xx错误
-│   └── api_validation.log    # API Key验证失败
-├── proxy/                    # 代理业务逻辑日志
-│   ├── requests.log          # 请求开始/完成
-│   ├── routing.log           # 路由解析、回退
-│   ├── backend.log           # 后端请求、响应
-│   └── fallback.log          # 回退策略执行
-├── llm_debug/                # 大模型调试日志（debug_mode控制）
-│   ├── system_prompt.log     # system_prompt注入调试
-│   ├── request_body.log      # 请求体详情（调试阶段）
-│   └── response_body.log     # 响应体详情（调试阶段）
-└── archive/                  # 轮转清理的旧日志（7天自动清理）
-```
-
-### 日志级别
-
-| 级别 | 内容 | 使用场景 |
-|------|------|----------|
-| ERROR | 严重错误（所有后端失败、配置加载失败） | SystemLogger, NetworkLogger |
-| WARN | 潜在问题（API Key 验证失败、后端返回错误） | NetworkLogger, SystemLogger |
-| INFO | 关键业务事件（请求开始/完成、后端切换） | GeneralLogger, ProxyLogger |
-| DEBUG | 调试信息（路由解析、跳过原因） | DebugLogger, ProxyLogger |
-
-### 新特性
-
-- **多目录日志**: 不同类型的日志分贝存储，便于查找和分析
-- **JSON格式文件**: 机器可读，便于日志分析工具处理
-- **按日期+大小自动轮转**: 避免单个日志文件过大
-- **7天自动清理**: 自动删除过期日志文件
-- **控制台Markdown着色**: 支持彩色输出，可通过 `-no-color` 禁用
-- **敏感信息脱敏**: API Key、Token等自动脱敏
-- **调试模式开关**: 通过 `debug_mode` 控制详细调试日志
-
-### 命令行选项
-
-```bash
-# 禁用控制台颜色输出
-./llm-proxy -no-color -config config.yaml
-
-# 或使用长选项
-./llm-proxy --disable-color -config config.yaml
-```
-
-### 日志示例
-
-**控制台输出（带颜色）:**
-```
-15:41:00  INFO  LLM Proxy 启动，监听地址: :8080
-15:41:00  INFO  已加载 4 个后端，13 个模型别名
-15:41:05  INFO  [req_abc123] 收到请求: 模型=anthropic/claude-opus-4-5 客户端=127.0.0.1
-15:41:06  INFO  [req_abc123] 请求成功: 后端=provider-a 状态=200 耗时=1234ms
-```
-
-**JSON文件格式:**
-```json
-{
-  "timestamp": "2026-01-14T16:41:00.123+0800",
-  "level": "info",
-  "logger": "general",
-  "msg": "LLM Proxy 启动，监听地址: :8080",
-  "caller": "main.go:79"
-}
-```
-
-### 敏感信息脱敏
-
-启用 `mask_sensitive: true` 后，敏感信息会自动脱敏：
-
-- API Key: `sk-abc1234567890defghijkl` → `sk-a****ijkl`
-- Bearer Token: `Bearer sk-test1234567890` → `Bearer sk-t****7890`
-- Authorization Header: `Authorization: Bearer sk-key1234567890` → `Authorization: Bearer sk-k****7890`
-
-### 调试模式
-
-设置 `debug_mode: true` 可以启用详细的调试信息，包括：
-- system_prompt 注入详情
-- 请求体完整内容
-- 响应体完整内容
-- 详细的路由解析过程
-
-**注意**: 调试模式仅建议在开发时使用，生产环境应关闭以避免敏感信息泄露。
-
-## 构建
-
-### 本地构建
-
-```bash
-# 单平台
-cd src
-go build -o ../dist/llm-proxy .
-
-# 多平台（Windows）
-build.bat all
-
-# 多平台（Linux/macOS）
+# 或构建所有平台版本
 make build-all
 ```
 
-### 构建产物
+#### 使用预编译二进制
+从 [Releases](https://github.com/ococl/llm-proxy/releases) 下载对应平台的二进制文件。
 
-| 平台 | 文件 |
-|------|------|
-| Windows amd64 | `llm-proxy-windows-amd64.exe` |
-| Windows arm64 | `llm-proxy-windows-arm64.exe` |
-| Linux amd64 | `llm-proxy-linux-amd64` |
-| Linux arm64 | `llm-proxy-linux-arm64` |
-| macOS amd64 | `llm-proxy-darwin-amd64` |
-| macOS arm64 | `llm-proxy-darwin-arm64` |
+---
 
-## 测试
+## 🔧 配置说明
+
+### 基础配置
+
+创建 `config.yaml`:
+
+```yaml
+# 监听地址
+listen: ":8765"
+
+# 代理全局 API Key (可选,用于访问控制)
+proxy_api_key: "your-secret-key"
+
+# 代理配置
+proxy:
+  enable_system_prompt: true   # 启用系统提示词注入
+  forward_client_ip: true      # 转发客户端真实 IP
+
+# 后端服务商配置
+backends:
+  - name: openai
+    url: https://api.openai.com/v1
+    api_key: sk-xxx
+    enabled: true
+    
+  - name: anthropic
+    url: https://api.anthropic.com/v1
+    api_key: sk-ant-xxx
+    enabled: true
+    
+  - name: local-llm
+    url: http://localhost:8080/v1
+    enabled: true
+
+# 模型别名映射
+models:
+  gpt-4:
+    routes:
+      - backend: openai
+        model: gpt-4-turbo-preview
+        priority: 1
+      - backend: local-llm      # 备用后端
+        model: mixtral-8x7b
+        priority: 2
+        
+  claude:
+    routes:
+      - backend: anthropic
+        model: claude-3-opus-20240229
+        priority: 1
+
+# 故障转移配置
+fallback:
+  cooldown_seconds: 300   # 后端冷却时长 (秒)
+  max_retries: 3          # 最大重试次数
+  
+  # L2 跨模型回退 (当所有 gpt-4 后端失败时,自动尝试 claude)
+  alias_fallback:
+    gpt-4: [claude]
+
+# 错误检测规则
+detection:
+  error_codes: [4xx, 5xx]  # 触发回退的 HTTP 状态码 (支持通配符)
+  error_patterns:           # 触发回退的响应体关键词
+    - insufficient_quota
+    - rate_limit
+    - overloaded
+
+# 限流配置
+rate_limit:
+  enabled: true
+  global_rps: 1000      # 全局每秒请求数
+  per_ip_rps: 100       # 每 IP 每秒请求数
+  burst_factor: 1.5     # 突发流量倍数
+  per_model_rps:        # 每模型限流
+    gpt-4: 50
+
+# 并发控制
+concurrency:
+  enabled: true
+  max_requests: 500         # 最大并发请求数
+  max_queue_size: 1000      # 最大队列长度
+  queue_timeout: 30s        # 队列超时时间
+  per_backend_limit: 100    # 每后端并发限制
+
+# 日志配置
+logging:
+  level: info                 # 日志级别: debug, info, warn, error
+  console_level: info         # 控制台日志级别
+  base_dir: ./logs            # 日志目录
+  separate_files: true        # 请求/错误日志分离
+  mask_sensitive: true        # 脱敏敏感信息
+  max_file_size_mb: 100       # 单文件大小限制
+  max_age_days: 7             # 日志保留天数
+  format: json                # 日志格式: json, text
+  console_format: markdown    # 控制台格式: json, markdown
+```
+
+### 启动服务
 
 ```bash
-cd src
-go test -v ./...
+# 使用默认配置 (config.yaml)
+./llm-proxy
+
+# 指定配置文件
+./llm-proxy -config /path/to/config.yaml
 ```
 
-## 目录结构
+---
 
-```
-llm-proxy/
-├── .github/workflows/      # CI/CD 配置
-│   └── ci.yml
-├── src/                    # 源代码
-│   ├── main.go
-│   ├── config.go
-│   ├── proxy.go
-│   ├── router.go
-│   ├── backend.go
-│   ├── detector.go
-│   ├── logger.go
-│   ├── *_test.go           # 单元测试
-│   └── config.example.yaml
-├── dist/                   # 构建产物
-├── docs/                   # 设计文档
-├── build.bat               # Windows 构建脚本
-├── Makefile                # Linux/macOS 构建脚本
-└── README.md
+## 🔌 API 使用
+
+### 调用示例
+
+```bash
+# 使用 OpenAI SDK
+export OPENAI_API_KEY="your-secret-key"  # 对应 config.yaml 中的 proxy_api_key
+export OPENAI_BASE_URL="http://localhost:8765/v1"
+
+python your_script.py
 ```
 
-## API 端点
+```python
+# Python 示例
+from openai import OpenAI
 
-| 端点 | 方法 | 说明 |
+client = OpenAI(
+    api_key="your-secret-key",
+    base_url="http://localhost:8765/v1"
+)
+
+response = client.chat.completions.create(
+    model="gpt-4",  # 使用代理中配置的模型别名
+    messages=[
+        {"role": "user", "content": "你好!"}
+    ]
+)
+
+print(response.choices[0].message.content)
+```
+
+### 请求头说明
+
+| 请求头 | 说明 | 必填 |
+|--------|------|------|
+| `Authorization` | `Bearer your-secret-key` | 是 |
+| `X-Forwarded-For` | 客户端真实 IP (自动转发) | 否 |
+| `X-Trace-ID` | 请求追踪 ID (自动生成) | 否 |
+
+---
+
+## 🏗️ 架构设计
+
+### 请求处理流程
+
+```
+客户端请求
+    ↓
+[API Key 验证]
+    ↓
+[中间件链]
+    ├── RecoveryMiddleware (Panic 恢复)
+    ├── RateLimiter (限流控制)
+    └── ConcurrencyLimiter (并发控制)
+    ↓
+[代理层 Proxy]
+    ├── 请求体解析
+    ├── 系统提示词注入
+    └── 模型路由解析
+    ↓
+[路由层 Router]
+    ├── 模型别名 → 后端映射
+    ├── 优先级排序
+    └── 冷却状态过滤
+    ↓
+[重试循环 (L1 回退)]
+    ├── 后端 1 (优先级 1)
+    ├── 后端 2 (优先级 1, 随机负载均衡)
+    └── 后端 3 (优先级 2)
+    ↓
+[错误检测 Detector]
+    ├── HTTP 状态码检查
+    └── 响应体模式匹配
+    ↓
+[故障转移]
+    ├── 触发冷却 (CooldownManager)
+    └── L2 跨模型回退
+    ↓
+[响应处理]
+    ├── 流式输出 (SSE)
+    └── 非流式输出
+    ↓
+返回客户端
+```
+
+### 模块说明
+
+| 模块 | 路径 | 职责 |
 |------|------|------|
-| `/v1/chat/completions` | POST | 聊天补全（透传到后端） |
-| `/v1/models` | GET | 获取可用模型列表 |
-| `/models` | GET | 同上 |
-| `/health` | GET | 健康检查 |
-| `/healthz` | GET | 健康检查（K8s 兼容） |
+| **Proxy** | `src/proxy/proxy.go` | HTTP 请求处理、重试逻辑 |
+| **Router** | `src/proxy/router.go` | 模型路由解析、负载均衡 |
+| **Detector** | `src/proxy/detector.go` | 错误检测、回退判断 |
+| **CooldownManager** | `src/backend/cooldown.go` | 后端冷却状态管理 |
+| **RateLimiter** | `src/middleware/ratelimit.go` | 多级限流控制 |
+| **ConcurrencyLimiter** | `src/middleware/concurrency.go` | 并发队列管理 |
+| **ConfigManager** | `src/config/config.go` | 配置热重载 |
+| **Logging** | `src/logging/*.go` | 结构化日志、脱敏 |
 
-## License
+---
 
-MIT
+## 🧪 开发与测试
+
+### 运行测试
+
+```bash
+# 所有测试
+make test
+
+# 指定包
+cd src && go test -v ./proxy
+
+# 单个测试
+cd src && go test -v -run TestDetector_Wildcard ./proxy
+
+# 覆盖率报告
+cd src && go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+```
+
+### 代码检查
+
+```bash
+# 格式化
+cd src && gofmt -s -w .
+
+# 静态分析
+cd src && go vet ./...
+
+# 依赖整理
+cd src && go mod tidy
+```
+
+### 调试模式
+
+```yaml
+# config.yaml
+logging:
+  level: debug
+  console_level: debug
+  debug_mode: true
+```
+
+---
+
+## 📊 监控与日志
+
+### 日志文件结构
+
+```
+logs/
+├── general.log         # 通用日志
+├── requests/           # 请求日志 (按日期分割)
+│   ├── 2026-01-18.log
+│   └── 2026-01-19.log
+└── errors/             # 错误日志
+    └── 2026-01-18.log
+```
+
+### 日志字段
+
+```json
+{
+  "level": "info",
+  "ts": "2026-01-18T12:00:00.000Z",
+  "msg": "请求成功",
+  "trace_id": "550e8400-e29b-41d4-a716-446655440000",
+  "model": "gpt-4",
+  "backend": "openai",
+  "status": 200,
+  "duration_ms": 1234,
+  "attempts": 1
+}
+```
+
+---
+
+## ⚙️ 高级配置
+
+### 系统提示词注入
+
+在 `system_prompts/` 目录创建 `<模型别名>.txt`:
+
+```
+system_prompts/
+├── gpt-4.txt
+└── claude.txt
+```
+
+内容示例:
+```
+你是一个专业的 AI 助手,遵循以下原则:
+1. 回答简洁准确
+2. 避免生成有害内容
+3. 拒绝违法请求
+```
+
+### 超时配置 (计划支持)
+
+```yaml
+timeout:
+  connect_timeout: 10s
+  read_timeout: 60s
+  write_timeout: 60s
+  total_timeout: 10m
+```
+
+> ⚠️ **已知问题**: 当前超时配置未生效,HTTP 客户端硬编码为 5 分钟超时。修复中。
+
+---
+
+## 🤝 贡献指南
+
+欢迎提交 Issue 和 Pull Request!
+
+### 提交规范
+
+```
+类型(范围): 简短描述
+
+详细说明
+
+关联问题: #123
+```
+
+**类型**: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
+
+### 开发流程
+
+1. Fork 本仓库
+2. 创建特性分支: `git checkout -b feature/my-feature`
+3. 提交代码: `git commit -m 'feat(proxy): 添加 XXX 功能'`
+4. 推送分支: `git push origin feature/my-feature`
+5. 创建 Pull Request
+
+---
+
+## 📄 许可证
+
+本项目采用 [MIT License](LICENSE) 开源。
+
+---
+
+## 🔗 相关资源
+
+- [AGENTS.md](AGENTS.md) - AI 编码助手开发指南
+- [系统提示词注入使用说明](docs/系统提示词注入使用说明.md)
+- [配置示例](src/config.example.yaml)
+
+---
+
+## 📮 联系方式
+
+- 提交问题: [GitHub Issues](https://github.com/ococl/llm-proxy/issues)
+- 讨论区: [GitHub Discussions](https://github.com/ococl/llm-proxy/discussions)
+
+---
+
+**项目状态**: 🚧 活跃开发中  
+**最后更新**: 2026-01-18

@@ -1,195 +1,314 @@
-# LLM Proxy - AI 代理协作指南
+# AGENTS.md - AI 编码助手指南
 
-本文档为 AI 编码代理提供项目开发指南。
+本文档为 AI 编码助手提供项目开发规范和命令参考。
 
-## 项目概述
+---
 
-LLM Proxy 是一个轻量级 LLM API 代理服务器，使用 Go 语言编写，支持多提供商负载均衡和自动回退。
+## 📦 项目概览
 
-## 构建/测试命令
+**llm-proxy** 是一个高性能的 LLM API 代理服务,提供负载均衡、故障转移、限流、并发控制等企业级功能。
 
+- **语言**: Go 1.25.5
+- **架构**: 分层中间件 + 代理模式
+- **主要模块**: proxy, router, middleware, config, backend, logging
+
+---
+
+## 🛠️ 构建与测试命令
+
+### 开发构建
+```bash
+# 快速开发构建(当前平台)
+make dev
+
+# 完整多平台构建
+make build-all
+
+# 清理构建产物
+make clean
+```
+
+### 测试命令
 ```bash
 # 运行所有测试
-cd src && go test -v ./...
+make test
+# 等同于: cd src && go test -v ./...
 
-# 运行单个测试文件（按文件名匹配）
-cd src && go test -v -run TestRouter ./...
+# 运行指定包的测试
+cd src && go test -v ./proxy
+cd src && go test -v ./config
 
-# 运行特定测试函数
-cd src && go test -v -run TestRouter_Resolve_Basic ./...
+# 运行单个测试用例
+cd src && go test -v -run TestDetector_EmptyConfig ./proxy
+cd src && go test -v -run TestFallback_L2 ./proxy
 
-# 运行带覆盖率的测试
+# 运行测试并显示覆盖率
 cd src && go test -v -cover ./...
 
-# 本地开发构建
-cd src && go build -o ../dist/llm-proxy.exe .
+# 生成覆盖率报告
+cd src && go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+```
 
-# Release 构建（去除调试信息）
-cd src && go build -ldflags "-s -w" -o ../dist/llm-proxy.exe .
+### 代码检查
+```bash
+# 代码格式化(自动修复)
+cd src && gofmt -s -w .
 
-# 多平台构建
-make build-all          # Linux/macOS
-.\build.ps1 all         # Windows PowerShell
+# 静态分析
+cd src && go vet ./...
 
 # 依赖管理
 cd src && go mod tidy
+cd src && go mod verify
 ```
 
-## 项目结构
+---
 
-```
-llm-proxy/
-├── src/                    # 源代码目录（go.mod 在此）
-│   ├── main.go             # 入口点
-│   ├── config.go           # 配置管理和结构体定义
-│   ├── proxy.go            # HTTP 代理处理
-│   ├── router.go           # 路由解析和负载均衡
-│   ├── backend.go          # 后端冷却管理
-│   ├── detector.go         # 错误检测
-│   ├── logger.go           # 日志系统
-│   └── *_test.go           # 单元测试
-├── dist/                   # 构建输出
-└── Makefile                # 构建脚本
-```
+## 📐 代码风格指南
 
-## 代码风格指南
+### 格式化
+- **缩进**: Tab (4 空格显示宽度)
+- **YAML 文件**: 2 空格缩进
+- **行尾**: LF (Unix 风格)
+- **文件结尾**: 必须有空行
+- **工具**: 使用 `gofmt -s` 格式化
 
-### 导入顺序
-
+### 导入规范
 ```go
 import (
-    // 1. 标准库
-    "fmt"
-    "net/http"
-    "sync"
-    
-    // 2. 外部依赖（空行分隔）
-    "github.com/google/uuid"
-    "gopkg.in/yaml.v3"
+	// 1. 标准库
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+	
+	// 2. 本项目包 (使用 llm-proxy/ 前缀)
+	"llm-proxy/backend"
+	"llm-proxy/config"
+	"llm-proxy/errors"
+	"llm-proxy/logging"
+	
+	// 3. 第三方库
+	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 ```
 
 ### 命名约定
+- **包名**: 小写单词,无下划线 (`proxy`, `config`, `middleware`)
+- **导出**: 首字母大写 (`type Proxy struct`, `func NewProxy()`)
+- **私有**: 首字母小写 (`func isHopByHopHeader()`)
+- **接口**: 名词或形容词 (`type Manager interface`)
+- **常量**: 驼峰命名 (`const maxRetries = 3`)
 
-| 类型 | 约定 | 示例 |
-|------|------|------|
-| 导出类型/函数 | PascalCase | `ConfigManager`, `NewProxy()` |
-| 未导出类型/函数 | camelCase | `configPath`, `tryReload()` |
-| 常量 | PascalCase | `MaxRetries` |
-| 测试函数 | `Test<Type>_<Method>_<Scenario>` | `TestRouter_Resolve_Basic` |
-
-### 结构体定义
-
+### 类型定义
 ```go
-// 使用 yaml tag 定义配置字段
-// 使用指针实现可选布尔字段（nil = 默认 true）
+// ✅ 推荐: 显式字段类型,YAML 标签清晰
 type Backend struct {
-    Name    string `yaml:"name"`
-    URL     string `yaml:"url"`
-    APIKey  string `yaml:"api_key,omitempty"`
-    Enabled *bool  `yaml:"enabled,omitempty"`
+	Name    string `yaml:"name"`
+	URL     string `yaml:"url"`
+	APIKey  string `yaml:"api_key,omitempty"`
+	Enabled *bool  `yaml:"enabled,omitempty"` // 使用指针区分零值和未设置
 }
 
-// 为可选布尔字段提供默认值方法
+// ✅ 推荐: 为配置项提供默认值获取方法
 func (b *Backend) IsEnabled() bool {
-    return b.Enabled == nil || *b.Enabled
+	return b.Enabled == nil || *b.Enabled
 }
 ```
 
 ### 错误处理
-
 ```go
-// 正确：返回错误并记录日志
+// ✅ 标准错误检查模式
+resp, err := client.Do(proxyReq)
 if err != nil {
-    LogGeneral("ERROR", "操作失败: %v", err)
-    return nil, err
+	logging.ProxySugar.Errorw("请求失败", "error", err, "backend", route.BackendName)
+	continue // 故障转移到下一个后端
 }
+defer resp.Body.Close()
 
-// 正确：HTTP 错误响应
-if modelAlias == "" {
-    LogGeneral("WARN", "[%s] 请求缺少 model 字段", reqID)
-    http.Error(w, "缺少 model 字段", http.StatusBadRequest)
-    return
+// ✅ 使用自定义错误类型 (见 src/errors/errors.go)
+errors.WriteJSONError(w, errors.ErrNoBackend, http.StatusBadGateway, traceID)
+
+// ❌ 避免: 忽略错误
+io.ReadAll(resp.Body) // 缺少错误检查
+
+// ❌ 避免: 过度嵌套
+if err == nil {
+	if data != nil {
+		// 处理
+	}
 }
-
-// 禁止：空的错误处理块
-// if err != nil { }
+// ✅ 推荐: 提前返回
+if err != nil {
+	return err
+}
+if data == nil {
+	return errors.New("data is nil")
+}
+// 处理正常路径
 ```
 
-### 日志规范
+### 日志记录
+```go
+// ✅ 使用结构化日志 (go.uber.org/zap)
+logging.ProxySugar.Infow("请求成功",
+	"trace_id", traceID,
+	"backend", route.BackendName,
+	"model", route.Model,
+	"status", resp.StatusCode,
+	"duration_ms", time.Since(start).Milliseconds(),
+)
+
+// ✅ 错误日志包含上下文
+logging.ProxySugar.Errorw("路由解析失败",
+	"error", err,
+	"model", model,
+	"trace_id", traceID,
+)
+
+// ❌ 避免: 非结构化日志
+log.Println("请求成功 backend=" + backend)
+```
+
+---
+
+## 🏗️ 架构模式
+
+### 中间件链 (见 src/main.go:100)
+```
+请求流 → RecoveryMiddleware → RateLimiter → ConcurrencyLimiter → Proxy
+```
+
+### 故障转移逻辑 (见 src/proxy/proxy.go:141-311)
+1. **L1 回退**: 同模型别名内多后端重试 (按优先级)
+2. **L2 回退**: 跨模型别名回退 (通过 `alias_fallback` 配置)
+3. **冷却机制**: 失败后端进入冷却期 (默认 300 秒)
+4. **错误检测**: 通过 HTTP 状态码和响应体模式触发回退
+
+### 配置热重载 (见 src/config/config.go:301-349)
+- 每次 `Get()` 检查文件修改时间
+- 检测到变化时自动重新加载
+- 日志配置变更会触发回调 (`LoggingConfigChangedFunc`)
+
+---
+
+## 🔍 关键组件说明
+
+### 1. Proxy (src/proxy/proxy.go)
+- **入口**: `ServeHTTP()` - 处理所有 HTTP 请求
+- **核心流程**:
+  1. API Key 验证 (line 64-72)
+  2. 请求体解析和系统提示词注入 (line 81-96)
+  3. 模型路由解析 (line 107)
+  4. 多后端重试循环 (line 141-311)
+  5. 响应流式/非流式处理 (line 253-277)
+- **已知问题**: HTTP 客户端超时硬编码为 5 分钟,`TimeoutConfig` 未生效
+
+### 2. Router (src/proxy/router.go)
+- **路由解析**: `Resolve()` - 将模型别名映射到后端列表
+- **负载均衡**: 同优先级后端随机打散 (line 50-59)
+- **L2 回退**: `ResolutionWithFallback()` - 收集跨别名回退路由
+
+### 3. Middleware
+- **限流** (src/middleware/ratelimit.go): Token Bucket 算法,支持全局/IP/模型级限流
+- **并发** (src/middleware/concurrency.go): 基于 channel 的信号量,支持队列超时
+- **恢复** (src/middleware/recovery.go): Panic 捕获和恢复
+
+### 4. Detector (src/proxy/detector.go)
+- **错误检测**: `ShouldFallback()` - 根据 HTTP 状态码和响应体判断是否回退
+- **通配符支持**: `4xx`, `5xx` 匹配整个状态码范围
+- **默认规则**: 未配置时默认 `["4xx", "5xx"]`
+
+---
+
+## ⚠️ 已知问题与注意事项
+
+1. **超时配置未生效** (src/proxy/proxy.go:208)
+   - 当前硬编码 5 分钟: `client := &http.Client{Timeout: 5 * time.Minute}`
+   - `TimeoutConfig` 结构体已定义但未应用到 HTTP 客户端
+   - 缺少 `http.Transport` 配置 (连接池、TLS 超时等)
+
+2. **HTTP 客户端效率**
+   - 每个请求创建新客户端,无连接池复用
+   - 建议改用单例客户端 + 自定义 Transport
+
+3. **测试覆盖**
+   - 主要模块有单元测试 (detector, router, fallback)
+   - 缺少集成测试和端到端测试
+
+---
+
+## 📝 提交指南
+
+### 提交消息格式
+```
+类型(范围): 简短描述
+
+详细说明(可选)
+
+关联问题: #123
+```
+
+**类型**: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`  
+**范围**: `proxy`, `router`, `config`, `middleware`, `logging`
+
+### 示例
+```
+fix(proxy): 修复 HTTP 客户端超时配置未生效
+
+- 应用 TimeoutConfig 到 http.Transport
+- 添加连接池配置 (MaxIdleConns=100)
+- 设置 IdleConnTimeout 为 90 秒
+
+关联问题: #42
+```
+
+---
+
+## 🧪 测试编写指南
 
 ```go
-// 使用 LogGeneral 统一日志，日志消息使用中文
-LogGeneral("DEBUG", "调试信息: %s", detail)
-LogGeneral("INFO", "业务事件: %s", event)
-LogGeneral("WARN", "潜在问题: %s", warning)
-LogGeneral("ERROR", "严重错误: %v", err)
-
-// 包含请求 ID 便于追踪
-LogGeneral("INFO", "[%s] 收到请求: 模型=%s", reqID, model)
-```
-
-### 测试规范
-
-```go
-// 使用 TestMain 启用测试模式（禁用日志输出）
-func TestMain(m *testing.M) {
-    SetTestMode(true)
-    os.Exit(m.Run())
-}
-
-// 表驱动测试
-func TestDetector_MatchStatusCode(t *testing.T) {
-    tests := []struct {
-        name     string
-        code     int
-        expected bool
-    }{
-        {"4xx match", 404, true},
-        {"2xx no match", 200, false},
-    }
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            got := d.ShouldFallback(tt.code, "")
-            if got != tt.expected {
-                t.Errorf("got %v, want %v", got, tt.expected)
-            }
-        })
-    }
+// 测试命名: Test<功能>_<场景>
+func TestDetector_MatchStatusCode_Wildcard(t *testing.T) {
+	// 1. 准备测试数据
+	d := newDetectorWithConfig([]string{"4xx", "5xx"}, nil)
+	
+	// 2. 定义测试用例 (表格驱动测试)
+	tests := []struct {
+		name     string
+		code     int
+		expected bool
+	}{
+		{"400 Bad Request", 400, true},
+		{"500 Internal Error", 500, true},
+		{"200 OK", 200, false},
+	}
+	
+	// 3. 遍历执行
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := d.ShouldFallback(tt.code, "")
+			if got != tt.expected {
+				t.Errorf("期望 %v, 实际 %v", tt.expected, got)
+			}
+		})
+	}
 }
 ```
 
-### 并发安全
+---
 
-```go
-// 使用 sync.RWMutex 保护共享状态
-type CooldownManager struct {
-    cooldowns map[CooldownKey]time.Time
-    mu        sync.RWMutex
-}
+## 📚 参考资料
 
-func (cm *CooldownManager) IsCoolingDown(key CooldownKey) bool {
-    cm.mu.RLock()
-    defer cm.mu.RUnlock()
-    // ...
-}
-```
+- [Go 代码审查建议](https://github.com/golang/go/wiki/CodeReviewComments)
+- [Effective Go](https://go.dev/doc/effective_go)
+- [Uber Go 风格指南](https://github.com/uber-go/guide/blob/master/style.md)
 
-## 关键模式
+---
 
-- **配置热重载**: `ConfigManager.Get()` 自动检测文件变更并重载
-- **多级回退**: L1 别名内后端优先级回退，L2 跨别名回退（`alias_fallback`）
-- **负载均衡**: 同优先级路由使用 `rand.Shuffle` 随机选择
-
-## 禁止事项
-
-- 空的错误处理块
-- 删除失败的测试来"通过"构建
-- 未经请求自动提交代码
-- 在 `.gitignore` 中忽略 `go.sum`
-- 硬编码敏感信息（API Key 等）
-
-## CI/CD
-
-- **main 分支**: 测试 + 构建（产物可下载）
-- **v* 标签**: 测试 + 构建 + 发布 Release
+**最后更新**: 2026-01-18  
+**项目版本**: 根据 git tag 自动生成
