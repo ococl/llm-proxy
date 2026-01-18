@@ -1,6 +1,10 @@
 listen: ":8080"
+
 proxy_api_key: "sk-your-unified-api-key"
 
+proxy:
+  enable_system_prompt: false
+  forward_client_ip: true
 backends:
   - name: "primary"
     url: "https://api.primary-provider.com/v1"

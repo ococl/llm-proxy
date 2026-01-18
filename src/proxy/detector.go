@@ -39,11 +39,6 @@ func (d *Detector) ShouldFallback(statusCode int, body string) bool {
 		}
 	}
 
-	if strings.Contains(body, `"__type":"com.amazon.aws.codewhisperer#`) && strings.Contains(body, `Exception"`) {
-		logging.ProxySugar.Warnw("检测到AWS风格错误", "statusCode", statusCode, "body", body)
-		return true
-	}
-
 	return false
 }
 

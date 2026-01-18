@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -79,6 +80,9 @@ func main() {
 		}
 	}()
 
+	// 初始化 HTTP 客户端（带连接池和超时配置）
+	proxy.InitHTTPClient(cfg)
+
 	router := proxy.NewRouter(configMgr, cooldown)
 	detector := proxy.NewDetector(configMgr)
 	p := proxy.NewProxy(configMgr, router, cooldown, detector)
@@ -101,7 +105,7 @@ func main() {
 	}
 
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("服务器启动失败: %v", err)
 		}
 	}()

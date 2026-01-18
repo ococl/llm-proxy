@@ -178,6 +178,7 @@ func (l *Logging) GetConsoleStyle() string {
 type Config struct {
 	Listen      string                 `yaml:"listen"`
 	ProxyAPIKey string                 `yaml:"proxy_api_key"`
+	Proxy       ProxyConfig            `yaml:"proxy"`
 	Backends    []Backend              `yaml:"backends"`
 	Models      map[string]*ModelAlias `yaml:"models"`
 	Fallback    Fallback               `yaml:"fallback"`
@@ -209,6 +210,19 @@ type ConcurrencyConfig struct {
 	MaxQueueSize    int           `yaml:"max_queue_size"`
 	QueueTimeout    time.Duration `yaml:"queue_timeout"`
 	PerBackendLimit int           `yaml:"per_backend_limit"`
+}
+
+type ProxyConfig struct {
+	EnableSystemPrompt bool  `yaml:"enable_system_prompt"`
+	ForwardClientIP    *bool `yaml:"forward_client_ip"`
+}
+
+func (p *ProxyConfig) GetEnableSystemPrompt() bool {
+	return p.EnableSystemPrompt
+}
+
+func (p *ProxyConfig) GetForwardClientIP() bool {
+	return p.ForwardClientIP == nil || *p.ForwardClientIP
 }
 
 func (r *RateLimitConfig) GetGlobalRPS() float64 {

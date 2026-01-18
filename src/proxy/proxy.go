@@ -15,6 +15,7 @@ import (
 	"llm-proxy/config"
 	"llm-proxy/errors"
 	"llm-proxy/logging"
+	"llm-proxy/middleware"
 	"llm-proxy/prompt"
 
 	"github.com/google/uuid"
@@ -93,7 +94,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reqBody = prompt.ProcessSystemPrompt(reqBody)
+	if cfg.Proxy.EnableSystemPrompt {
+		reqBody = prompt.ProcessSystemPrompt(reqBody)
+	}
 
 	modelAlias, _ := reqBody["model"].(string)
 	if modelAlias == "" {
@@ -143,7 +146,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		maxRetries = len(routes)
 	}
 
-	metrics := logging.NewRequestMetrics(reqID, modelAlias)
+	// Metrics 只在 enable_metrics 开启时创建
+	var metrics *logging.RequestMetrics
+	if cfg.Logging.EnableMetrics {
+		metrics = logging.NewRequestMetrics(reqID, modelAlias)
+	}
 	var finalBackend string
 
 	for i, route := range routes {
@@ -200,16 +207,30 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		proxyReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
 
+		if cfg.Proxy.GetForwardClientIP() {
+			clientIP := middleware.ExtractIP(r)
+			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				proxyReq.Header.Set("X-Forwarded-For", xff+", "+clientIP)
+			} else {
+				proxyReq.Header.Set("X-Forwarded-For", clientIP)
+			}
+			if r.Header.Get("X-Real-IP") == "" {
+				proxyReq.Header.Set("X-Real-IP", clientIP)
+			}
+		}
+
 		bkend := p.configMgr.GetBackend(route.BackendName)
 		if bkend != nil && bkend.APIKey != "" {
 			proxyReq.Header.Set("Authorization", "Bearer "+bkend.APIKey)
 		}
 
-		client := &http.Client{Timeout: 5 * time.Minute}
+		client := GetHTTPClient()
 		backendStart := time.Now()
 		resp, err := client.Do(proxyReq)
 		backendDuration := time.Since(backendStart)
-		metrics.RecordBackendTime(route.BackendName, backendDuration)
+		if metrics != nil {
+			metrics.RecordBackendTime(route.BackendName, backendDuration)
+		}
 
 		if err != nil {
 			lastErr = err
@@ -237,11 +258,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			logBuilder.WriteString(fmt.Sprintf("结果: 成功\n"))
-			logging.ProxySugar.Infow("请求成功", "reqID", reqID, "backend", route.BackendName, "status", resp.StatusCode, "duration_ms", backendDuration.Milliseconds(), "attempts", metrics.Attempts)
+			attempts := 0
+			if metrics != nil {
+				attempts = metrics.Attempts
+			}
+			logging.ProxySugar.Infow("请求成功", "reqID", reqID, "backend", route.BackendName, "status", resp.StatusCode, "duration_ms", backendDuration.Milliseconds(), "attempts", attempts)
 			logging.WriteRequestLogFile(cfg, reqID, logBuilder.String())
 
 			finalBackend = route.BackendName
-			metrics.Finish(true, finalBackend)
+			if metrics != nil {
+				metrics.Finish(true, finalBackend)
+			}
 
 			for k, v := range resp.Header {
 				if isHopByHopHeader(k) {
@@ -304,7 +331,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		logging.WriteRequestLogFile(cfg, reqID, logBuilder.String())
 		finalBackend = route.BackendName
-		metrics.Finish(false, finalBackend)
+		if metrics != nil {
+			metrics.Finish(false, finalBackend)
+		}
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
 		return
@@ -315,13 +344,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logging.WriteRequestLogFile(cfg, reqID, logBuilder.String())
 	logging.WriteErrorLogFile(cfg, reqID, logBuilder.String())
 
-	var backendDetails []string
-	for bkend, duration := range metrics.BackendTimes {
-		backendDetails = append(backendDetails, fmt.Sprintf("%s=%dms", bkend, duration.Milliseconds()))
+	if metrics != nil {
+		var backendDetails []string
+		for bkend, duration := range metrics.BackendTimes {
+			backendDetails = append(backendDetails, fmt.Sprintf("%s=%dms", bkend, duration.Milliseconds()))
+		}
+		logging.NetworkSugar.Errorw("所有后端均失败详情", "reqID", reqID, "model", modelAlias, "attempts", metrics.Attempts, "backend_details", strings.Join(backendDetails, ", "))
+		metrics.Finish(false, "")
+	} else {
+		logging.NetworkSugar.Errorw("所有后端均失败详情", "reqID", reqID, "model", modelAlias)
 	}
-	logging.NetworkSugar.Errorw("所有后端均失败详情", "reqID", reqID, "model", modelAlias, "attempts", metrics.Attempts, "backend_details", strings.Join(backendDetails, ", "))
-
-	metrics.Finish(false, "")
 
 	if lastErr != nil {
 		errors.WriteJSONErrorWithMsg(w, errors.ErrNoBackend, http.StatusBadGateway, reqID, fmt.Sprintf("所有后端均失败: %v", lastErr))
@@ -341,7 +373,6 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 	buf := make([]byte, 32*1024)
 	bytesProcessed := 0
 	chunksReceived := 0
-	sawDone := false
 
 	for {
 		n, err := body.Read(buf)
@@ -349,10 +380,6 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 		if n > 0 {
 			bytesProcessed += n
 			chunk := buf[:n]
-
-			if bytes.Contains(chunk, []byte("[DONE]")) {
-				sawDone = true
-			}
 
 			logging.FileOnlySugar.Debugw("接收SSE数据块", "chunk_number", chunksReceived, "size", n, "total_bytes", bytesProcessed, "backend", backendName)
 
@@ -364,12 +391,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 		}
 		if err != nil {
 			if err == io.EOF {
-				if !sawDone {
-					logging.ProxySugar.Warnw("后端未发送[DONE]标识，自动补足", "backend", backendName, "total_bytes", bytesProcessed)
-					w.Write([]byte("\n\ndata: [DONE]\n\n"))
-					flusher.Flush()
-				}
-				logging.FileOnlySugar.Debugw("SSE流结束", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName, "saw_done", sawDone)
+				logging.FileOnlySugar.Debugw("SSE流结束", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
 				break
 			} else {
 				logging.ProxySugar.Errorw("读取SSE流错误", "error", err, "chunk_number", chunksReceived, "backend", backendName)
@@ -377,7 +399,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 			}
 		}
 	}
-	logging.FileOnlySugar.Infow("SSE流传输完成", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName, "saw_done", sawDone)
+	logging.FileOnlySugar.Infow("SSE流传输完成", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
 }
 
 func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {

@@ -67,10 +67,12 @@ curl http://localhost:8080/health
 ```yaml
 listen: ":8080"
 
-# 统一 API Key（用户使用此密钥访问代理）
 proxy_api_key: "sk-your-unified-api-key"
 
-# 后端定义
+proxy:
+  enable_system_prompt: false
+  forward_client_ip: true
+
 backends:
   - name: "provider-a"
     url: "https://api.provider-a.com/v1"
