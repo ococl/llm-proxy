@@ -67,7 +67,7 @@ func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]Re
 			}
 			key := r.cooldown.Key(route.Backend, route.Model)
 			if r.cooldown.IsCoolingDown(key) {
-				logging.ProxySugar.Debugw("跳过冷却中的后端", "key", key)
+				logging.ProxySugar.Debugw("跳过冷却中的后端", "backend", route.Backend, "model", route.Model, "key", key)
 				continue
 			}
 			bkend := r.configMgr.GetBackend(route.Backend)

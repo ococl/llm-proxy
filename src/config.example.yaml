@@ -51,6 +51,7 @@ detection:
   - "quota"
   - "organization has been disabled"
   - "upstream_all_accounts_busy"
+  - "upstream_no_eligible_accounts"
   - "invalid chat setting"
 
 # 日志配置
