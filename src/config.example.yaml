@@ -5,94 +5,98 @@ proxy_api_key: "sk-your-unified-api-key"
 proxy:
   enable_system_prompt: false
   forward_client_ip: true
-backends:
-  - name: "primary"
-    url: "https://api.primary-provider.com/v1"
-    api_key: "sk-primary-xxx"
 
-  - name: "secondary"
-    url: "https://api.secondary-provider.com/v1"
-    api_key: "sk-secondary-yyy"
-    enabled: false
+backends:
+- name: "primary"
+  url: "https://api.primary-provider.com/v1"
+  api_key: "sk-primary-xxx"
+
+- name: "secondary"
+  url: "https://api.secondary-provider.com/v1"
+  api_key: "sk-secondary-yyy"
+  enabled: false
 
 models:
   "anthropic/claude-sonnet-4":
     routes:
-      - backend: "primary"
-        model: "claude-sonnet-4"
-        priority: 1
-      - backend: "secondary"
-        model: "claude-sonnet-4"
-        priority: 2
-        enabled: false
+    - backend: "primary"
+      model: "claude-sonnet-4"
+      priority: 1
+    - backend: "secondary"
+      model: "claude-sonnet-4"
+      priority: 2
+      enabled: false
 
   "openai/gpt-4o":
     enabled: false
     routes:
-      - backend: "primary"
-        model: "gpt-4o"
-        priority: 1
+    - backend: "primary"
+      model: "gpt-4o"
+      priority: 1
 
 fallback:
   cooldown_seconds: 300
   max_retries: 3
   alias_fallback:
     "anthropic/claude-sonnet-4":
-      - "openai/gpt-4o"
+    - "openai/gpt-4o"
 
 detection:
-  error_codes: ["4xx", "5xx"]
+  error_codes: [ "4xx", "5xx" ]
   error_patterns:
-    - "insufficient_quota"
-    - "rate_limit"
-    - "exceeded"
-    - "billing"
-    - "quota"
+  - "insufficient_quota"
+  - "rate_limit"
+  - "exceeded"
+  - "billing"
+  - "quota"
+  - "organization has been disabled"
+  - "upstream_all_accounts_busy"
+  - "invalid chat setting"
 
 # 日志配置
 logging:
   # 日志级别
   level: "info"                      # 文件日志级别: debug/info/warn/error
   console_level: "info"              # 控制台日志级别（默认继承level）
-  
+
   # 输出目录（相对于应用同目录）
   base_dir: "./logs"                 # 日志根目录
-  
+
   # 轮转策略
   max_file_size_mb: 100              # 单个文件最大100MB
   max_age_days: 7                    # 日志保留7天后删除
   max_backups: 21                    # 最多保留21个备份
   compress: true                     # 压缩旧日志为.gz
-  
+
   # 输出格式
   format: "json"                     # json格式（机器可读）
-  
+
   # 控制台着色
   colorize: true                     # 启用控制台着色
   console_style: "compact"           # 输出风格: compact/verbose
   console_format: "markdown"         # 控制台输出格式: markdown/plain
-  
+
   # 调试模式（开发时true，发行时false）
   debug_mode: true                   # true时输出llm_debug日志
-  
+
   # 异步日志
   async: true                        # 异步写入
   buffer_size: 10000                 # 缓冲区大小
   flush_interval: 5                  # 5秒自动刷新
   drop_on_full: false                # 缓冲区满时丢弃日志
-  
+
   # 日志轮转配置
   rotate_by_size: true               # 按大小轮转
   rotate_by_time: false              # 按时间轮转
   time_rotation: "daily"             # 时间轮转策略: daily/hourly
-  
+
   # 敏感信息
   mask_sensitive: true               # 脱敏API Key、Token
   detailed_masking: false            # 详细脱敏（包括邮箱、IP等）
 
   # 特殊供应商处理
-  problematic_backends: ["special-vendor", "problematic-provider"]  # 需要特殊处理的后端列表，用于解决重复发言等问题
-  
+  problematic_backends: [ "special-vendor", "problematic-provider" ]  # 需要特殊处理的后端列表，用于解决重复发言等问题
+
   # 独立请求/错误日志目录（兼容旧配置）
   request_dir: "./logs/requests"
   error_dir: "./logs/errors"
