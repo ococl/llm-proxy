@@ -26,10 +26,17 @@ type Proxy struct {
 	router    *Router
 	cooldown  *backend.CooldownManager
 	detector  *Detector
+	converter *ProtocolConverter
 }
 
 func NewProxy(cfg *config.Manager, router *Router, cd *backend.CooldownManager, det *Detector) *Proxy {
-	return &Proxy{configMgr: cfg, router: router, cooldown: cd, detector: det}
+	return &Proxy{
+		configMgr: cfg,
+		router:    router,
+		cooldown:  cd,
+		detector:  det,
+		converter: NewProtocolConverter(),
+	}
 }
 
 var hopByHopHeaders = map[string]bool{
@@ -164,18 +171,48 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logBuilder.WriteString(fmt.Sprintf("后端: %s\n模型: %s\n", route.BackendName, route.Model))
 		logging.ProxySugar.Debugw("尝试后端", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
 
+		// 获取后端配置以确定协议
+		bkend := p.configMgr.GetBackend(route.BackendName)
+		if bkend == nil {
+			lastErr = fmt.Errorf("backend %s not found", route.BackendName)
+			logBuilder.WriteString(fmt.Sprintf("后端配置未找到: %v\n", lastErr))
+			logging.ProxySugar.Errorw("后端配置未找到", "reqID", reqID, "backend", route.BackendName)
+			continue
+		}
+
+		// 确定使用的协议（模型级别优先）
+		protocol := route.GetProtocol(bkend.GetProtocol())
+		logBuilder.WriteString(fmt.Sprintf("协议: %s\n", protocol))
+		logging.ProxySugar.Debugw("使用协议", "reqID", reqID, "protocol", protocol, "backend", route.BackendName)
+
 		modifiedBody := make(map[string]interface{})
 		for k, v := range reqBody {
 			modifiedBody[k] = v
 		}
 		modifiedBody["model"] = route.Model
 
-		newBody, err := json.Marshal(modifiedBody)
-		if err != nil {
-			lastErr = err
-			logBuilder.WriteString(fmt.Sprintf("序列化请求体失败: %v\n", err))
-			logging.ProxySugar.Errorw("序列化请求体失败", "reqID", reqID, "error", err)
-			continue
+		var newBody []byte
+		var err error
+
+		// 根据协议转换请求体
+		if protocol == "anthropic" {
+			newBody, err = p.converter.ConvertToAnthropic(modifiedBody)
+			if err != nil {
+				lastErr = err
+				logBuilder.WriteString(fmt.Sprintf("转换为Anthropic格式失败: %v\n", err))
+				logging.ProxySugar.Errorw("转换为Anthropic格式失败", "reqID", reqID, "error", err)
+				continue
+			}
+			logBuilder.WriteString("已转换为Anthropic协议格式\n")
+		} else {
+			// OpenAI 格式，直接序列化
+			newBody, err = json.Marshal(modifiedBody)
+			if err != nil {
+				lastErr = err
+				logBuilder.WriteString(fmt.Sprintf("序列化请求体失败: %v\n", err))
+				logging.ProxySugar.Errorw("序列化请求体失败", "reqID", reqID, "error", err)
+				continue
+			}
 		}
 
 		targetURL, err := url.Parse(route.BackendURL)
@@ -209,6 +246,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		proxyReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
 
+		// 根据协议设置特定的请求头
+		if protocol == "anthropic" {
+			// Anthropic 需要特定的头部
+			proxyReq.Header.Set("anthropic-version", "2023-06-01")
+			proxyReq.Header.Set("Content-Type", "application/json")
+			// 移除 OpenAI 特定的头部
+			proxyReq.Header.Del("OpenAI-Organization")
+			proxyReq.Header.Del("OpenAI-Project")
+		}
+
 		if cfg.Proxy.GetForwardClientIP() {
 			clientIP := middleware.ExtractIP(r)
 			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
@@ -221,9 +268,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		bkend := p.configMgr.GetBackend(route.BackendName)
-		if bkend != nil && bkend.APIKey != "" {
-			proxyReq.Header.Set("Authorization", "Bearer "+bkend.APIKey)
+		// 设置 API Key（Anthropic 使用 x-api-key 头部）
+		if bkend.APIKey != "" {
+			if protocol == "anthropic" {
+				proxyReq.Header.Set("x-api-key", bkend.APIKey)
+				proxyReq.Header.Del("Authorization") // 移除 OpenAI 的 Authorization 头
+			} else {
+				proxyReq.Header.Set("Authorization", "Bearer "+bkend.APIKey)
+			}
 		}
 
 		client := GetHTTPClient()

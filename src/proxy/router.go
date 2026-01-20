@@ -23,6 +23,14 @@ type ResolvedRoute struct {
 	BackendName string
 	BackendURL  string
 	Model       string
+	Protocol    string // "openai" or "anthropic"
+}
+
+func (r *ResolvedRoute) GetProtocol(backendProtocol string) string {
+	if r.Protocol != "" {
+		return r.Protocol
+	}
+	return backendProtocol
 }
 
 func (r *Router) Resolve(alias string) ([]ResolvedRoute, error) {
@@ -86,6 +94,7 @@ func (r *Router) resolveWithVisited(alias string, visited map[string]bool) ([]Re
 				BackendName: bkend.Name,
 				BackendURL:  bkend.URL,
 				Model:       route.Model,
+				Protocol:    route.Protocol, // 传递模型级别的协议配置
 			})
 		}
 	}

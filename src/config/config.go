@@ -11,14 +11,22 @@ import (
 )
 
 type Backend struct {
-	Name    string `yaml:"name"`
-	URL     string `yaml:"url"`
-	APIKey  string `yaml:"api_key,omitempty"`
-	Enabled *bool  `yaml:"enabled,omitempty"`
+	Name     string `yaml:"name"`
+	URL      string `yaml:"url"`
+	APIKey   string `yaml:"api_key,omitempty"`
+	Enabled  *bool  `yaml:"enabled,omitempty"`
+	Protocol string `yaml:"protocol,omitempty"` // "openai" or "anthropic", default: "openai"
 }
 
 func (b *Backend) IsEnabled() bool {
 	return b.Enabled == nil || *b.Enabled
+}
+
+func (b *Backend) GetProtocol() string {
+	if b.Protocol == "" {
+		return "openai"
+	}
+	return b.Protocol
 }
 
 type ModelRoute struct {
@@ -26,10 +34,18 @@ type ModelRoute struct {
 	Model    string `yaml:"model"`
 	Priority int    `yaml:"priority"`
 	Enabled  *bool  `yaml:"enabled,omitempty"`
+	Protocol string `yaml:"protocol,omitempty"` // "openai" or "anthropic", overrides backend protocol
 }
 
 func (r *ModelRoute) IsEnabled() bool {
 	return r.Enabled == nil || *r.Enabled
+}
+
+func (r *ModelRoute) GetProtocol(backendProtocol string) string {
+	if r.Protocol != "" {
+		return r.Protocol
+	}
+	return backendProtocol
 }
 
 type ModelAlias struct {
