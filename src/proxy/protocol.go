@@ -5,11 +5,36 @@ import (
 	"fmt"
 )
 
+// ConversionMetadata stores parameter conversion details for logging
+type ConversionMetadata struct {
+	InputMaxTokens    interface{}
+	OutputMaxTokens   int
+	MaxTokensSource   string
+	InputTemperature  interface{}
+	OutputTemperature interface{}
+	InputTopP         interface{}
+	OutputTopP        interface{}
+	InputStream       interface{}
+	OutputStream      interface{}
+	InputStop         interface{}
+	OutputStop        interface{}
+	InputTools        interface{}
+	OutputTools       interface{}
+	SystemPromptLen   int
+}
+
 // ProtocolConverter handles conversion between OpenAI and Anthropic API formats
-type ProtocolConverter struct{}
+type ProtocolConverter struct {
+	lastConversion *ConversionMetadata
+}
 
 func NewProtocolConverter() *ProtocolConverter {
 	return &ProtocolConverter{}
+}
+
+// GetLastConversion returns the metadata from the last conversion
+func (pc *ProtocolConverter) GetLastConversion() *ConversionMetadata {
+	return pc.lastConversion
 }
 
 // ConvertToAnthropic converts OpenAI format request to Anthropic format
@@ -22,32 +47,57 @@ func (pc *ProtocolConverter) ConvertToAnthropic(openAIBody map[string]interface{
 	}
 
 	// Extract max_tokens (required by Anthropic)
+	var inputMaxTokens interface{}
+	var outputMaxTokens int
+	var maxTokensSource string
+
 	if maxTokens, ok := openAIBody["max_tokens"].(float64); ok {
-		anthropicBody["max_tokens"] = int(maxTokens)
+		inputMaxTokens = maxTokens
+		outputMaxTokens = int(maxTokens)
+		maxTokensSource = "max_tokens"
+		anthropicBody["max_tokens"] = outputMaxTokens
 	} else if maxCompletionTokens, ok := openAIBody["max_completion_tokens"].(float64); ok {
-		anthropicBody["max_tokens"] = int(maxCompletionTokens)
+		inputMaxTokens = maxCompletionTokens
+		outputMaxTokens = int(maxCompletionTokens)
+		maxTokensSource = "max_completion_tokens"
+		anthropicBody["max_tokens"] = outputMaxTokens
 	} else {
 		// Anthropic requires max_tokens, default to 4096
-		anthropicBody["max_tokens"] = 4096
+		inputMaxTokens = nil
+		outputMaxTokens = 4096
+		maxTokensSource = "default"
+		anthropicBody["max_tokens"] = outputMaxTokens
 	}
 
 	// Extract temperature
+	var inputTemp, outputTemp interface{}
 	if temp, ok := openAIBody["temperature"].(float64); ok {
+		inputTemp = temp
+		outputTemp = temp
 		anthropicBody["temperature"] = temp
 	}
 
 	// Extract top_p
+	var inputTopP, outputTopP interface{}
 	if topP, ok := openAIBody["top_p"].(float64); ok {
+		inputTopP = topP
+		outputTopP = topP
 		anthropicBody["top_p"] = topP
 	}
 
 	// Extract stream
+	var inputStream, outputStream interface{}
 	if stream, ok := openAIBody["stream"].(bool); ok {
+		inputStream = stream
+		outputStream = stream
 		anthropicBody["stream"] = stream
 	}
 
 	// Extract stop sequences
+	var inputStop, outputStop interface{}
 	if stop, ok := openAIBody["stop"]; ok {
+		inputStop = stop
+		outputStop = stop
 		anthropicBody["stop_sequences"] = stop
 	}
 
@@ -57,23 +107,46 @@ func (pc *ProtocolConverter) ConvertToAnthropic(openAIBody map[string]interface{
 		return nil, fmt.Errorf("failed to convert messages: %w", err)
 	}
 
+	var systemPromptLen int
 	if system != "" {
 		anthropicBody["system"] = system
+		systemPromptLen = len(system)
 	}
 	anthropicBody["messages"] = messages
 
 	// Convert tools if present
+	var inputTools, outputTools interface{}
 	if tools, ok := openAIBody["tools"].([]interface{}); ok && len(tools) > 0 {
+		inputTools = len(tools)
 		anthropicTools, err := pc.convertTools(tools)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert tools: %w", err)
 		}
+		outputTools = len(anthropicTools)
 		anthropicBody["tools"] = anthropicTools
 
 		// Convert tool_choice if present
 		if toolChoice, ok := openAIBody["tool_choice"]; ok {
 			anthropicBody["tool_choice"] = pc.convertToolChoice(toolChoice)
 		}
+	}
+
+	// Store conversion metadata for logging
+	pc.lastConversion = &ConversionMetadata{
+		InputMaxTokens:    inputMaxTokens,
+		OutputMaxTokens:   outputMaxTokens,
+		MaxTokensSource:   maxTokensSource,
+		InputTemperature:  inputTemp,
+		OutputTemperature: outputTemp,
+		InputTopP:         inputTopP,
+		OutputTopP:        outputTopP,
+		InputStream:       inputStream,
+		OutputStream:      outputStream,
+		InputStop:         inputStop,
+		OutputStop:        outputStop,
+		InputTools:        inputTools,
+		OutputTools:       outputTools,
+		SystemPromptLen:   systemPromptLen,
 	}
 
 	return json.Marshal(anthropicBody)
