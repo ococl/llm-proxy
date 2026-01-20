@@ -22,23 +22,42 @@ import (
 	"github.com/google/uuid"
 )
 
+// 常量定义
+const (
+	streamBufferSize       = 32 * 1024      // 流式响应缓冲区大小
+	anthropicVersionHeader = "2023-06-01"   // Anthropic API 版本
+	anthropicAPIPath       = "/v1/messages" // Anthropic API 路径
+	defaultLogBuilderSize  = 4096           // 日志构建器默认容量
+	reqIDPrefix            = "req_"         // 请求ID前缀
+	reqIDLength            = 18             // 请求ID长度
+)
+
 type Proxy struct {
-	configMgr       *config.Manager
-	router          *Router
-	cooldown        *backend.CooldownManager
-	detector        *Detector
-	converter       *ProtocolConverter
-	requestDetector *RequestDetector
+	configMgr         *config.Manager
+	router            *Router
+	cooldown          *backend.CooldownManager
+	detector          *Detector
+	converter         *ProtocolConverter
+	requestDetector   *RequestDetector
+	bodyPreparer      *RequestBodyPreparer
+	requestBuilder    *ProxyRequestBuilder
+	responseConverter *ResponseConverter
 }
 
 func NewProxy(cfg *config.Manager, router *Router, cd *backend.CooldownManager, det *Detector) *Proxy {
+	converter := NewProtocolConverter()
+	requestDetector := NewRequestDetector()
+
 	return &Proxy{
-		configMgr:       cfg,
-		router:          router,
-		cooldown:        cd,
-		detector:        det,
-		converter:       NewProtocolConverter(),
-		requestDetector: NewRequestDetector(),
+		configMgr:         cfg,
+		router:            router,
+		cooldown:          cd,
+		detector:          det,
+		converter:         converter,
+		requestDetector:   requestDetector,
+		bodyPreparer:      NewRequestBodyPreparer(converter, requestDetector),
+		requestBuilder:    NewProxyRequestBuilder(),
+		responseConverter: NewResponseConverter(converter, requestDetector),
 	}
 }
 
@@ -88,7 +107,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reqID := "req_" + strings.ReplaceAll(uuid.New().String()[:18], "-", "")
+	reqID := reqIDPrefix + strings.ReplaceAll(uuid.New().String()[:reqIDLength], "-", "")
 
 	// 检测请求协议类型（客户端使用的协议）
 	clientProtocol := p.requestDetector.DetectProtocol(r)
@@ -160,6 +179,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logging.FileOnlySugar.Debugw("解析到可用路由", "reqID", reqID, "count", len(routes))
 
 	var logBuilder strings.Builder
+	logBuilder.Grow(defaultLogBuilderSize) // 预分配容量
 	logBuilder.WriteString(fmt.Sprintf("================== 请求日志 ==================\n"))
 	logBuilder.WriteString(fmt.Sprintf("请求ID: %s\n时间: %s\n客户端: %s\n\n", reqID, time.Now().Format(time.RFC3339), clientIP))
 	logBuilder.WriteString("--- 请求头 ---\n")
@@ -186,9 +206,31 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var finalBackend string
 
+	var backoff *BackoffStrategy
+	if cfg.Fallback.IsBackoffEnabled() {
+		backoff = NewBackoffStrategy(
+			time.Duration(cfg.Fallback.GetBackoffInitialDelay())*time.Millisecond,
+			time.Duration(cfg.Fallback.GetBackoffMaxDelay())*time.Millisecond,
+			cfg.Fallback.GetBackoffMultiplier(),
+			cfg.Fallback.GetBackoffJitter(),
+			maxRetries,
+		)
+	}
+
 	for i, route := range routes {
 		if i >= maxRetries {
 			break
+		}
+
+		if backoff != nil && i > 0 {
+			delay := backoff.CalculateDelay(i)
+			if delay > 0 {
+				logging.ProxySugar.Debugw("指数退避等待",
+					"reqID", reqID,
+					"attempt", i+1,
+					"delay_ms", delay.Milliseconds())
+				time.Sleep(delay)
+			}
 		}
 
 		logBuilder.WriteString(fmt.Sprintf("\n--- 尝试 %d ---\n", i+1))
@@ -230,147 +272,26 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"passthrough", isPassthrough,
 			"stream", isStream)
 
-		var newBody []byte
+		var prepareResult *PrepareResult
 		var err error
 
-		// 协议直通：客户端和后端使用相同协议，直接使用原始请求体
-		if isPassthrough {
-			// 只需要替换 model 字段
-			modifiedBody := make(map[string]interface{})
-			if err := json.Unmarshal(originalBody, &modifiedBody); err != nil {
-				lastErr = err
-				logBuilder.WriteString(fmt.Sprintf("解析原始请求体失败: %v\n", err))
-				logging.ProxySugar.Errorw("解析原始请求体失败", "reqID", reqID, "error", err)
-				continue
-			}
-			modifiedBody["model"] = route.Model
-			newBody, err = json.Marshal(modifiedBody)
-			if err != nil {
-				lastErr = err
-				logBuilder.WriteString(fmt.Sprintf("序列化请求体失败: %v\n", err))
-				logging.ProxySugar.Errorw("序列化请求体失败", "reqID", reqID, "error", err)
-				continue
-			}
-			logBuilder.WriteString(fmt.Sprintf("✓ 协议直通 (%s)，仅替换model字段\n", protocol))
-			logging.ProxySugar.Infow("协议直通处理完成",
-				"reqID", reqID,
-				"protocol", protocol,
-				"original_size", len(originalBody),
-				"modified_size", len(newBody))
-		} else if protocol == "anthropic" && clientProtocol == ProtocolOpenAI {
-			// OpenAI → Anthropic 转换
-			modifiedBody := make(map[string]interface{})
-			for k, v := range reqBody {
-				modifiedBody[k] = v
-			}
-			modifiedBody["model"] = route.Model
-
-			newBody, err = p.converter.ConvertToAnthropic(modifiedBody)
-			if err != nil {
-				lastErr = err
-				logBuilder.WriteString(fmt.Sprintf("转换为Anthropic格式失败: %v\n", err))
-				logging.ProxySugar.Errorw("协议转换失败",
-					"reqID", reqID,
-					"protocol", "anthropic",
-					"backend", route.BackendName,
-					"error", err)
-				continue
-			}
-
-			// 获取转换元数据
-			convMeta := p.converter.GetLastConversion()
-
-			// 记录转换后的请求体大小
-			convertedSize := len(newBody)
-
-			// 详细记录参数转换情况（增加空指针检查）
-			if convMeta != nil {
-				logging.ProxySugar.Infow("参数转换详情",
-					"reqID", reqID,
-					"backend", route.BackendName,
-					"input_max_tokens", convMeta.InputMaxTokens,
-					"output_max_tokens", convMeta.OutputMaxTokens,
-					"max_tokens_source", convMeta.MaxTokensSource,
-					"input_temperature", convMeta.InputTemperature,
-					"output_temperature", convMeta.OutputTemperature,
-					"input_top_p", convMeta.InputTopP,
-					"output_top_p", convMeta.OutputTopP,
-					"input_stream", convMeta.InputStream,
-					"output_stream", convMeta.OutputStream,
-					"input_stop", convMeta.InputStop,
-					"output_stop", convMeta.OutputStop,
-					"input_tools_count", convMeta.InputTools,
-					"output_tools_count", convMeta.OutputTools,
-					"system_prompt_length", convMeta.SystemPromptLen)
-
-				logBuilder.WriteString("✓ 已转换为Anthropic协议格式\n")
-				logBuilder.WriteString(fmt.Sprintf("  max_tokens: %v → %d (%s)\n",
-					convMeta.InputMaxTokens, convMeta.OutputMaxTokens, convMeta.MaxTokensSource))
-				if convMeta.SystemPromptLen > 0 {
-					logBuilder.WriteString(fmt.Sprintf("  system prompt: %d 字符\n", convMeta.SystemPromptLen))
-				}
-			} else {
-				logging.ProxySugar.Warnw("转换元数据为空",
-					"reqID", reqID,
-					"backend", route.BackendName)
-				logBuilder.WriteString("✓ 已转换为Anthropic协议格式（无元数据）\n")
-			}
-
-			logging.ProxySugar.Infow("Anthropic 请求体转换完成",
-				"reqID", reqID,
-				"original_size_bytes", requestBodySize,
-				"converted_size_bytes", convertedSize,
-				"backend", route.BackendName,
-				"model", route.Model)
-
-			logging.ProxySugar.Infow("协议转换成功",
-				"reqID", reqID,
-				"from", "openai",
-				"to", "anthropic",
-				"backend", route.BackendName)
-		} else if protocol == "openai" && clientProtocol == ProtocolAnthropic {
-			// Anthropic → OpenAI 转换
-			logging.ProxySugar.Infow("检测到Anthropic客户端请求OpenAI后端，需要转换",
-				"reqID", reqID,
-				"original_path", r.URL.Path)
-
-			convertedBody, err := p.requestDetector.ConvertAnthropicToOpenAI(reqBody)
-			if err != nil {
-				lastErr = err
-				logBuilder.WriteString(fmt.Sprintf("转换Anthropic请求失败: %v\n", err))
-				logging.NetworkSugar.Errorw("转换Anthropic请求失败", "reqID", reqID, "error", err)
-				continue
-			}
-			convertedBody["model"] = route.Model
-			newBody, err = json.Marshal(convertedBody)
-			if err != nil {
-				lastErr = err
-				logBuilder.WriteString(fmt.Sprintf("序列化请求体失败: %v\n", err))
-				logging.ProxySugar.Errorw("序列化请求体失败", "reqID", reqID, "error", err)
-				continue
-			}
-			logBuilder.WriteString("✓ 已转换为OpenAI协议格式\n")
-			logging.ProxySugar.Infow("协议转换完成",
-				"reqID", reqID,
-				"from", "anthropic",
-				"to", "openai",
-				"backend", route.BackendName)
-		} else {
-			// OpenAI → OpenAI（直通已在上面处理）
-			modifiedBody := make(map[string]interface{})
-			for k, v := range reqBody {
-				modifiedBody[k] = v
-			}
-			modifiedBody["model"] = route.Model
-			newBody, err = json.Marshal(modifiedBody)
-			if err != nil {
-				lastErr = err
-				logBuilder.WriteString(fmt.Sprintf("序列化请求体失败: %v\n", err))
-				logging.ProxySugar.Errorw("序列化请求体失败", "reqID", reqID, "error", err)
-				continue
-			}
-			logBuilder.WriteString("✓ 使用OpenAI协议格式\n")
+		// 使用 RequestBodyPreparer 准备请求体
+		prepareResult, err = p.bodyPreparer.PrepareRequestBody(
+			reqBody,
+			originalBody,
+			&route,
+			protocol,
+			clientProtocol,
+			reqID,
+			&logBuilder,
+		)
+		if err != nil {
+			lastErr = err
+			continue
 		}
+
+		newBody := prepareResult.Body
+		isPassthrough = prepareResult.IsPassthrough
 
 		targetURL, err := url.Parse(route.BackendURL)
 		if err != nil {
@@ -381,74 +302,25 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 根据协议确定端点路径
-		var apiPath string
-		if protocol == "anthropic" {
-			apiPath = "/v1/messages"
-		} else {
-			apiPath = r.URL.Path // OpenAI 使用原始路径
-		}
+		apiPath := GetAPIPath(protocol, r.URL.Path)
+		logBuilder.WriteString(fmt.Sprintf("API路径: %s\n", apiPath))
 
-		backendPath := targetURL.Path
-		if backendPath != "" && strings.HasPrefix(apiPath, backendPath) {
-			targetURL.Path = apiPath
-		} else {
-			targetURL.Path = backendPath + apiPath
-		}
-		targetURL.RawQuery = r.URL.RawQuery
-
-		logBuilder.WriteString(fmt.Sprintf("目标URL: %s\n", targetURL.String()))
-
-		proxyReq, err := http.NewRequest(r.Method, targetURL.String(), bytes.NewReader(newBody))
+		// 使用 ProxyRequestBuilder 构建代理请求
+		apiKey := bkend.APIKey
+		proxyReq, err := p.requestBuilder.BuildRequestWithAPIKey(
+			r,
+			targetURL,
+			newBody,
+			protocol,
+			apiKey,
+			cfg,
+			reqID,
+			apiPath,
+		)
 		if err != nil {
 			lastErr = err
-			logBuilder.WriteString(fmt.Sprintf("创建代理请求失败: %v\n", err))
-			logging.ProxySugar.Errorw("创建代理请求失败", "reqID", reqID, "error", err)
+			logBuilder.WriteString(fmt.Sprintf("构建代理请求失败: %v\n", err))
 			continue
-		}
-
-		// 记录即将发送的请求详情
-		logging.ProxySugar.Infow("发送请求到后端",
-			"reqID", reqID,
-			"method", proxyReq.Method,
-			"url", targetURL.String(),
-			"body_size", len(newBody),
-			"protocol", protocol,
-			"backend", route.BackendName)
-		for k, v := range r.Header {
-			proxyReq.Header[k] = v
-		}
-		proxyReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
-
-		// 根据协议设置特定的请求头
-		if protocol == "anthropic" {
-			// Anthropic 需要特定的头部
-			proxyReq.Header.Set("anthropic-version", "2023-06-01")
-			proxyReq.Header.Set("Content-Type", "application/json")
-			// 移除 OpenAI 特定的头部
-			proxyReq.Header.Del("OpenAI-Organization")
-			proxyReq.Header.Del("OpenAI-Project")
-		}
-
-		if cfg.Proxy.GetForwardClientIP() {
-			clientIP := middleware.ExtractIP(r)
-			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-				proxyReq.Header.Set("X-Forwarded-For", xff+", "+clientIP)
-			} else {
-				proxyReq.Header.Set("X-Forwarded-For", clientIP)
-			}
-			if r.Header.Get("X-Real-IP") == "" {
-				proxyReq.Header.Set("X-Real-IP", clientIP)
-			}
-		}
-
-		// 设置 API Key（Anthropic 使用 x-api-key 头部）
-		if bkend.APIKey != "" {
-			if protocol == "anthropic" {
-				proxyReq.Header.Set("x-api-key", bkend.APIKey)
-				proxyReq.Header.Del("Authorization") // 移除 OpenAI 的 Authorization 头
-			} else {
-				proxyReq.Header.Set("Authorization", "Bearer "+bkend.APIKey)
-			}
 		}
 
 		client := GetHTTPClient()
@@ -542,59 +414,21 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						"protocol", protocol,
 						"error", err)
 				} else {
-					// 协议直通场景，不需要转换响应
-					if isPassthrough {
-						logging.ProxySugar.Infow("协议直通响应",
+					// 使用 ResponseConverter 转换响应
+					convertedBytes, convErr := p.responseConverter.ConvertResponse(
+						bodyBytes,
+						protocol,
+						clientProtocol,
+						isPassthrough,
+						reqID,
+						route.BackendName,
+					)
+					if convErr != nil {
+						logging.ProxySugar.Warnw("响应转换失败，使用原始响应",
 							"reqID", reqID,
-							"protocol", protocol,
-							"backend", route.BackendName,
-							"response_size", len(bodyBytes),
-							"note", "客户端与后端协议相同，直接返回")
+							"error", convErr)
 					} else {
-						// 需要协议转换的场景
-						if protocol == "anthropic" && clientProtocol == ProtocolOpenAI {
-							// 后端 Anthropic → 客户端 OpenAI
-							logging.ProxySugar.Infow("转换后端响应格式",
-								"reqID", reqID,
-								"from", "anthropic",
-								"to", "openai",
-								"backend", route.BackendName,
-								"response_size", len(bodyBytes))
-							convertedBytes, convErr := p.converter.ConvertFromAnthropic(bodyBytes)
-							if convErr != nil {
-								logging.ProxySugar.Errorw("后端响应转换失败",
-									"reqID", reqID,
-									"protocol", "anthropic",
-									"backend", route.BackendName,
-									"error", convErr)
-							} else {
-								bodyBytes = convertedBytes
-								logging.ProxySugar.Infow("后端响应转换成功",
-									"reqID", reqID,
-									"from", "anthropic",
-									"to", "openai",
-									"backend", route.BackendName,
-									"size", len(bodyBytes))
-							}
-						} else if protocol == "openai" && clientProtocol == ProtocolAnthropic {
-							// 后端 OpenAI → 客户端 Anthropic
-							logging.ProxySugar.Infow("转换响应为客户端协议",
-								"reqID", reqID,
-								"from", "openai",
-								"to", "anthropic",
-								"client_protocol", clientProtocol)
-							convertedBytes, convErr := p.requestDetector.ConvertOpenAIToAnthropicResponse(bodyBytes)
-							if convErr != nil {
-								logging.ProxySugar.Errorw("客户端协议转换失败",
-									"reqID", reqID,
-									"error", convErr)
-							} else {
-								bodyBytes = convertedBytes
-								logging.ProxySugar.Infow("客户端协议转换成功",
-									"reqID", reqID,
-									"size", len(bodyBytes))
-							}
-						}
+						bodyBytes = convertedBytes
 					}
 
 					logging.ProxySugar.Infow("非流式响应",
@@ -696,7 +530,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 	logging.ProxySugar.Infow("使用 OpenAI 原始流式传输",
 		"backend", backendName,
 		"protocol", protocol)
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, streamBufferSize)
 	bytesProcessed := 0
 	chunksReceived := 0
 

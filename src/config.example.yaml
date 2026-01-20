@@ -46,6 +46,23 @@ fallback:
   alias_fallback:
     "anthropic/claude-sonnet-4":
     - "openai/gpt-4o"
+  
+  enable_backoff: true
+  backoff_initial_delay: 100
+  backoff_max_delay: 5000
+  backoff_multiplier: 2.0
+  backoff_jitter: 0.1
+  
+  enable_circuit_breaker: false
+  circuit_failure_threshold: 5
+  circuit_success_threshold: 2
+  circuit_open_timeout: 60
+
+timeout:
+  connect_timeout: 10s
+  read_timeout: 60s
+  write_timeout: 60s
+  total_timeout: 15m
 
 detection:
   error_codes: [ "4xx", "5xx" ]

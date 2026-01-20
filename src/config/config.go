@@ -58,9 +58,75 @@ func (m *ModelAlias) IsEnabled() bool {
 }
 
 type Fallback struct {
-	CooldownSeconds int                 `yaml:"cooldown_seconds"`
-	MaxRetries      int                 `yaml:"max_retries"`
-	AliasFallback   map[string][]string `yaml:"alias_fallback,omitempty"`
+	CooldownSeconds       int                 `yaml:"cooldown_seconds"`
+	MaxRetries            int                 `yaml:"max_retries"`
+	AliasFallback         map[string][]string `yaml:"alias_fallback,omitempty"`
+	EnableBackoff         *bool               `yaml:"enable_backoff,omitempty"`
+	BackoffInitialDelay   int                 `yaml:"backoff_initial_delay,omitempty"`
+	BackoffMaxDelay       int                 `yaml:"backoff_max_delay,omitempty"`
+	BackoffMultiplier     float64             `yaml:"backoff_multiplier,omitempty"`
+	BackoffJitter         float64             `yaml:"backoff_jitter,omitempty"`
+	EnableCircuitBreaker  *bool               `yaml:"enable_circuit_breaker,omitempty"`
+	CircuitFailureThresh  int                 `yaml:"circuit_failure_threshold,omitempty"`
+	CircuitSuccessThresh  int                 `yaml:"circuit_success_threshold,omitempty"`
+	CircuitOpenTimeoutSec int                 `yaml:"circuit_open_timeout,omitempty"`
+}
+
+func (f *Fallback) IsBackoffEnabled() bool {
+	return f.EnableBackoff != nil && *f.EnableBackoff
+}
+
+func (f *Fallback) GetBackoffInitialDelay() int {
+	if f.BackoffInitialDelay <= 0 {
+		return 100
+	}
+	return f.BackoffInitialDelay
+}
+
+func (f *Fallback) GetBackoffMaxDelay() int {
+	if f.BackoffMaxDelay <= 0 {
+		return 5000
+	}
+	return f.BackoffMaxDelay
+}
+
+func (f *Fallback) GetBackoffMultiplier() float64 {
+	if f.BackoffMultiplier <= 0 {
+		return 2.0
+	}
+	return f.BackoffMultiplier
+}
+
+func (f *Fallback) GetBackoffJitter() float64 {
+	if f.BackoffJitter < 0 || f.BackoffJitter > 1 {
+		return 0.1
+	}
+	return f.BackoffJitter
+}
+
+func (f *Fallback) IsCircuitBreakerEnabled() bool {
+	return f.EnableCircuitBreaker != nil && *f.EnableCircuitBreaker
+}
+
+func (f *Fallback) GetCircuitFailureThreshold() int {
+	if f.CircuitFailureThresh <= 0 {
+		return 5
+	}
+	return f.CircuitFailureThresh
+}
+
+func (f *Fallback) GetCircuitSuccessThreshold() int {
+	if f.CircuitSuccessThresh <= 0 {
+		return 2
+	}
+	return f.CircuitSuccessThresh
+}
+
+func (f *Fallback) GetCircuitOpenTimeout() int {
+	if f.CircuitOpenTimeoutSec <= 0 {
+		return 60
+	}
+	return f.CircuitOpenTimeoutSec
 }
 
 type Detection struct {
