@@ -25,7 +25,7 @@ func (d *Detector) ShouldFallback(statusCode int, body string) bool {
 		errorCodes = []string{"4xx", "5xx"}
 	}
 
-	logging.ProxySugar.Debugw("开始错误检测", "statusCode", statusCode, "errorCodes", errorCodes, "errorPatterns", cfg.Detection.ErrorPatterns, "bodyLength", len(body))
+	logging.FileOnlySugar.Debugw("开始错误检测", "statusCode", statusCode, "errorCodes", errorCodes, "errorPatterns", cfg.Detection.ErrorPatterns, "bodyLength", len(body))
 
 	for _, pattern := range errorCodes {
 		if d.matchStatusCode(statusCode, pattern) {
@@ -41,7 +41,7 @@ func (d *Detector) ShouldFallback(statusCode int, body string) bool {
 		}
 	}
 
-	logging.ProxySugar.Debugw("未匹配到任何错误规则,不触发回退", "statusCode", statusCode)
+	logging.FileOnlySugar.Debugw("未匹配到任何错误规则,不触发回退", "statusCode", statusCode)
 	return false
 }
 

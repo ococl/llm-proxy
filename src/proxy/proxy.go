@@ -66,7 +66,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		expected := "Bearer " + cfg.ProxyAPIKey
 		if auth != expected {
-			logging.NetworkSugar.Warnw("API Key验证失败", "client", r.RemoteAddr)
+			clientIP := middleware.ExtractIP(r)
+			logging.NetworkSugar.Warnw("API Key验证失败", "client", clientIP)
 			errors.WriteJSONError(w, errors.ErrUnauthorized, http.StatusUnauthorized, "")
 			return
 		}
@@ -105,7 +106,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logging.ProxySugar.Infow("收到请求", "reqID", reqID, "model", modelAlias, "client", r.RemoteAddr)
+	clientIP := middleware.ExtractIP(r)
+	logging.ProxySugar.Infow("收到请求", "reqID", reqID, "model", modelAlias, "client", clientIP)
 
 	routes, err := p.router.Resolve(modelAlias)
 	if err != nil {
@@ -119,7 +121,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logging.ProxySugar.Debugw("解析到可用路由", "reqID", reqID, "count", len(routes))
+	logging.FileOnlySugar.Debugw("解析到可用路由", "reqID", reqID, "count", len(routes))
 
 	isStream := false
 	if s, ok := reqBody["stream"].(bool); ok {
@@ -128,7 +130,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var logBuilder strings.Builder
 	logBuilder.WriteString(fmt.Sprintf("================== 请求日志 ==================\n"))
-	logBuilder.WriteString(fmt.Sprintf("请求ID: %s\n时间: %s\n客户端: %s\n\n", reqID, time.Now().Format(time.RFC3339), r.RemoteAddr))
+	logBuilder.WriteString(fmt.Sprintf("请求ID: %s\n时间: %s\n客户端: %s\n\n", reqID, time.Now().Format(time.RFC3339), clientIP))
 	logBuilder.WriteString("--- 请求头 ---\n")
 	for k, v := range r.Header {
 		logBuilder.WriteString(fmt.Sprintf("%s: %s\n", k, strings.Join(v, ", ")))
@@ -160,7 +162,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		logBuilder.WriteString(fmt.Sprintf("\n--- 尝试 %d ---\n", i+1))
 		logBuilder.WriteString(fmt.Sprintf("后端: %s\n模型: %s\n", route.BackendName, route.Model))
-		logging.ProxySugar.Infow("尝试后端", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
+		logging.ProxySugar.Debugw("尝试后端", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
 
 		modifiedBody := make(map[string]interface{})
 		for k, v := range reqBody {
@@ -284,10 +286,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(resp.StatusCode)
 
 			if isStream {
-				logging.ProxySugar.Infow("开始流式传输", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
+				logging.ProxySugar.Debugw("开始流式传输", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
 				logging.FileOnlySugar.Debugw("后端响应头部", "reqID", reqID, "backend", route.BackendName, "headers", resp.Header)
 				p.streamResponse(w, resp.Body, route.BackendName)
-				logging.ProxySugar.Infow("完成流式传输", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
+				logging.ProxySugar.Debugw("完成流式传输", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
 			} else {
 				bodyBytes, err := io.ReadAll(resp.Body)
 				if err != nil {
@@ -325,7 +327,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			key := p.cooldown.Key(route.BackendName, route.Model)
 			p.cooldown.SetCooldown(key, time.Duration(cfg.Fallback.CooldownSeconds)*time.Second)
 			logBuilder.WriteString(fmt.Sprintf("操作: 冷却 %s，尝试下一个后端\n", key))
-			logging.ProxySugar.Infow("触发回退", "reqID", reqID, "backend", key, "action", "进入冷却")
+			logging.ProxySugar.Debugw("触发回退", "reqID", reqID, "backend", key, "action", "进入冷却")
 			continue
 		}
 
@@ -404,7 +406,8 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 
 func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 	cfg := p.configMgr.Get()
-	logging.ProxySugar.Debugw("收到模型列表请求", "client", r.RemoteAddr)
+	clientIP := middleware.ExtractIP(r)
+	logging.ProxySugar.Debugw("收到模型列表请求", "client", clientIP)
 
 	type Model struct {
 		ID      string `json:"id"`
