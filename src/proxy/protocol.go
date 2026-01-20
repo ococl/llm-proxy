@@ -252,3 +252,111 @@ func (pc *ProtocolConverter) ConvertFromAnthropic(anthropicResp []byte) ([]byte,
 
 	return json.Marshal(openAIBody)
 }
+
+// ConvertAnthropicStreamToOpenAI converts Anthropic SSE event to OpenAI SSE format
+func (pc *ProtocolConverter) ConvertAnthropicStreamToOpenAI(anthropicEvent string) (string, error) {
+	// Anthropic SSE events:
+	// event: message_start, content_block_start, content_block_delta, content_block_stop, message_delta, message_stop
+
+	if anthropicEvent == "" || anthropicEvent == "event: ping" {
+		return "", nil
+	}
+
+	// Parse event type and data
+	var eventType, dataStr string
+	lines := splitLines(anthropicEvent)
+	for _, line := range lines {
+		if len(line) > 7 && line[:7] == "event: " {
+			eventType = line[7:]
+		} else if len(line) > 6 && line[:6] == "data: " {
+			dataStr = line[6:]
+		}
+	}
+
+	if dataStr == "" {
+		return "", nil
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(dataStr), &data); err != nil {
+		return "", nil
+	}
+
+	// Convert based on event type
+	switch eventType {
+	case "message_start":
+		// Initialize OpenAI stream response
+		return pc.createOpenAIStreamEvent("", "", ""), nil
+
+	case "content_block_delta":
+		// Extract text delta
+		if delta, ok := data["delta"].(map[string]interface{}); ok {
+			if deltaType, _ := delta["type"].(string); deltaType == "text_delta" {
+				if text, ok := delta["text"].(string); ok {
+					return pc.createOpenAIStreamEvent(text, "", ""), nil
+				}
+			}
+		}
+
+	case "message_delta":
+		// Handle finish reason
+		if delta, ok := data["delta"].(map[string]interface{}); ok {
+			if stopReason, ok := delta["stop_reason"].(string); ok {
+				return pc.createOpenAIStreamEvent("", stopReason, ""), nil
+			}
+		}
+
+	case "message_stop":
+		// Send [DONE]
+		return "data: [DONE]\n\n", nil
+	}
+
+	return "", nil
+}
+
+func (pc *ProtocolConverter) createOpenAIStreamEvent(content, finishReason, toolCallDelta string) string {
+	choice := map[string]interface{}{
+		"index": 0,
+		"delta": map[string]interface{}{},
+	}
+
+	if content != "" {
+		choice["delta"].(map[string]interface{})["content"] = content
+	}
+
+	if finishReason != "" {
+		choice["finish_reason"] = finishReason
+	} else {
+		choice["finish_reason"] = nil
+	}
+
+	event := map[string]interface{}{
+		"id":      "chatcmpl-anthropic",
+		"object":  "chat.completion.chunk",
+		"created": 0,
+		"model":   "claude",
+		"choices": []interface{}{choice},
+	}
+
+	eventJSON, _ := json.Marshal(event)
+	return "data: " + string(eventJSON) + "\n\n"
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	var line string
+	for _, c := range s {
+		if c == '\n' {
+			if line != "" {
+				lines = append(lines, line)
+			}
+			line = ""
+		} else if c != '\r' {
+			line += string(c)
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
+}

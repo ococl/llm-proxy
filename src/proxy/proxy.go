@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -114,7 +115,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientIP := middleware.ExtractIP(r)
-	logging.ProxySugar.Infow("收到请求", "reqID", reqID, "model", modelAlias, "client", clientIP)
+
+	// 判断是否为流式请求
+	isStream := false
+	if s, ok := reqBody["stream"].(bool); ok {
+		isStream = s
+	}
+
+	logging.ProxySugar.Infow("收到请求",
+		"reqID", reqID,
+		"model", modelAlias,
+		"client", clientIP,
+		"stream", isStream)
 
 	routes, err := p.router.Resolve(modelAlias)
 	if err != nil {
@@ -129,11 +141,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logging.FileOnlySugar.Debugw("解析到可用路由", "reqID", reqID, "count", len(routes))
-
-	isStream := false
-	if s, ok := reqBody["stream"].(bool); ok {
-		isStream = s
-	}
 
 	var logBuilder strings.Builder
 	logBuilder.WriteString(fmt.Sprintf("================== 请求日志 ==================\n"))
@@ -169,7 +176,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		logBuilder.WriteString(fmt.Sprintf("\n--- 尝试 %d ---\n", i+1))
 		logBuilder.WriteString(fmt.Sprintf("后端: %s\n模型: %s\n", route.BackendName, route.Model))
-		logging.ProxySugar.Debugw("尝试后端", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
 
 		// 获取后端配置以确定协议
 		bkend := p.configMgr.GetBackend(route.BackendName)
@@ -183,7 +189,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 确定使用的协议（模型级别优先）
 		protocol := route.GetProtocol(bkend.GetProtocol())
 		logBuilder.WriteString(fmt.Sprintf("协议: %s\n", protocol))
-		logging.ProxySugar.Debugw("使用协议", "reqID", reqID, "protocol", protocol, "backend", route.BackendName)
+
+		// 在控制台明确打印协议类型
+		logging.ProxySugar.Infow("转发请求",
+			"reqID", reqID,
+			"attempt", i+1,
+			"backend", route.BackendName,
+			"model", route.Model,
+			"protocol", protocol,
+			"stream", isStream)
 
 		modifiedBody := make(map[string]interface{})
 		for k, v := range reqBody {
@@ -200,10 +214,19 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				lastErr = err
 				logBuilder.WriteString(fmt.Sprintf("转换为Anthropic格式失败: %v\n", err))
-				logging.ProxySugar.Errorw("转换为Anthropic格式失败", "reqID", reqID, "error", err)
+				logging.ProxySugar.Errorw("协议转换失败",
+					"reqID", reqID,
+					"protocol", "anthropic",
+					"backend", route.BackendName,
+					"error", err)
 				continue
 			}
-			logBuilder.WriteString("已转换为Anthropic协议格式\n")
+			logBuilder.WriteString("✓ 已转换为Anthropic协议格式\n")
+			logging.ProxySugar.Infow("协议转换成功",
+				"reqID", reqID,
+				"from", "openai",
+				"to", "anthropic",
+				"backend", route.BackendName)
 		} else {
 			// OpenAI 格式，直接序列化
 			newBody, err = json.Marshal(modifiedBody)
@@ -213,6 +236,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				logging.ProxySugar.Errorw("序列化请求体失败", "reqID", reqID, "error", err)
 				continue
 			}
+			logBuilder.WriteString("✓ 使用OpenAI协议格式\n")
 		}
 
 		targetURL, err := url.Parse(route.BackendURL)
@@ -223,12 +247,19 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		backendPath := targetURL.Path
-		reqPath := r.URL.Path
-		if backendPath != "" && strings.HasPrefix(reqPath, backendPath) {
-			targetURL.Path = reqPath
+		// 根据协议确定端点路径
+		var apiPath string
+		if protocol == "anthropic" {
+			apiPath = "/v1/messages"
 		} else {
-			targetURL.Path = backendPath + reqPath
+			apiPath = r.URL.Path // OpenAI 使用原始路径
+		}
+
+		backendPath := targetURL.Path
+		if backendPath != "" && strings.HasPrefix(apiPath, backendPath) {
+			targetURL.Path = apiPath
+		} else {
+			targetURL.Path = backendPath + apiPath
 		}
 		targetURL.RawQuery = r.URL.RawQuery
 
@@ -316,7 +347,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if metrics != nil {
 				attempts = metrics.Attempts
 			}
-			logging.ProxySugar.Infow("请求成功", "reqID", reqID, "backend", route.BackendName, "status", resp.StatusCode, "duration_ms", backendDuration.Milliseconds(), "attempts", attempts)
+
+			// 记录成功信息，包含协议类型
+			logging.ProxySugar.Infow("请求成功",
+				"reqID", reqID,
+				"backend", route.BackendName,
+				"model", route.Model,
+				"protocol", protocol,
+				"stream", isStream,
+				"status", resp.StatusCode,
+				"duration_ms", backendDuration.Milliseconds(),
+				"attempts", attempts)
 			logging.WriteRequestLogFile(cfg, reqID, logBuilder.String())
 
 			finalBackend = route.BackendName
@@ -338,16 +379,56 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(resp.StatusCode)
 
 			if isStream {
-				logging.ProxySugar.Debugw("开始流式传输", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
+				logging.ProxySugar.Infow("开始流式传输",
+					"reqID", reqID,
+					"backend", route.BackendName,
+					"protocol", protocol,
+					"model", route.Model)
 				logging.FileOnlySugar.Debugw("后端响应头部", "reqID", reqID, "backend", route.BackendName, "headers", resp.Header)
-				p.streamResponse(w, resp.Body, route.BackendName)
-				logging.ProxySugar.Debugw("完成流式传输", "reqID", reqID, "backend", route.BackendName, "model", route.Model)
+				p.streamResponse(w, resp.Body, route.BackendName, protocol)
+				logging.ProxySugar.Infow("完成流式传输",
+					"reqID", reqID,
+					"backend", route.BackendName,
+					"protocol", protocol,
+					"model", route.Model)
 			} else {
 				bodyBytes, err := io.ReadAll(resp.Body)
 				if err != nil {
-					logging.ProxySugar.Errorw("读取非流式响应失败", "reqID", reqID, "error", err)
+					logging.ProxySugar.Errorw("读取非流式响应失败",
+						"reqID", reqID,
+						"backend", route.BackendName,
+						"protocol", protocol,
+						"error", err)
 				} else {
-					logging.ProxySugar.Debugw("非流式响应", "reqID", reqID, "backend", route.BackendName, "response_size", len(bodyBytes))
+					if protocol == "anthropic" {
+						logging.ProxySugar.Infow("转换响应格式",
+							"reqID", reqID,
+							"from", "anthropic",
+							"to", "openai",
+							"backend", route.BackendName,
+							"response_size", len(bodyBytes))
+						convertedBytes, convErr := p.converter.ConvertFromAnthropic(bodyBytes)
+						if convErr != nil {
+							logging.ProxySugar.Errorw("响应转换失败",
+								"reqID", reqID,
+								"protocol", "anthropic",
+								"backend", route.BackendName,
+								"error", convErr)
+						} else {
+							bodyBytes = convertedBytes
+							logging.ProxySugar.Infow("响应转换成功",
+								"reqID", reqID,
+								"from", "anthropic",
+								"to", "openai",
+								"backend", route.BackendName,
+								"size", len(bodyBytes))
+						}
+					}
+					logging.ProxySugar.Infow("非流式响应",
+						"reqID", reqID,
+						"backend", route.BackendName,
+						"protocol", protocol,
+						"response_size", len(bodyBytes))
 					_, writeErr := w.Write(bodyBytes)
 					if writeErr != nil {
 						logging.ProxySugar.Errorw("写入非流式响应失败", "reqID", reqID, "error", writeErr)
@@ -417,13 +498,29 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(lastBody))
 }
 
-func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backendName string) {
+func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backendName string, protocol string) {
+	logging.ProxySugar.Infow("开始流式响应处理", "backend", backendName, "protocol", protocol)
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		logging.ProxySugar.Warnw("不支持流式响应", "backend", backendName, "protocol", protocol)
 		io.Copy(w, body)
 		return
 	}
 
+	// For Anthropic protocol, we need line-by-line parsing
+	if protocol == "anthropic" {
+		logging.ProxySugar.Infow("使用 Anthropic 流式转换",
+			"backend", backendName,
+			"protocol", protocol)
+		p.streamAnthropicResponse(w, body, backendName, flusher)
+		return
+	}
+
+	// For OpenAI protocol, use raw byte streaming
+	logging.ProxySugar.Infow("使用 OpenAI 原始流式传输",
+		"backend", backendName,
+		"protocol", protocol)
 	buf := make([]byte, 32*1024)
 	bytesProcessed := 0
 	chunksReceived := 0
@@ -454,6 +551,55 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 		}
 	}
 	logging.FileOnlySugar.Infow("SSE流传输完成", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
+}
+
+func (p *Proxy) streamAnthropicResponse(w http.ResponseWriter, body io.ReadCloser, backendName string, flusher http.Flusher) {
+	scanner := bufio.NewScanner(body)
+	var eventBuffer strings.Builder
+	linesProcessed := 0
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		linesProcessed++
+
+		// SSE events are separated by empty lines
+		if line == "" {
+			if eventBuffer.Len() > 0 {
+				// Convert the complete event
+				convertedEvent, err := p.converter.ConvertAnthropicStreamToOpenAI(eventBuffer.String())
+				if err == nil && convertedEvent != "" {
+					if _, writeErr := w.Write([]byte(convertedEvent)); writeErr != nil {
+						logging.ProxySugar.Errorw("写入转换后的SSE事件失败", "backend", backendName, "error", writeErr)
+						return
+					}
+					flusher.Flush()
+				}
+				eventBuffer.Reset()
+			}
+			continue
+		}
+
+		// Accumulate lines for the current event
+		if eventBuffer.Len() > 0 {
+			eventBuffer.WriteString("\n")
+		}
+		eventBuffer.WriteString(line)
+	}
+
+	// Handle any remaining event
+	if eventBuffer.Len() > 0 {
+		convertedEvent, err := p.converter.ConvertAnthropicStreamToOpenAI(eventBuffer.String())
+		if err == nil && convertedEvent != "" {
+			w.Write([]byte(convertedEvent))
+			flusher.Flush()
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		logging.ProxySugar.Errorw("读取Anthropic SSE流错误", "backend", backendName, "error", err)
+	}
+
+	logging.FileOnlySugar.Infow("Anthropic SSE流传输完成", "lines_processed", linesProcessed, "backend", backendName)
 }
 
 func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
