@@ -294,8 +294,15 @@ func initRequestErrorLoggers(cfg *config.Config) error {
 		}
 	}
 
-	RequestLogger, requestLogger, _ = createFileOnlyLogger(cfg, "request", filepath.Join(reqDir, "requests.log"))
-	ErrorLogger, errorLogger, _ = createFileOnlyLogger(cfg, "error", filepath.Join(errDir, "errors.log"))
+	var err error
+	RequestLogger, requestLogger, err = createFileOnlyLogger(cfg, "request", filepath.Join(reqDir, "requests.log"))
+	if err != nil {
+		return fmt.Errorf("初始化RequestLogger失败: %w", err)
+	}
+	ErrorLogger, errorLogger, err = createFileOnlyLogger(cfg, "error", filepath.Join(errDir, "errors.log"))
+	if err != nil {
+		return fmt.Errorf("初始化ErrorLogger失败: %w", err)
+	}
 	return nil
 }
 

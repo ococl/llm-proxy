@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -84,7 +85,20 @@ func isHopByHopHeader(header string) bool {
 	return hopByHopHeaders[header]
 }
 
+func isClientDisconnect(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "connection was forcibly closed") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "wsasend")
+}
+
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if r.URL.Path == "/health" || r.URL.Path == "/healthz" {
 		cfg := p.configMgr.Get()
 		health := map[string]interface{}{
@@ -99,7 +113,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	cfg := p.configMgr.Get()
 
-	// 检测请求协议类型（客户端使用的协议）- 必须在API Key验证之前
 	clientProtocol := p.requestDetector.DetectProtocol(r)
 
 	// 根据协议验证API Key
@@ -352,6 +365,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		requestTimeout := cfg.Timeout.GetTotalTimeout()
+		if requestTimeout == 0 {
+			requestTimeout = 15 * time.Minute
+		}
+		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+
+		proxyReq = proxyReq.WithContext(reqCtx)
+
 		client := GetHTTPClient()
 		backendStart := time.Now()
 		resp, err := client.Do(proxyReq)
@@ -361,6 +383,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err != nil {
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
 			lastErr = err
 			logBuilder.WriteString(fmt.Sprintf("\n--- 响应详情 ---\n"))
 			logBuilder.WriteString(fmt.Sprintf("错误: %v\n", err))
@@ -469,7 +494,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						"response_size", len(bodyBytes))
 					_, writeErr := w.Write(bodyBytes)
 					if writeErr != nil {
-						logging.ProxySugar.Errorw("写入非流式响应失败", "reqID", reqID, "error", writeErr)
+						if isClientDisconnect(writeErr) {
+							logging.ProxySugar.Debugw("客户端断开连接",
+								"backend", route.BackendName,
+								"error", writeErr.Error())
+						} else {
+							logging.ProxySugar.Errorw("写入响应失败",
+								"backend", route.BackendName,
+								"error", writeErr)
+						}
+						return
 					}
 				}
 			}
@@ -537,12 +571,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backendName string, protocol string, clientProtocol RequestProtocol, prepResult *PrepareResult) {
+	defer body.Close() // 确保所有路径都关闭 body
 	logging.ProxySugar.Infow("开始流式响应处理", "backend", backendName, "protocol", protocol, "client_protocol", clientProtocol)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		logging.ProxySugar.Warnw("不支持流式响应", "backend", backendName, "protocol", protocol)
-		defer body.Close()
 		io.Copy(w, body)
 		return
 	}

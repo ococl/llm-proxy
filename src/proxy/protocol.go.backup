@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"llm-proxy/logging"
 	"llm-proxy/translator"
 )
 
@@ -28,7 +29,7 @@ type ConversionMetadata struct {
 }
 
 // ProtocolConverter handles conversion between OpenAI and Anthropic API formats
-// Uses tokligence translator internally for robust conversion
+// Now using tokligence translator internally for robust conversion
 type ProtocolConverter struct {
 	lastConversion *ConversionMetadata
 	adapter        *translator.Adapter
@@ -45,101 +46,23 @@ func (pc *ProtocolConverter) GetLastConversion() *ConversionMetadata {
 	return pc.lastConversion
 }
 
-// ConvertToAnthropic converts OpenAI format request to Anthropic format
+// ConvertToAnthropic converts OpenAI format request to Anthropic format using tokligence
 func (pc *ProtocolConverter) ConvertToAnthropic(openAIBody map[string]interface{}) ([]byte, error) {
-	meta := &ConversionMetadata{}
-
-	if maxTokens, ok := openAIBody["max_tokens"]; ok {
-		meta.InputMaxTokens = maxTokens
-		meta.MaxTokensSource = "max_tokens"
-		switch v := maxTokens.(type) {
-		case float64:
-			meta.OutputMaxTokens = int(v)
-		case int:
-			meta.OutputMaxTokens = v
-		}
-	} else if maxComp, ok := openAIBody["max_completion_tokens"]; ok {
-		meta.InputMaxTokens = maxComp
-		meta.MaxTokensSource = "max_completion_tokens"
-		switch v := maxComp.(type) {
-		case float64:
-			meta.OutputMaxTokens = int(v)
-		case int:
-			meta.OutputMaxTokens = v
-		}
-	} else {
-		meta.MaxTokensSource = "default"
-		meta.OutputMaxTokens = 4096
-	}
-
-	if temp, ok := openAIBody["temperature"].(float64); ok {
-		meta.InputTemperature = temp
-		meta.OutputTemperature = temp
-	}
-
-	if topP, ok := openAIBody["top_p"].(float64); ok {
-		meta.InputTopP = topP
-		meta.OutputTopP = topP
-	}
-
-	if stream, ok := openAIBody["stream"].(bool); ok {
-		meta.InputStream = stream
-		meta.OutputStream = stream
-	}
-
-	if stop, ok := openAIBody["stop"]; ok {
-		meta.InputStop = stop
-		meta.OutputStop = stop
-	}
-
-	if tools, ok := openAIBody["tools"].([]interface{}); ok {
-		meta.InputTools = len(tools)
-		meta.OutputTools = len(tools)
-	}
-
-	result, err := pc.adapter.ConvertToAnthropic(openAIBody)
+	anthropicBody, err := pc.adapter.ConvertToAnthropic(openAIBody)
 	if err != nil {
+		logging.ProxySugar.Errorw("ConvertToAnthropic failed", "error", err)
 		return nil, err
 	}
-
-	var anthropicBody map[string]interface{}
-	if err := json.Unmarshal(result, &anthropicBody); err == nil {
-		if system, ok := anthropicBody["system"]; ok {
-			switch s := system.(type) {
-			case string:
-				meta.SystemPromptLen = len(s)
-			case []interface{}:
-				totalLen := 0
-				for _, block := range s {
-					if blockMap, ok := block.(map[string]interface{}); ok {
-						if text, ok := blockMap["text"].(string); ok {
-							totalLen += len(text)
-						}
-					}
-				}
-				meta.SystemPromptLen = totalLen
-			}
-		}
-	}
-
-	pc.lastConversion = meta
-
-	return result, nil
+	return anthropicBody, nil
 }
 
-// ConvertFromAnthropic converts Anthropic response to OpenAI format
+// ConvertFromAnthropic converts Anthropic response to OpenAI format using tokligence
 func (pc *ProtocolConverter) ConvertFromAnthropic(anthropicResp []byte) ([]byte, error) {
 	return pc.adapter.ConvertFromAnthropic(anthropicResp)
 }
 
 // ConvertAnthropicStreamToOpenAI converts Anthropic SSE event to OpenAI SSE format
 func (pc *ProtocolConverter) ConvertAnthropicStreamToOpenAI(anthropicEvent string) (string, error) {
-	if anthropicEvent == "" || anthropicEvent == "event: ping" {
-		return "", nil
-	}
-
-	var eventType, dataStr string
-	lines := splitLines(anthropicEvent)
 	for _, line := range lines {
 		if len(line) > 7 && line[:7] == "event: " {
 			eventType = line[7:]
@@ -160,6 +83,7 @@ func (pc *ProtocolConverter) ConvertAnthropicStreamToOpenAI(anthropicEvent strin
 	switch eventType {
 	case "message_start":
 		return pc.createOpenAIStreamEvent("", "", ""), nil
+
 	case "content_block_start":
 		if block, ok := data["content_block"].(map[string]interface{}); ok {
 			if blockType, _ := block["type"].(string); blockType == "tool_use" {
@@ -169,6 +93,7 @@ func (pc *ProtocolConverter) ConvertAnthropicStreamToOpenAI(anthropicEvent strin
 			}
 		}
 		return "", nil
+
 	case "content_block_delta":
 		if delta, ok := data["delta"].(map[string]interface{}); ok {
 			deltaType, _ := delta["type"].(string)
@@ -182,14 +107,17 @@ func (pc *ProtocolConverter) ConvertAnthropicStreamToOpenAI(anthropicEvent strin
 				}
 			}
 		}
+
 	case "content_block_stop":
 		return "", nil
+
 	case "message_delta":
 		if delta, ok := data["delta"].(map[string]interface{}); ok {
 			if stopReason, ok := delta["stop_reason"].(string); ok {
 				return pc.createOpenAIStreamEvent("", stopReason, ""), nil
 			}
 		}
+
 	case "message_stop":
 		return "data: [DONE]\n\n", nil
 	}
@@ -204,7 +132,9 @@ func (pc *ProtocolConverter) createOpenAIStreamEvent(content, finishReason, tool
 	}
 
 	if content != "" {
-		choice["delta"].(map[string]interface{})["content"] = content
+		if delta, ok := choice["delta"].(map[string]interface{}); ok {
+			delta["content"] = content
+		}
 	}
 
 	if finishReason != "" {
@@ -263,6 +193,7 @@ func (pc *ProtocolConverter) createOpenAIToolCallDelta(partialJSON string) strin
 			"tool_calls": []interface{}{
 				map[string]interface{}{
 					"index": 0,
+					"id":    "",
 					"type":  "function",
 					"function": map[string]interface{}{
 						"arguments": partialJSON,
