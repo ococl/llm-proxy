@@ -542,6 +542,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		logging.ProxySugar.Warnw("不支持流式响应", "backend", backendName, "protocol", protocol)
+		defer body.Close()
 		io.Copy(w, body)
 		return
 	}
@@ -602,6 +603,8 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 
 func (p *Proxy) streamAnthropicResponse(w http.ResponseWriter, body io.ReadCloser, backendName string, flusher http.Flusher) {
 	scanner := bufio.NewScanner(body)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
 	var eventBuffer strings.Builder
 	linesProcessed := 0
 
@@ -612,9 +615,10 @@ func (p *Proxy) streamAnthropicResponse(w http.ResponseWriter, body io.ReadClose
 		// SSE events are separated by empty lines
 		if line == "" {
 			if eventBuffer.Len() > 0 {
-				// Convert the complete event
 				convertedEvent, err := p.converter.ConvertAnthropicStreamToOpenAI(eventBuffer.String())
-				if err == nil && convertedEvent != "" {
+				if err != nil {
+					logging.ProxySugar.Warnw("转换Anthropic SSE事件失败", "backend", backendName, "error", err)
+				} else if convertedEvent != "" {
 					if _, writeErr := w.Write([]byte(convertedEvent)); writeErr != nil {
 						logging.ProxySugar.Errorw("写入转换后的SSE事件失败", "backend", backendName, "error", writeErr)
 						return
@@ -636,7 +640,9 @@ func (p *Proxy) streamAnthropicResponse(w http.ResponseWriter, body io.ReadClose
 	// Handle any remaining event
 	if eventBuffer.Len() > 0 {
 		convertedEvent, err := p.converter.ConvertAnthropicStreamToOpenAI(eventBuffer.String())
-		if err == nil && convertedEvent != "" {
+		if err != nil {
+			logging.ProxySugar.Warnw("转换剩余Anthropic SSE事件失败", "backend", backendName, "error", err)
+		} else if convertedEvent != "" {
 			w.Write([]byte(convertedEvent))
 			flusher.Flush()
 		}
@@ -651,15 +657,17 @@ func (p *Proxy) streamAnthropicResponse(w http.ResponseWriter, body io.ReadClose
 
 func (p *Proxy) streamOpenAIToAnthropicResponse(w http.ResponseWriter, body io.ReadCloser, backendName string, flusher http.Flusher, prepResult *PrepareResult) {
 	scanner := bufio.NewScanner(body)
-	var eventsSent int
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+	messageStartSent := false
 	var model string
+	eventsSent := 0
+
 	if prepResult != nil && prepResult.ConversionMeta != nil {
 		logging.ProxySugar.Debugw("OpenAI→Anthropic流式转换开始",
 			"backend", backendName,
 			"有转换元数据", prepResult.ConversionMeta != nil)
 	}
-
-	messageStartSent := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -674,8 +682,13 @@ func (p *Proxy) streamOpenAIToAnthropicResponse(w http.ResponseWriter, body io.R
 		if data == "[DONE]" {
 			events := p.converter.ConvertOpenAIStreamEndToAnthropic()
 			for _, event := range events {
+				eventType, ok := event["type"].(string)
+				if !ok || eventType == "" {
+					logging.ProxySugar.Warnw("事件缺少type字段", "event", event)
+					continue
+				}
 				eventJSON, _ := json.Marshal(event)
-				w.Write([]byte("event: " + event["type"].(string) + "\ndata: " + string(eventJSON) + "\n\n"))
+				w.Write([]byte("event: " + eventType + "\ndata: " + string(eventJSON) + "\n\n"))
 				flusher.Flush()
 				eventsSent++
 			}
@@ -701,8 +714,13 @@ func (p *Proxy) streamOpenAIToAnthropicResponse(w http.ResponseWriter, body io.R
 			}
 			events := p.converter.ConvertOpenAIStreamStartToAnthropic(model)
 			for _, event := range events {
+				eventType, ok := event["type"].(string)
+				if !ok || eventType == "" {
+					logging.ProxySugar.Warnw("事件缺少type字段", "event", event)
+					continue
+				}
 				eventJSON, _ := json.Marshal(event)
-				w.Write([]byte("event: " + event["type"].(string) + "\ndata: " + string(eventJSON) + "\n\n"))
+				w.Write([]byte("event: " + eventType + "\ndata: " + string(eventJSON) + "\n\n"))
 				flusher.Flush()
 				eventsSent++
 			}
@@ -718,8 +736,12 @@ func (p *Proxy) streamOpenAIToAnthropicResponse(w http.ResponseWriter, body io.R
 		}
 
 		if event != nil {
+			eventType, ok := event["type"].(string)
+			if !ok || eventType == "" {
+				logging.ProxySugar.Warnw("事件缺少type字段", "event", event)
+				continue
+			}
 			eventJSON, _ := json.Marshal(event)
-			eventType := event["type"].(string)
 			w.Write([]byte("event: " + eventType + "\ndata: " + string(eventJSON) + "\n\n"))
 			flusher.Flush()
 			eventsSent++

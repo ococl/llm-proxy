@@ -1,8 +1,11 @@
 package proxy
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 )
 
 // ConversionMetadata stores parameter conversion details for logging
@@ -115,28 +118,37 @@ func (pc *ProtocolConverter) ConvertToAnthropic(openAIBody map[string]interface{
 	var inputStop, outputStop interface{}
 	if stop, ok := openAIBody["stop"]; ok {
 		inputStop = stop
-		// Convert stop to stop_sequences format
 		switch v := stop.(type) {
 		case string:
-			// Single stop sequence -> array with one element
-			outputStop = []string{v}
-			anthropicBody["stop_sequences"] = outputStop
+			if strings.TrimSpace(v) != "" {
+				outputStop = []string{v}
+				anthropicBody["stop_sequences"] = outputStop
+			}
 		case []interface{}:
-			// Array of stop sequences -> convert to []string
-			stopSequences := make([]string, len(v))
-			for i, s := range v {
+			stopSequences := make([]string, 0, len(v))
+			for _, s := range v {
 				if str, ok := s.(string); ok {
-					stopSequences[i] = str
+					if strings.TrimSpace(str) != "" {
+						stopSequences = append(stopSequences, str)
+					}
 				}
 			}
-			outputStop = stopSequences
-			anthropicBody["stop_sequences"] = outputStop
+			if len(stopSequences) > 0 {
+				outputStop = stopSequences
+				anthropicBody["stop_sequences"] = outputStop
+			}
 		case []string:
-			// Already string array
-			outputStop = v
-			anthropicBody["stop_sequences"] = outputStop
+			stopSequences := make([]string, 0, len(v))
+			for _, str := range v {
+				if strings.TrimSpace(str) != "" {
+					stopSequences = append(stopSequences, str)
+				}
+			}
+			if len(stopSequences) > 0 {
+				outputStop = stopSequences
+				anthropicBody["stop_sequences"] = outputStop
+			}
 		default:
-			// Unsupported format, skip stop_sequences
 			outputStop = nil
 		}
 	}
@@ -165,9 +177,47 @@ func (pc *ProtocolConverter) ConvertToAnthropic(openAIBody map[string]interface{
 		outputTools = len(anthropicTools)
 		anthropicBody["tools"] = anthropicTools
 
-		// Convert tool_choice if present
 		if toolChoice, ok := openAIBody["tool_choice"]; ok {
-			anthropicBody["tool_choice"] = pc.convertToolChoice(toolChoice)
+			convertedChoice := pc.convertToolChoice(toolChoice)
+			anthropicBody["tool_choice"] = convertedChoice
+		}
+	} else {
+		hasToolCalls := false
+		if messages, ok := openAIBody["messages"].([]interface{}); ok {
+			for _, msgInterface := range messages {
+				if msg, ok := msgInterface.(map[string]interface{}); ok {
+					if toolCalls, ok := msg["tool_calls"].([]interface{}); ok && len(toolCalls) > 0 {
+						hasToolCalls = true
+						break
+					}
+				}
+			}
+		}
+
+		if hasToolCalls {
+			anthropicBody["tools"] = []map[string]interface{}{
+				{
+					"name":        "dummy_tool",
+					"description": "Placeholder tool for tool_calls without tools definition",
+					"input_schema": map[string]interface{}{
+						"type":       "object",
+						"properties": map[string]interface{}{},
+					},
+				},
+			}
+		}
+	}
+
+	if parallelToolCalls, ok := openAIBody["parallel_tool_calls"].(bool); ok {
+		if !parallelToolCalls {
+			if toolChoice, ok := anthropicBody["tool_choice"].(map[string]interface{}); ok {
+				toolChoice["disable_parallel_tool_use"] = true
+			} else {
+				anthropicBody["tool_choice"] = map[string]interface{}{
+					"type":                      "auto",
+					"disable_parallel_tool_use": true,
+				}
+			}
 		}
 	}
 
@@ -224,7 +274,67 @@ func (pc *ProtocolConverter) convertMessages(messagesInterface interface{}) ([]m
 			continue
 		}
 
-		// Convert user and assistant messages
+		// Handle tool role messages - convert to user role with tool_result
+		if role == "tool" {
+			toolCallID, _ := msg["tool_call_id"].(string)
+			if toolCallID == "" {
+				return nil, "", fmt.Errorf("tool_call_id is required for tool role messages")
+			}
+
+			toolResultBlock := map[string]interface{}{
+				"type":        "tool_result",
+				"tool_use_id": toolCallID,
+			}
+
+			if contentStr, ok := content.(string); ok {
+				toolResultBlock["content"] = contentStr
+			} else if contentArr, ok := content.([]interface{}); ok {
+				toolResultBlock["content"] = contentArr
+			} else {
+				toolResultBlock["content"] = ""
+			}
+
+			anthropicMsg := map[string]interface{}{
+				"role":    "user",
+				"content": []interface{}{toolResultBlock},
+			}
+			anthropicMessages = append(anthropicMessages, anthropicMsg)
+			continue
+		}
+
+		// Handle assistant messages with tool_calls
+		if role == "assistant" {
+			contentBlocks := []interface{}{}
+
+			if contentStr, ok := content.(string); ok && contentStr != "" {
+				contentBlocks = append(contentBlocks, map[string]interface{}{
+					"type": "text",
+					"text": contentStr,
+				})
+			} else if contentArr, ok := content.([]interface{}); ok {
+				contentBlocks = append(contentBlocks, contentArr...)
+			}
+
+			if toolCalls, ok := msg["tool_calls"].([]interface{}); ok {
+				for _, toolCallInterface := range toolCalls {
+					if toolCall, ok := toolCallInterface.(map[string]interface{}); ok {
+						toolUseBlock, err := pc.convertToolCallToToolUse(toolCall)
+						if err == nil {
+							contentBlocks = append(contentBlocks, toolUseBlock)
+						}
+					}
+				}
+			}
+
+			anthropicMsg := map[string]interface{}{
+				"role":    "assistant",
+				"content": contentBlocks,
+			}
+			anthropicMessages = append(anthropicMessages, anthropicMsg)
+			continue
+		}
+
+		// Convert user messages
 		anthropicMsg := map[string]interface{}{
 			"role":    role,
 			"content": content,
@@ -234,6 +344,48 @@ func (pc *ProtocolConverter) convertMessages(messagesInterface interface{}) ([]m
 	}
 
 	return anthropicMessages, systemPrompt, nil
+}
+
+func (pc *ProtocolConverter) convertToolCallToToolUse(toolCall map[string]interface{}) (map[string]interface{}, error) {
+	toolCallID, _ := toolCall["id"].(string)
+	if toolCallID == "" {
+		return nil, fmt.Errorf("tool_call_id is required but empty")
+	}
+
+	toolType, _ := toolCall["type"].(string)
+	if toolType != "function" {
+		return nil, fmt.Errorf("unsupported tool call type: %s", toolType)
+	}
+
+	function, ok := toolCall["function"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("tool call missing function field")
+	}
+
+	name, _ := function["name"].(string)
+	if name == "" {
+		return nil, fmt.Errorf("tool name is required but empty")
+	}
+
+	argumentsStr, _ := function["arguments"].(string)
+
+	var input interface{}
+	if argumentsStr != "" {
+		if err := json.Unmarshal([]byte(argumentsStr), &input); err != nil {
+			return nil, fmt.Errorf("invalid tool arguments JSON: %w", err)
+		}
+	} else {
+		input = map[string]interface{}{}
+	}
+
+	toolUseBlock := map[string]interface{}{
+		"type":  "tool_use",
+		"id":    toolCallID,
+		"name":  name,
+		"input": input,
+	}
+
+	return toolUseBlock, nil
 }
 
 // convertTools converts OpenAI tools to Anthropic format
@@ -266,7 +418,6 @@ func (pc *ProtocolConverter) convertTools(tools []interface{}) ([]map[string]int
 
 // sanitizeInputSchema removes fields that Anthropic doesn't support in input_schema
 func (pc *ProtocolConverter) sanitizeInputSchema(parameters interface{}) map[string]interface{} {
-	// Default schema if parameters is nil or invalid
 	defaultSchema := map[string]interface{}{
 		"type":       "object",
 		"properties": map[string]interface{}{},
@@ -277,31 +428,87 @@ func (pc *ProtocolConverter) sanitizeInputSchema(parameters interface{}) map[str
 		return defaultSchema
 	}
 
-	// Create a clean schema with only supported fields
+	return pc.sanitizeSchemaRecursive(paramsMap)
+}
+
+func (pc *ProtocolConverter) sanitizeSchemaRecursive(schema map[string]interface{}) map[string]interface{} {
 	cleanSchema := map[string]interface{}{}
 
-	// Always set type to "object" (required by Anthropic)
-	if schemaType, ok := paramsMap["type"].(string); ok && schemaType != "" {
-		cleanSchema["type"] = schemaType
-	} else {
+	supportedFields := []string{"type", "properties", "required", "items", "enum", "description", "default", "minimum", "maximum", "minLength", "maxLength", "pattern", "minItems", "maxItems"}
+
+	for _, field := range supportedFields {
+		if value, ok := schema[field]; ok {
+			if field == "properties" {
+				if propsMap, ok := value.(map[string]interface{}); ok {
+					cleanProps := make(map[string]interface{})
+					for propName, propSchema := range propsMap {
+						if propSchemaMap, ok := propSchema.(map[string]interface{}); ok {
+							cleanProps[propName] = cloneMap(pc.sanitizeSchemaRecursive(propSchemaMap))
+						} else {
+							cleanProps[propName] = propSchema
+						}
+					}
+					cleanSchema[field] = cleanProps
+				}
+			} else if field == "items" {
+				if itemsMap, ok := value.(map[string]interface{}); ok {
+					cleanSchema[field] = cloneMap(pc.sanitizeSchemaRecursive(itemsMap))
+				} else {
+					cleanSchema[field] = value
+				}
+			} else {
+				cleanSchema[field] = value
+			}
+		}
+	}
+
+	if _, ok := cleanSchema["type"]; !ok {
 		cleanSchema["type"] = "object"
 	}
 
-	// Copy supported fields
-	if properties, ok := paramsMap["properties"]; ok {
-		cleanSchema["properties"] = properties
-	}
-
-	if required, ok := paramsMap["required"]; ok {
-		cleanSchema["required"] = required
-	}
-
-	// Add description if present (Anthropic supports this)
-	if description, ok := paramsMap["description"]; ok {
-		cleanSchema["description"] = description
+	if schemaType, ok := cleanSchema["type"].(string); ok && schemaType == "object" {
+		if _, hasProps := cleanSchema["properties"]; !hasProps {
+			cleanSchema["properties"] = map[string]interface{}{}
+		}
 	}
 
 	return cleanSchema
+}
+
+func cloneMap(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		switch val := v.(type) {
+		case map[string]interface{}:
+			dst[k] = cloneMap(val)
+		case []interface{}:
+			dst[k] = cloneSlice(val)
+		default:
+			dst[k] = v
+		}
+	}
+	return dst
+}
+
+func cloneSlice(src []interface{}) []interface{} {
+	if src == nil {
+		return nil
+	}
+	dst := make([]interface{}, len(src))
+	for i, v := range src {
+		switch val := v.(type) {
+		case map[string]interface{}:
+			dst[i] = cloneMap(val)
+		case []interface{}:
+			dst[i] = cloneSlice(val)
+		default:
+			dst[i] = v
+		}
+	}
+	return dst
 }
 
 // convertToolChoice converts OpenAI tool_choice to Anthropic format
@@ -313,7 +520,7 @@ func (pc *ProtocolConverter) convertToolChoice(toolChoice interface{}) interface
 		} else if tc == "required" {
 			return map[string]interface{}{"type": "any"}
 		} else if tc == "none" {
-			return map[string]interface{}{"type": "auto"}
+			return nil
 		}
 	case map[string]interface{}:
 		if tcType, ok := tc["type"].(string); ok && tcType == "function" {
@@ -353,10 +560,13 @@ func (pc *ProtocolConverter) ConvertFromAnthropic(anthropicResp []byte) ([]byte,
 
 	// Map usage
 	if usage, ok := anthropicBody["usage"].(map[string]interface{}); ok {
+		inputTokens, _ := usage["input_tokens"].(float64)
+		outputTokens, _ := usage["output_tokens"].(float64)
+
 		openAIBody["usage"] = map[string]interface{}{
-			"prompt_tokens":     usage["input_tokens"],
-			"completion_tokens": usage["output_tokens"],
-			"total_tokens":      int(usage["input_tokens"].(float64)) + int(usage["output_tokens"].(float64)),
+			"prompt_tokens":     int(inputTokens),
+			"completion_tokens": int(outputTokens),
+			"total_tokens":      int(inputTokens) + int(outputTokens),
 		}
 	}
 
@@ -372,13 +582,17 @@ func (pc *ProtocolConverter) ConvertFromAnthropic(anthropicResp []byte) ([]byte,
 						messageContent += text
 					}
 				} else if itemType == "tool_use" {
-					// Convert Anthropic tool_use to OpenAI tool_calls
+					argumentsJSON, err := json.Marshal(item["input"])
+					if err != nil {
+						argumentsJSON = []byte("{}")
+					}
+
 					toolCall := map[string]interface{}{
 						"id":   item["id"],
 						"type": "function",
 						"function": map[string]interface{}{
 							"name":      item["name"],
-							"arguments": item["input"],
+							"arguments": string(argumentsJSON),
 						},
 					}
 					toolCalls = append(toolCalls, toolCall)
@@ -396,7 +610,9 @@ func (pc *ProtocolConverter) ConvertFromAnthropic(anthropicResp []byte) ([]byte,
 		}
 
 		if len(toolCalls) > 0 {
-			choice["message"].(map[string]interface{})["tool_calls"] = toolCalls
+			if message, ok := choice["message"].(map[string]interface{}); ok {
+				message["tool_calls"] = toolCalls
+			}
 		}
 
 		openAIBody["choices"] = []interface{}{choice}
@@ -437,21 +653,36 @@ func (pc *ProtocolConverter) ConvertAnthropicStreamToOpenAI(anthropicEvent strin
 	// Convert based on event type
 	switch eventType {
 	case "message_start":
-		// Initialize OpenAI stream response
 		return pc.createOpenAIStreamEvent("", "", ""), nil
 
+	case "content_block_start":
+		if block, ok := data["content_block"].(map[string]interface{}); ok {
+			if blockType, _ := block["type"].(string); blockType == "tool_use" {
+				toolUseID, _ := block["id"].(string)
+				toolName, _ := block["name"].(string)
+				return pc.createOpenAIToolCallStart(toolUseID, toolName), nil
+			}
+		}
+		return "", nil
+
 	case "content_block_delta":
-		// Extract text delta
 		if delta, ok := data["delta"].(map[string]interface{}); ok {
-			if deltaType, _ := delta["type"].(string); deltaType == "text_delta" {
+			deltaType, _ := delta["type"].(string)
+			if deltaType == "text_delta" {
 				if text, ok := delta["text"].(string); ok {
 					return pc.createOpenAIStreamEvent(text, "", ""), nil
+				}
+			} else if deltaType == "input_json_delta" {
+				if partialJSON, ok := delta["partial_json"].(string); ok {
+					return pc.createOpenAIToolCallDelta(partialJSON), nil
 				}
 			}
 		}
 
+	case "content_block_stop":
+		return "", nil
+
 	case "message_delta":
-		// Handle finish reason
 		if delta, ok := data["delta"].(map[string]interface{}); ok {
 			if stopReason, ok := delta["stop_reason"].(string); ok {
 				return pc.createOpenAIStreamEvent("", stopReason, ""), nil
@@ -459,7 +690,6 @@ func (pc *ProtocolConverter) ConvertAnthropicStreamToOpenAI(anthropicEvent strin
 		}
 
 	case "message_stop":
-		// Send [DONE]
 		return "data: [DONE]\n\n", nil
 	}
 
@@ -473,13 +703,74 @@ func (pc *ProtocolConverter) createOpenAIStreamEvent(content, finishReason, tool
 	}
 
 	if content != "" {
-		choice["delta"].(map[string]interface{})["content"] = content
+		if delta, ok := choice["delta"].(map[string]interface{}); ok {
+			delta["content"] = content
+		}
 	}
 
 	if finishReason != "" {
 		choice["finish_reason"] = finishReason
 	} else {
 		choice["finish_reason"] = nil
+	}
+
+	event := map[string]interface{}{
+		"id":      "chatcmpl-anthropic",
+		"object":  "chat.completion.chunk",
+		"created": 0,
+		"model":   "claude",
+		"choices": []interface{}{choice},
+	}
+
+	eventJSON, _ := json.Marshal(event)
+	return "data: " + string(eventJSON) + "\n\n"
+}
+
+func (pc *ProtocolConverter) createOpenAIToolCallStart(toolUseID, toolName string) string {
+	choice := map[string]interface{}{
+		"index": 0,
+		"delta": map[string]interface{}{
+			"tool_calls": []interface{}{
+				map[string]interface{}{
+					"index": 0,
+					"id":    toolUseID,
+					"type":  "function",
+					"function": map[string]interface{}{
+						"name":      toolName,
+						"arguments": "",
+					},
+				},
+			},
+		},
+		"finish_reason": nil,
+	}
+
+	event := map[string]interface{}{
+		"id":      "chatcmpl-anthropic",
+		"object":  "chat.completion.chunk",
+		"created": 0,
+		"model":   "claude",
+		"choices": []interface{}{choice},
+	}
+
+	eventJSON, _ := json.Marshal(event)
+	return "data: " + string(eventJSON) + "\n\n"
+}
+
+func (pc *ProtocolConverter) createOpenAIToolCallDelta(partialJSON string) string {
+	choice := map[string]interface{}{
+		"index": 0,
+		"delta": map[string]interface{}{
+			"tool_calls": []interface{}{
+				map[string]interface{}{
+					"index": 0,
+					"function": map[string]interface{}{
+						"arguments": partialJSON,
+					},
+				},
+			},
+		},
+		"finish_reason": nil,
 	}
 
 	event := map[string]interface{}{
@@ -563,6 +854,26 @@ func (pc *ProtocolConverter) ConvertOpenAIStreamChunkToAnthropic(chunk map[strin
 		return nil, nil
 	}
 
+	if toolCalls, hasToolCalls := delta["tool_calls"].([]interface{}); hasToolCalls && len(toolCalls) > 0 {
+		toolCall, ok := toolCalls[0].(map[string]interface{})
+		if !ok {
+			return nil, nil
+		}
+
+		if function, ok := toolCall["function"].(map[string]interface{}); ok {
+			if arguments, ok := function["arguments"].(string); ok && arguments != "" {
+				return map[string]interface{}{
+					"type":  "content_block_delta",
+					"index": 0,
+					"delta": map[string]interface{}{
+						"type":         "input_json_delta",
+						"partial_json": arguments,
+					},
+				}, nil
+			}
+		}
+	}
+
 	if content, hasContent := delta["content"].(string); hasContent && content != "" {
 		return map[string]interface{}{
 			"type":  "content_block_delta",
@@ -615,10 +926,10 @@ func (pc *ProtocolConverter) ConvertOpenAIStreamEndToAnthropic() []map[string]in
 }
 
 func (pc *ProtocolConverter) generateID() string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, 29)
-	for i := range b {
-		b[i] = charset[i%len(charset)]
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		return fmt.Sprintf("msg_%d", time.Now().UnixNano())
 	}
-	return string(b)
+	return fmt.Sprintf("msg_%x", b)
 }

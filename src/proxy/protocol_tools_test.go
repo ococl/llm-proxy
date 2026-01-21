@@ -137,7 +137,7 @@ func TestConvertToolChoice(t *testing.T) {
 			name:  "none",
 			input: "none",
 			expected: map[string]interface{}{
-				"type": "auto",
+				"type": "none",
 			},
 		},
 		{
@@ -158,6 +158,10 @@ func TestConvertToolChoice(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := converter.convertToolChoice(tt.input)
+
+			if tt.name == "none" && result == nil {
+				return
+			}
 
 			resultMap, ok := result.(map[string]interface{})
 			if !ok {

@@ -54,11 +54,11 @@ func (p *RequestBodyPreparer) PrepareRequestBody(
 	}
 
 	if protocol == "openai" && clientProtocol == ProtocolAnthropic {
-		return p.handleAnthropicToOpenAI(reqBody, route, reqID, logBuilder)
+		return p.handleAnthropicToOpenAI(reqBody, route, reqID, logBuilder, originalBody)
 	}
 
 	// OpenAI → OpenAI（非直通场景）
-	return p.handleOpenAIToOpenAI(reqBody, route, reqID, logBuilder)
+	return p.handleOpenAIToOpenAI(reqBody, route, reqID, logBuilder, originalBody)
 }
 
 // handlePassthrough 处理协议直通
@@ -199,6 +199,7 @@ func (p *RequestBodyPreparer) handleAnthropicToOpenAI(
 	route *ResolvedRoute,
 	reqID string,
 	logBuilder *strings.Builder,
+	originalBody []byte,
 ) (*PrepareResult, error) {
 	convertedBody, err := p.requestDetector.ConvertAnthropicToOpenAI(reqBody)
 	if err != nil {
@@ -223,9 +224,10 @@ func (p *RequestBodyPreparer) handleAnthropicToOpenAI(
 		"backend", route.BackendName)
 
 	return &PrepareResult{
-		Body:          newBody,
-		IsPassthrough: false,
-		ConvertedSize: len(newBody),
+		Body:             newBody,
+		IsPassthrough:    false,
+		OriginalBodySize: len(originalBody),
+		ConvertedSize:    len(newBody),
 	}, nil
 }
 
@@ -235,6 +237,7 @@ func (p *RequestBodyPreparer) handleOpenAIToOpenAI(
 	route *ResolvedRoute,
 	reqID string,
 	logBuilder *strings.Builder,
+	originalBody []byte,
 ) (*PrepareResult, error) {
 	modifiedBody := make(map[string]interface{})
 	for k, v := range reqBody {
@@ -252,8 +255,9 @@ func (p *RequestBodyPreparer) handleOpenAIToOpenAI(
 	logBuilder.WriteString("✓ 使用OpenAI协议格式\n")
 
 	return &PrepareResult{
-		Body:          newBody,
-		IsPassthrough: false,
-		ConvertedSize: len(newBody),
+		Body:             newBody,
+		IsPassthrough:    false,
+		OriginalBodySize: len(originalBody),
+		ConvertedSize:    len(newBody),
 	}, nil
 }
