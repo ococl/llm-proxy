@@ -6,10 +6,13 @@ dist
 *.swo
 *~
 
+.sisyphus
+
 # TMEP FILES
 .DS_Store
 Thumbs.db
 nul
 src/*.exe
 tmp
-
+temp_*
+coverage.out

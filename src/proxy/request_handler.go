@@ -69,25 +69,44 @@ func (p *RequestBodyPreparer) handlePassthrough(
 	reqID string,
 	logBuilder *strings.Builder,
 ) (*PrepareResult, error) {
-	modifiedBody := make(map[string]interface{})
-	if err := json.Unmarshal(originalBody, &modifiedBody); err != nil {
+	var tempBody map[string]interface{}
+	if err := json.Unmarshal(originalBody, &tempBody); err != nil {
 		logBuilder.WriteString(fmt.Sprintf("解析原始请求体失败: %v\n", err))
 		logging.ProxySugar.Errorw("解析原始请求体失败", "reqID", reqID, "error", err)
 		return nil, err
 	}
 
-	modifiedBody["model"] = route.Model
-	newBody, err := json.Marshal(modifiedBody)
+	originalModel, _ := tempBody["model"].(string)
+	if originalModel == route.Model {
+		logBuilder.WriteString(fmt.Sprintf("✓ 协议直通 (%s)，model字段无需替换\n", protocol))
+		logging.ProxySugar.Infow("协议直通处理完成(无修改)",
+			"reqID", reqID,
+			"protocol", protocol,
+			"model", route.Model,
+			"body_size", len(originalBody))
+
+		return &PrepareResult{
+			Body:             originalBody,
+			IsPassthrough:    true,
+			OriginalBodySize: len(originalBody),
+			ConvertedSize:    len(originalBody),
+		}, nil
+	}
+
+	tempBody["model"] = route.Model
+	newBody, err := json.Marshal(tempBody)
 	if err != nil {
 		logBuilder.WriteString(fmt.Sprintf("序列化请求体失败: %v\n", err))
 		logging.ProxySugar.Errorw("序列化请求体失败", "reqID", reqID, "error", err)
 		return nil, err
 	}
 
-	logBuilder.WriteString(fmt.Sprintf("✓ 协议直通 (%s)，仅替换model字段\n", protocol))
+	logBuilder.WriteString(fmt.Sprintf("✓ 协议直通 (%s)，仅替换model字段: %s → %s\n", protocol, originalModel, route.Model))
 	logging.ProxySugar.Infow("协议直通处理完成",
 		"reqID", reqID,
 		"protocol", protocol,
+		"original_model", originalModel,
+		"target_model", route.Model,
 		"original_size", len(originalBody),
 		"modified_size", len(newBody))
 

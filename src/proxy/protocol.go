@@ -51,16 +51,34 @@ func (pc *ProtocolConverter) ConvertToAnthropic(openAIBody map[string]interface{
 	var outputMaxTokens int
 	var maxTokensSource string
 
-	if maxTokens, ok := openAIBody["max_tokens"].(float64); ok {
-		inputMaxTokens = maxTokens
-		outputMaxTokens = int(maxTokens)
-		maxTokensSource = "max_tokens"
-		anthropicBody["max_tokens"] = outputMaxTokens
-	} else if maxCompletionTokens, ok := openAIBody["max_completion_tokens"].(float64); ok {
-		inputMaxTokens = maxCompletionTokens
-		outputMaxTokens = int(maxCompletionTokens)
-		maxTokensSource = "max_completion_tokens"
-		anthropicBody["max_tokens"] = outputMaxTokens
+	// Try to extract max_tokens with support for both int and float64 types
+	if maxTokens := openAIBody["max_tokens"]; maxTokens != nil {
+		switch v := maxTokens.(type) {
+		case float64:
+			inputMaxTokens = v
+			outputMaxTokens = int(v)
+			maxTokensSource = "max_tokens"
+			anthropicBody["max_tokens"] = outputMaxTokens
+		case int:
+			inputMaxTokens = v
+			outputMaxTokens = v
+			maxTokensSource = "max_tokens"
+			anthropicBody["max_tokens"] = outputMaxTokens
+		}
+	} else if maxCompletionTokens := openAIBody["max_completion_tokens"]; maxCompletionTokens != nil {
+		// Try max_completion_tokens with support for both types
+		switch v := maxCompletionTokens.(type) {
+		case float64:
+			inputMaxTokens = v
+			outputMaxTokens = int(v)
+			maxTokensSource = "max_completion_tokens"
+			anthropicBody["max_tokens"] = outputMaxTokens
+		case int:
+			inputMaxTokens = v
+			outputMaxTokens = v
+			maxTokensSource = "max_completion_tokens"
+			anthropicBody["max_tokens"] = outputMaxTokens
+		}
 	} else {
 		// Anthropic requires max_tokens, default to 4096
 		inputMaxTokens = nil
@@ -93,12 +111,34 @@ func (pc *ProtocolConverter) ConvertToAnthropic(openAIBody map[string]interface{
 		anthropicBody["stream"] = stream
 	}
 
-	// Extract stop sequences
+	// Extract stop sequences - convert OpenAI stop to Anthropic stop_sequences
 	var inputStop, outputStop interface{}
 	if stop, ok := openAIBody["stop"]; ok {
 		inputStop = stop
-		outputStop = stop
-		anthropicBody["stop_sequences"] = stop
+		// Convert stop to stop_sequences format
+		switch v := stop.(type) {
+		case string:
+			// Single stop sequence -> array with one element
+			outputStop = []string{v}
+			anthropicBody["stop_sequences"] = outputStop
+		case []interface{}:
+			// Array of stop sequences -> convert to []string
+			stopSequences := make([]string, len(v))
+			for i, s := range v {
+				if str, ok := s.(string); ok {
+					stopSequences[i] = str
+				}
+			}
+			outputStop = stopSequences
+			anthropicBody["stop_sequences"] = outputStop
+		case []string:
+			// Already string array
+			outputStop = v
+			anthropicBody["stop_sequences"] = outputStop
+		default:
+			// Unsupported format, skip stop_sequences
+			outputStop = nil
+		}
 	}
 
 	// Convert messages from OpenAI to Anthropic format
@@ -206,8 +246,6 @@ func (pc *ProtocolConverter) convertTools(tools []interface{}) ([]map[string]int
 			continue
 		}
 
-		// OpenAI format: {"type": "function", "function": {...}}
-		// Anthropic format: {"name": "...", "description": "...", "input_schema": {...}}
 		if toolType, _ := tool["type"].(string); toolType == "function" {
 			if function, ok := tool["function"].(map[string]interface{}); ok {
 				anthropicTool := map[string]interface{}{
@@ -225,16 +263,14 @@ func (pc *ProtocolConverter) convertTools(tools []interface{}) ([]map[string]int
 
 // convertToolChoice converts OpenAI tool_choice to Anthropic format
 func (pc *ProtocolConverter) convertToolChoice(toolChoice interface{}) interface{} {
-	// OpenAI: "auto", "none", or {"type": "function", "function": {"name": "..."}}
-	// Anthropic: {"type": "auto"}, {"type": "any"}, {"type": "tool", "name": "..."}
-
 	switch tc := toolChoice.(type) {
 	case string:
 		if tc == "auto" {
 			return map[string]interface{}{"type": "auto"}
+		} else if tc == "required" {
+			return map[string]interface{}{"type": "any"}
 		} else if tc == "none" {
-			// Anthropic doesn't have explicit "none", just omit tool_choice
-			return nil
+			return map[string]interface{}{"type": "auto"}
 		}
 	case map[string]interface{}:
 		if tcType, ok := tc["type"].(string); ok && tcType == "function" {
@@ -432,4 +468,114 @@ func splitLines(s string) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+func (pc *ProtocolConverter) ConvertOpenAIStreamStartToAnthropic(model string) []map[string]interface{} {
+	var events []map[string]interface{}
+
+	messageStart := map[string]interface{}{
+		"type": "message_start",
+		"message": map[string]interface{}{
+			"id":            "msg_" + pc.generateID(),
+			"type":          "message",
+			"role":          "assistant",
+			"content":       []interface{}{},
+			"model":         model,
+			"stop_reason":   nil,
+			"stop_sequence": nil,
+			"usage": map[string]interface{}{
+				"input_tokens":  0,
+				"output_tokens": 0,
+			},
+		},
+	}
+	events = append(events, messageStart)
+
+	contentBlockStart := map[string]interface{}{
+		"type":  "content_block_start",
+		"index": 0,
+		"content_block": map[string]interface{}{
+			"type": "text",
+			"text": "",
+		},
+	}
+	events = append(events, contentBlockStart)
+
+	return events
+}
+
+func (pc *ProtocolConverter) ConvertOpenAIStreamChunkToAnthropic(chunk map[string]interface{}) (map[string]interface{}, error) {
+	choices, ok := chunk["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return nil, nil
+	}
+
+	choice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+
+	delta, ok := choice["delta"].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+
+	if content, hasContent := delta["content"].(string); hasContent && content != "" {
+		return map[string]interface{}{
+			"type":  "content_block_delta",
+			"index": 0,
+			"delta": map[string]interface{}{
+				"type": "text_delta",
+				"text": content,
+			},
+		}, nil
+	}
+
+	if finishReason, hasFinish := choice["finish_reason"].(string); hasFinish && finishReason != "" {
+		anthropicStopReason := "end_turn"
+		if finishReason == "length" {
+			anthropicStopReason = "max_tokens"
+		} else if finishReason == "tool_calls" {
+			anthropicStopReason = "tool_use"
+		}
+
+		return map[string]interface{}{
+			"type": "message_delta",
+			"delta": map[string]interface{}{
+				"stop_reason":   anthropicStopReason,
+				"stop_sequence": nil,
+			},
+			"usage": map[string]interface{}{
+				"output_tokens": 0,
+			},
+		}, nil
+	}
+
+	return nil, nil
+}
+
+func (pc *ProtocolConverter) ConvertOpenAIStreamEndToAnthropic() []map[string]interface{} {
+	var events []map[string]interface{}
+
+	contentBlockStop := map[string]interface{}{
+		"type":  "content_block_stop",
+		"index": 0,
+	}
+	events = append(events, contentBlockStop)
+
+	messageStop := map[string]interface{}{
+		"type": "message_stop",
+	}
+	events = append(events, messageStop)
+
+	return events
+}
+
+func (pc *ProtocolConverter) generateID() string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 29)
+	for i := range b {
+		b[i] = charset[i%len(charset)]
+	}
+	return string(b)
 }
