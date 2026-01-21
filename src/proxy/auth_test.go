@@ -65,4 +65,41 @@ func TestProtocolDetection(t *testing.T) {
 			t.Errorf("Expected ProtocolOpenAI (default), got %s", protocol)
 		}
 	})
+
+	t.Run("DetectProtocol_AnthropicByXApiKeyOnly", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/unknown", strings.NewReader(`{}`))
+		req.Header.Set("x-api-key", "test-key")
+
+		detector := NewRequestDetector()
+		protocol := detector.DetectProtocol(req)
+
+		if protocol != ProtocolAnthropic {
+			t.Errorf("Expected ProtocolAnthropic (x-api-key only), got %s", protocol)
+		}
+	})
+
+	t.Run("DetectProtocol_OpenAIWhenBothHeadersPresent", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/unknown", strings.NewReader(`{}`))
+		req.Header.Set("x-api-key", "test-key")
+		req.Header.Set("Authorization", "Bearer sk-test")
+
+		detector := NewRequestDetector()
+		protocol := detector.DetectProtocol(req)
+
+		if protocol != ProtocolOpenAI {
+			t.Errorf("Expected ProtocolOpenAI (both headers present), got %s", protocol)
+		}
+	})
+
+	t.Run("DetectProtocol_PathOverridesHeaders", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer sk-test")
+
+		detector := NewRequestDetector()
+		protocol := detector.DetectProtocol(req)
+
+		if protocol != ProtocolAnthropic {
+			t.Errorf("Expected ProtocolAnthropic (path overrides headers), got %s", protocol)
+		}
+	})
 }

@@ -22,10 +22,9 @@ func NewRequestDetector() *RequestDetector {
 	return &RequestDetector{}
 }
 
-// DetectProtocol determines the protocol type based on request path and headers
 func (rd *RequestDetector) DetectProtocol(r *http.Request) RequestProtocol {
-	// Method 1: Check request path
 	path := r.URL.Path
+
 	if path == "/v1/messages" || strings.HasPrefix(path, "/v1/messages/") {
 		return ProtocolAnthropic
 	}
@@ -36,21 +35,21 @@ func (rd *RequestDetector) DetectProtocol(r *http.Request) RequestProtocol {
 		return ProtocolOpenAI
 	}
 
-	// Method 2: Check anthropic-version header (Anthropic-specific)
 	if r.Header.Get("anthropic-version") != "" {
 		return ProtocolAnthropic
 	}
 
-	// Method 3: Check x-api-key vs Authorization header pattern
 	apiKey := r.Header.Get("x-api-key")
 	authHeader := r.Header.Get("Authorization")
 
-	// Anthropic typically uses x-api-key
-	if apiKey != "" && !strings.HasPrefix(authHeader, "Bearer sk-") {
+	if apiKey != "" && authHeader == "" {
 		return ProtocolAnthropic
 	}
 
-	// Default to OpenAI for backward compatibility
+	if authHeader != "" && apiKey == "" {
+		return ProtocolOpenAI
+	}
+
 	return ProtocolOpenAI
 }
 

@@ -248,10 +248,13 @@ func (pc *ProtocolConverter) convertTools(tools []interface{}) ([]map[string]int
 
 		if toolType, _ := tool["type"].(string); toolType == "function" {
 			if function, ok := tool["function"].(map[string]interface{}); ok {
+				// Sanitize parameters to create a valid input_schema
+				inputSchema := pc.sanitizeInputSchema(function["parameters"])
+
 				anthropicTool := map[string]interface{}{
 					"name":         function["name"],
 					"description":  function["description"],
-					"input_schema": function["parameters"],
+					"input_schema": inputSchema,
 				}
 				anthropicTools = append(anthropicTools, anthropicTool)
 			}
@@ -259,6 +262,46 @@ func (pc *ProtocolConverter) convertTools(tools []interface{}) ([]map[string]int
 	}
 
 	return anthropicTools, nil
+}
+
+// sanitizeInputSchema removes fields that Anthropic doesn't support in input_schema
+func (pc *ProtocolConverter) sanitizeInputSchema(parameters interface{}) map[string]interface{} {
+	// Default schema if parameters is nil or invalid
+	defaultSchema := map[string]interface{}{
+		"type":       "object",
+		"properties": map[string]interface{}{},
+	}
+
+	paramsMap, ok := parameters.(map[string]interface{})
+	if !ok {
+		return defaultSchema
+	}
+
+	// Create a clean schema with only supported fields
+	cleanSchema := map[string]interface{}{}
+
+	// Always set type to "object" (required by Anthropic)
+	if schemaType, ok := paramsMap["type"].(string); ok && schemaType != "" {
+		cleanSchema["type"] = schemaType
+	} else {
+		cleanSchema["type"] = "object"
+	}
+
+	// Copy supported fields
+	if properties, ok := paramsMap["properties"]; ok {
+		cleanSchema["properties"] = properties
+	}
+
+	if required, ok := paramsMap["required"]; ok {
+		cleanSchema["required"] = required
+	}
+
+	// Add description if present (Anthropic supports this)
+	if description, ok := paramsMap["description"]; ok {
+		cleanSchema["description"] = description
+	}
+
+	return cleanSchema
 }
 
 // convertToolChoice converts OpenAI tool_choice to Anthropic format

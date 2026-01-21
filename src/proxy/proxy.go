@@ -160,11 +160,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 保存原始请求体，用于直通场景
-	originalBody := body
-
 	if cfg.Proxy.EnableSystemPrompt {
 		reqBody = prompt.ProcessSystemPrompt(reqBody)
+	}
+
+	originalBody := body
+	if cfg.Proxy.EnableSystemPrompt {
+		if modifiedBody, err := json.Marshal(reqBody); err == nil {
+			originalBody = modifiedBody
+		}
 	}
 
 	modelAlias, _ := reqBody["model"].(string)
