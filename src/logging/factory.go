@@ -294,8 +294,8 @@ func initRequestErrorLoggers(cfg *config.Config) error {
 		}
 	}
 
-	_, requestLogger, _ = createFileOnlyLogger(cfg, "request", filepath.Join(reqDir, "requests.log"))
-	_, errorLogger, _ = createFileOnlyLogger(cfg, "error", filepath.Join(errDir, "errors.log"))
+	RequestLogger, requestLogger, _ = createFileOnlyLogger(cfg, "request", filepath.Join(reqDir, "requests.log"))
+	ErrorLogger, errorLogger, _ = createFileOnlyLogger(cfg, "error", filepath.Join(errDir, "errors.log"))
 	return nil
 }
 
@@ -318,7 +318,7 @@ func startFlushTicker(interval int) {
 }
 
 func syncAllLoggers() {
-	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger, FileOnlyLogger}
+	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger, FileOnlyLogger, RequestLogger, ErrorLogger}
 	for _, logger := range loggers {
 		if logger != nil {
 			_ = logger.Sync()
@@ -522,7 +522,7 @@ func Shutdown() error {
 		flushDone = nil
 	}
 
-	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger}
+	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger, RequestLogger, ErrorLogger}
 	for _, logger := range loggers {
 		if logger != nil {
 			if err := logger.Sync(); err != nil {

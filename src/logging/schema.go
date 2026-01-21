@@ -14,6 +14,8 @@ var (
 	ProxyLogger    *zap.Logger
 	DebugLogger    *zap.Logger
 	FileOnlyLogger *zap.Logger
+	RequestLogger  *zap.Logger
+	ErrorLogger    *zap.Logger
 
 	GeneralSugar  *zap.SugaredLogger
 	SystemSugar   *zap.SugaredLogger

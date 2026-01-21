@@ -87,10 +87,19 @@ func WriteRequestLogFile(cfg *config.Config, reqID string, content string) error
 	if testMode {
 		return nil
 	}
+
 	maskedContent := content
 	if maskSensitive {
 		maskedContent = MaskSensitiveData(content)
 	}
+
+	maxSize := cfg.Logging.GetMaxLogContentSize()
+	if maxSize > 0 && len(maskedContent) > maxSize {
+		truncatedContent := maskedContent[:maxSize]
+		truncatedContent += fmt.Sprintf("\n\n[日志内容过大,已截断。原始大小: %d 字节, 截断后: %d 字节]\n", len(maskedContent), maxSize)
+		maskedContent = truncatedContent
+	}
+
 	if cfg.Logging.SeparateFiles {
 		filename := filepath.Join(cfg.Logging.RequestDir, reqID+".log")
 		return os.WriteFile(filename, []byte(maskedContent), 0644)
@@ -103,10 +112,19 @@ func WriteErrorLogFile(cfg *config.Config, reqID string, content string) error {
 	if testMode {
 		return nil
 	}
+
 	maskedContent := content
 	if maskSensitive {
 		maskedContent = MaskSensitiveData(content)
 	}
+
+	maxSize := cfg.Logging.GetMaxLogContentSize()
+	if maxSize > 0 && len(maskedContent) > maxSize {
+		truncatedContent := maskedContent[:maxSize]
+		truncatedContent += fmt.Sprintf("\n\n[日志内容过大,已截断。原始大小: %d 字节, 截断后: %d 字节]\n", len(maskedContent), maxSize)
+		maskedContent = truncatedContent
+	}
+
 	if cfg.Logging.SeparateFiles {
 		filename := filepath.Join(cfg.Logging.ErrorDir, reqID+".log")
 		return os.WriteFile(filename, []byte(maskedContent), 0644)

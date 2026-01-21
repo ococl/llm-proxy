@@ -136,8 +136,8 @@ type Detection struct {
 
 type Logging struct {
 	Level               string   `yaml:"level"`
-	ConsoleLevel        string   `yaml:"console_level,omitempty"`
-	BaseDir             string   `yaml:"base_dir,omitempty"`
+	ConsoleLevel        string   `yaml:"console_level"`
+	BaseDir             string   `yaml:"base_dir"`
 	RequestDir          string   `yaml:"request_dir"`
 	ErrorDir            string   `yaml:"error_dir"`
 	GeneralFile         string   `yaml:"general_file"`
@@ -162,6 +162,7 @@ type Logging struct {
 	TimeRotation        string   `yaml:"time_rotation,omitempty"`
 	DetailedMasking     *bool    `yaml:"detailed_masking,omitempty"`
 	ProblematicBackends []string `yaml:"problematic_backends,omitempty"`
+	MaxLogContentSize   int      `yaml:"max_log_content_size,omitempty"` // 最大日志内容大小(字节),0表示不限制
 }
 
 func (l *Logging) ShouldMaskSensitive() bool {
@@ -255,6 +256,13 @@ func (l *Logging) GetConsoleStyle() string {
 		return "compact"
 	}
 	return l.ConsoleStyle
+}
+
+func (l *Logging) GetMaxLogContentSize() int {
+	if l.MaxLogContentSize <= 0 {
+		return 0
+	}
+	return l.MaxLogContentSize
 }
 
 type Config struct {
