@@ -79,7 +79,7 @@ func (p *RequestBodyPreparer) handlePassthrough(
 	originalModel, _ := tempBody["model"].(string)
 	if originalModel == route.Model {
 		logBuilder.WriteString(fmt.Sprintf("✓ 协议直通 (%s)，model字段无需替换\n", protocol))
-		logging.ProxySugar.Infow("协议直通处理完成(无修改)",
+		logging.FileOnlySugar.Debugw("协议直通处理完成(无修改)",
 			"reqID", reqID,
 			"protocol", protocol,
 			"model", route.Model,
@@ -102,7 +102,7 @@ func (p *RequestBodyPreparer) handlePassthrough(
 	}
 
 	logBuilder.WriteString(fmt.Sprintf("✓ 协议直通 (%s)，仅替换model字段: %s → %s\n", protocol, originalModel, route.Model))
-	logging.ProxySugar.Infow("协议直通处理完成",
+	logging.FileOnlySugar.Debugw("协议直通处理完成",
 		"reqID", reqID,
 		"protocol", protocol,
 		"original_model", originalModel,
@@ -146,9 +146,9 @@ func (p *RequestBodyPreparer) handleOpenAIToAnthropic(
 	convMeta := p.converter.GetLastConversion()
 	convertedSize := len(newBody)
 
-	// 记录转换详情
+	// 记录转换详情（生产环境不需要每次都记录，降级到 FileOnlySugar）
 	if convMeta != nil {
-		logging.ProxySugar.Infow("参数转换详情",
+		logging.FileOnlySugar.Debugw("参数转换详情",
 			"reqID", reqID,
 			"backend", route.BackendName,
 			"input_max_tokens", convMeta.InputMaxTokens,
@@ -177,7 +177,7 @@ func (p *RequestBodyPreparer) handleOpenAIToAnthropic(
 		logBuilder.WriteString("✓ 已转换为Anthropic协议格式（无元数据）\n")
 	}
 
-	logging.ProxySugar.Infow("Anthropic 请求体转换完成",
+	logging.FileOnlySugar.Debugw("Anthropic 请求体转换完成",
 		"reqID", reqID,
 		"original_size_bytes", originalBodySize,
 		"converted_size_bytes", convertedSize,
@@ -217,7 +217,7 @@ func (p *RequestBodyPreparer) handleAnthropicToOpenAI(
 	}
 
 	logBuilder.WriteString("✓ 已转换为OpenAI协议格式\n")
-	logging.ProxySugar.Infow("协议转换完成",
+	logging.FileOnlySugar.Debugw("协议转换完成",
 		"reqID", reqID,
 		"from", "anthropic",
 		"to", "openai",

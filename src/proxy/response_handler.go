@@ -70,7 +70,7 @@ func (b *ProxyRequestBuilder) BuildRequestWithAPIKey(
 	// 设置 API Key
 	b.setAPIKey(proxyReq, protocol, apiKey)
 
-	logging.ProxySugar.Infow("发送请求到后端",
+	logging.FileOnlySugar.Debugw("发送请求到后端",
 		"reqID", reqID,
 		"method", proxyReq.Method,
 		"url", targetURL.String(),
@@ -165,7 +165,7 @@ func (c *ResponseConverter) ConvertResponse(
 ) ([]byte, error) {
 	// 协议直通场景，不需要转换响应
 	if isPassthrough {
-		logging.ProxySugar.Infow("协议直通响应",
+		logging.FileOnlySugar.Debugw("协议直通响应",
 			"reqID", reqID,
 			"protocol", protocol,
 			"backend", backendName,
@@ -177,7 +177,7 @@ func (c *ResponseConverter) ConvertResponse(
 	// 需要协议转换的场景
 	if protocol == "anthropic" && clientProtocol == ProtocolOpenAI {
 		// 后端 Anthropic → 客户端 OpenAI
-		logging.ProxySugar.Infow("转换后端响应格式",
+		logging.FileOnlySugar.Debugw("转换后端响应格式",
 			"reqID", reqID,
 			"from", "anthropic",
 			"to", "openai",
@@ -194,7 +194,7 @@ func (c *ResponseConverter) ConvertResponse(
 			return bodyBytes, err
 		}
 
-		logging.ProxySugar.Infow("后端响应转换成功",
+		logging.FileOnlySugar.Debugw("后端响应转换成功",
 			"reqID", reqID,
 			"from", "anthropic",
 			"to", "openai",
@@ -205,7 +205,7 @@ func (c *ResponseConverter) ConvertResponse(
 
 	if protocol == "openai" && clientProtocol == ProtocolAnthropic {
 		// 后端 OpenAI → 客户端 Anthropic
-		logging.ProxySugar.Infow("转换响应为客户端协议",
+		logging.FileOnlySugar.Debugw("转换响应为客户端协议",
 			"reqID", reqID,
 			"from", "openai",
 			"to", "anthropic",
@@ -219,7 +219,7 @@ func (c *ResponseConverter) ConvertResponse(
 			return bodyBytes, err
 		}
 
-		logging.ProxySugar.Infow("客户端协议转换成功",
+		logging.FileOnlySugar.Debugw("客户端协议转换成功",
 			"reqID", reqID,
 			"size", len(convertedBytes))
 		return convertedBytes, nil
