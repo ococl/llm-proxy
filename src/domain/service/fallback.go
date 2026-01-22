@@ -11,7 +11,7 @@ import (
 // FallbackStrategy implements the fallback logic for routing.
 type FallbackStrategy struct {
 	cooldownMgr       port.CooldownProvider
-	fallbackAliases   map[string][]port.ModelAlias
+	fallbackAliases   map[string][]entity.ModelAlias
 	enableBackoff     bool
 	backoffInitial    time.Duration
 	backoffMax        time.Duration
@@ -23,7 +23,7 @@ type FallbackStrategy struct {
 // NewFallbackStrategy creates a new fallback strategy.
 func NewFallbackStrategy(
 	cooldownMgr port.CooldownProvider,
-	fallbackAliases map[string][]port.ModelAlias,
+	fallbackAliases map[string][]entity.ModelAlias,
 	backoffConfig entity.RetryConfig,
 ) *FallbackStrategy {
 	return &FallbackStrategy{

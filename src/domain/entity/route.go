@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"llm-proxy/domain/port"
+	"llm-proxy/domain/types"
 )
 
 // ModelAlias represents a model alias name.
@@ -31,7 +31,7 @@ type Route struct {
 	model    string
 	priority int
 	enabled  bool
-	protocol port.Protocol
+	protocol types.Protocol
 }
 
 // NewRoute creates a new route.
@@ -66,7 +66,7 @@ func (r *Route) IsEnabled() bool {
 }
 
 // Protocol returns the protocol.
-func (r *Route) Protocol() port.Protocol {
+func (r *Route) Protocol() types.Protocol {
 	if r.protocol == "" {
 		return r.backend.Protocol()
 	}
@@ -80,7 +80,7 @@ func (r *Route) String() string {
 }
 
 // WithProtocol creates a new route with a different protocol.
-func (r *Route) WithProtocol(protocol port.Protocol) *Route {
+func (r *Route) WithProtocol(protocol types.Protocol) *Route {
 	return &Route{
 		backend:  r.backend,
 		model:    r.model,
@@ -105,7 +105,7 @@ func (rl RouteList) FilterEnabled() RouteList {
 }
 
 // FilterByProtocol returns routes matching the protocol.
-func (rl RouteList) FilterByProtocol(protocol port.Protocol) RouteList {
+func (rl RouteList) FilterByProtocol(protocol types.Protocol) RouteList {
 	var result RouteList
 	for _, r := range rl {
 		if r.Protocol() == protocol {
@@ -168,9 +168,9 @@ func (rc *RouteConfig) IsEnabled() bool {
 }
 
 // GetProtocol returns the protocol, defaulting to the backend protocol.
-func (rc *RouteConfig) GetProtocol(backendProtocol port.Protocol) port.Protocol {
+func (rc *RouteConfig) GetProtocol(backendProtocol types.Protocol) types.Protocol {
 	if rc.Protocol != "" {
-		return port.Protocol(rc.Protocol)
+		return types.Protocol(rc.Protocol)
 	}
 	return backendProtocol
 }
@@ -222,7 +222,7 @@ type RouteBuilder struct {
 	model    string
 	priority int
 	enabled  bool
-	protocol port.Protocol
+	protocol types.Protocol
 }
 
 // NewRouteBuilder creates a new route builder.
@@ -258,7 +258,7 @@ func (rb *RouteBuilder) Enabled(enabled bool) *RouteBuilder {
 }
 
 // Protocol sets the protocol.
-func (rb *RouteBuilder) Protocol(protocol port.Protocol) *RouteBuilder {
+func (rb *RouteBuilder) Protocol(protocol types.Protocol) *RouteBuilder {
 	rb.protocol = protocol
 	return rb
 }

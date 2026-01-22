@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"llm-proxy/domain/port"
+	"llm-proxy/domain/types"
 )
 
 // BackendID is a value object for backend identifier.
@@ -80,11 +80,11 @@ type Backend struct {
 	url      BackendURL
 	apiKey   APIKey
 	enabled  bool
-	protocol port.Protocol
+	protocol types.Protocol
 }
 
 // NewBackend creates a new backend entity.
-func NewBackend(name, urlStr, apiKey string, enabled bool, protocol port.Protocol) (*Backend, error) {
+func NewBackend(name, urlStr, apiKey string, enabled bool, protocol types.Protocol) (*Backend, error) {
 	id := NewBackendID(name)
 	validURL, err := NewBackendURL(urlStr)
 	if err != nil {
@@ -126,9 +126,9 @@ func (b *Backend) IsEnabled() bool {
 }
 
 // Protocol returns the API protocol.
-func (b *Backend) Protocol() port.Protocol {
+func (b *Backend) Protocol() types.Protocol {
 	if b.protocol == "" {
-		return port.ProtocolOpenAI
+		return types.ProtocolOpenAI
 	}
 	return b.protocol
 }
@@ -154,7 +154,7 @@ func WithEnabled(enabled bool) BackendOption {
 }
 
 // WithProtocol sets the protocol.
-func WithProtocol(protocol port.Protocol) BackendOption {
+func WithProtocol(protocol types.Protocol) BackendOption {
 	return func(b *Backend) {
 		b.protocol = protocol
 	}
@@ -166,14 +166,14 @@ type BackendBuilder struct {
 	url      string
 	apiKey   string
 	enabled  bool
-	protocol port.Protocol
+	protocol types.Protocol
 }
 
 // NewBackendBuilder creates a new backend builder.
 func NewBackendBuilder() *BackendBuilder {
 	return &BackendBuilder{
 		enabled:  true,
-		protocol: port.ProtocolOpenAI,
+		protocol: types.ProtocolOpenAI,
 	}
 }
 
@@ -202,7 +202,7 @@ func (b *BackendBuilder) Enabled(enabled bool) *BackendBuilder {
 }
 
 // Protocol sets the protocol.
-func (b *BackendBuilder) Protocol(protocol port.Protocol) *BackendBuilder {
+func (b *BackendBuilder) Protocol(protocol types.Protocol) *BackendBuilder {
 	b.protocol = protocol
 	return b
 }
@@ -295,7 +295,7 @@ func (t TimeoutConfig) GetTotalTimeout() time.Duration {
 // BackendFilter is a value object for filtering backends.
 type BackendFilter struct {
 	Enabled   *bool
-	Protocols []port.Protocol
+	Protocols []types.Protocol
 	Names     []string
 }
 
@@ -410,7 +410,7 @@ func (r RetryConfig) CalculateDelay(attempt int) time.Duration {
 
 	// Add jitter
 	jitterAmount := delay * jitter
-	delay = delay - jitterAmount + (jitterAmount*2*float64(time.Now().UnixNano()%1000)/1000)
+	delay = delay - jitterAmount + (jitterAmount * 2 * float64(time.Now().UnixNano()%1000) / 1000)
 
 	return time.Duration(delay)
 }
@@ -425,10 +425,10 @@ func pow(base, exp float64) float64 {
 
 // CircuitBreakerConfig represents circuit breaker configuration.
 type CircuitBreakerConfig struct {
-	Enabled           bool
-	FailureThreshold  int
-	SuccessThreshold  int
-	OpenTimeout       time.Duration
+	Enabled          bool
+	FailureThreshold int
+	SuccessThreshold int
+	OpenTimeout      time.Duration
 }
 
 // DefaultCircuitBreakerConfig returns the default circuit breaker configuration.

@@ -9,27 +9,20 @@ import (
 	"llm-proxy/domain/port"
 )
 
-// LoadBalancingStrategy defines the load balancing approach.
 type LoadBalancingStrategy string
 
 const (
-	// StrategyRandom uses random selection.
-	StrategyRandom LoadBalancingStrategy = "random"
-	// StrategyRoundRobin uses round-robin selection.
-	StrategyRoundRobin LoadBalancingStrategy = "round_robin"
-	// StrategyLeastRequests selects the backend with fewest requests.
-	StrategyLeastRequests LoadBalancingStrategy = "least_requests"
-	// StrategyWeighted selects based on weights.
-	StrategyWeighted LoadBalancingStrategy = "weighted"
+	StrategyRandom            LoadBalancingStrategy = "random"
+	StrategyRoundRobin        LoadBalancingStrategy = "round_robin"
+	StrategyLeastRequests     LoadBalancingStrategy = "least_requests"
+	StrategyWeighted          LoadBalancingStrategy = "weighted"
 )
 
-// LoadBalancer implements various load balancing strategies.
 type LoadBalancer struct {
 	strategy LoadBalancingStrategy
 	mu       sync.Mutex
 }
 
-// NewLoadBalancer creates a new load balancer with the given strategy.
 func NewLoadBalancer(strategy LoadBalancingStrategy) *LoadBalancer {
 	if strategy == "" {
 		strategy = StrategyRandom
@@ -39,8 +32,7 @@ func NewLoadBalancer(strategy LoadBalancingStrategy) *LoadBalancer {
 	}
 }
 
-// Select selects a backend from the given routes using the configured strategy.
-func (lb *LoadBalancer) Select(routes []*port.Route) *port.Backend {
+func (lb *LoadBalancer) Select(routes []*port.Route) *entity.Backend {
 	if len(routes) == 0 {
 		return nil
 	}
@@ -62,36 +54,7 @@ func (lb *LoadBalancer) Select(routes []*port.Route) *port.Backend {
 	}
 }
 
-// SelectWithPriority selects a backend considering priority grouping.
-func (lb *LoadBalancer) SelectWithPriority(routes entity.RouteList) *port.Backend {
-	groups := routes.GroupByPriority()
-	for priority := 0; priority < 100; priority++ {
-		group, ok := groups[priority]
-		if !ok {
-			continue
-		}
-		if group.IsEmpty() {
-			continue
-		}
-		enabled := group.FilterEnabled()
-		if !enabled.IsEmpty() {
-			var portRoutes []*port.Route
-			for _, r := range enabled {
-				portRoutes = append(portRoutes, &port.Route{
-					Backend:  &port.Backend{Name: r.Backend().Name(), URL: r.Backend().URL().String(), APIKey: string(r.Backend().APIKey()), Enabled: r.Backend().IsEnabled(), Protocol: r.Backend().Protocol()},
-					Model:    r.Model(),
-					Priority: r.Priority(),
-					Protocol: r.Protocol(),
-				})
-			}
-			return lb.Select(portRoutes)
-		}
-	}
-	return nil
-}
-
-// selectRandom randomly selects a backend.
-func (lb *LoadBalancer) selectRandom(routes []*port.Route) *port.Backend {
+func (lb *LoadBalancer) selectRandom(routes []*port.Route) *entity.Backend {
 	enabled := filterEnabledBackends(routes)
 	if len(enabled) == 0 {
 		return nil
@@ -100,8 +63,7 @@ func (lb *LoadBalancer) selectRandom(routes []*port.Route) *port.Backend {
 	return enabled[idx]
 }
 
-// selectRoundRobin selects the next backend in round-robin fashion.
-func (lb *LoadBalancer) selectRoundRobin(routes []*port.Route) *port.Backend {
+func (lb *LoadBalancer) selectRoundRobin(routes []*port.Route) *entity.Backend {
 	enabled := filterEnabledBackends(routes)
 	if len(enabled) == 0 {
 		return nil
@@ -110,8 +72,7 @@ func (lb *LoadBalancer) selectRoundRobin(routes []*port.Route) *port.Backend {
 	return enabled[idx]
 }
 
-// selectLeastRequests selects the backend with the fewest active requests.
-func (lb *LoadBalancer) selectLeastRequests(routes []*port.Route) *port.Backend {
+func (lb *LoadBalancer) selectLeastRequests(routes []*port.Route) *entity.Backend {
 	enabled := filterEnabledBackends(routes)
 	if len(enabled) == 0 {
 		return nil
@@ -119,8 +80,7 @@ func (lb *LoadBalancer) selectLeastRequests(routes []*port.Route) *port.Backend 
 	return enabled[rand.Intn(len(enabled))]
 }
 
-// selectWeighted selects a backend based on priority (simplified weighted).
-func (lb *LoadBalancer) selectWeighted(routes []*port.Route) *port.Backend {
+func (lb *LoadBalancer) selectWeighted(routes []*port.Route) *entity.Backend {
 	if len(routes) == 0 {
 		return nil
 	}
@@ -133,9 +93,8 @@ func (lb *LoadBalancer) selectWeighted(routes []*port.Route) *port.Backend {
 	return best.Backend
 }
 
-// filterEnabledBackends filters routes to only enabled backends.
-func filterEnabledBackends(routes []*port.Route) []*port.Backend {
-	var backends []*port.Backend
+func filterEnabledBackends(routes []*port.Route) []*entity.Backend {
+	var backends []*entity.Backend
 	for _, route := range routes {
 		if route.IsEnabled() {
 			backends = append(backends, route.Backend)
@@ -144,27 +103,23 @@ func filterEnabledBackends(routes []*port.Route) []*port.Backend {
 	return backends
 }
 
-// WeightedBackend represents a backend with a weight.
 type WeightedBackend struct {
-	Backend *port.Backend
+	Backend *entity.Backend
 	Weight  int
 }
 
-// WeightedLoadBalancer implements weighted load balancing.
 type WeightedLoadBalancer struct {
 	backends []WeightedBackend
 	mu       sync.Mutex
 }
 
-// NewWeightedLoadBalancer creates a new weighted load balancer.
 func NewWeightedLoadBalancer(backends []WeightedBackend) *WeightedLoadBalancer {
 	return &WeightedLoadBalancer{
 		backends: backends,
 	}
 }
 
-// Select selects a backend based on weights.
-func (wlb *WeightedLoadBalancer) Select() *port.Backend {
+func (wlb *WeightedLoadBalancer) Select() *entity.Backend {
 	wlb.mu.Lock()
 	defer wlb.mu.Unlock()
 
@@ -199,19 +154,14 @@ func (wlb *WeightedLoadBalancer) Select() *port.Backend {
 	return nil
 }
 
-// CircuitBreakerState represents the state of a circuit breaker.
 type CircuitBreakerState int
 
 const (
-	// CircuitStateClosed allows requests to pass.
 	CircuitStateClosed CircuitBreakerState = iota
-	// CircuitStateOpen blocks requests.
 	CircuitStateOpen
-	// CircuitStateHalfOpen allows limited requests to test recovery.
 	CircuitStateHalfOpen
 )
 
-// String returns the string representation of the circuit breaker state.
 func (s CircuitBreakerState) String() string {
 	switch s {
 	case CircuitStateClosed:
@@ -225,7 +175,6 @@ func (s CircuitBreakerState) String() string {
 	}
 }
 
-// CircuitBreaker implements the circuit breaker pattern.
 type CircuitBreaker struct {
 	state            CircuitBreakerState
 	failureCount     int
@@ -237,7 +186,6 @@ type CircuitBreaker struct {
 	mu               sync.RWMutex
 }
 
-// NewCircuitBreaker creates a new circuit breaker.
 func NewCircuitBreaker(
 	failureThreshold int,
 	successThreshold int,
@@ -261,14 +209,12 @@ func NewCircuitBreaker(
 	}
 }
 
-// State returns the current state of the circuit breaker.
 func (cb *CircuitBreaker) State() CircuitBreakerState {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
 	return cb.state
 }
 
-// AllowRequest returns true if the request should be allowed.
 func (cb *CircuitBreaker) AllowRequest() bool {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
@@ -292,7 +238,6 @@ func (cb *CircuitBreaker) AllowRequest() bool {
 	}
 }
 
-// RecordSuccess records a successful request.
 func (cb *CircuitBreaker) RecordSuccess() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
@@ -310,7 +255,6 @@ func (cb *CircuitBreaker) RecordSuccess() {
 	}
 }
 
-// RecordFailure records a failed request.
 func (cb *CircuitBreaker) RecordFailure() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
@@ -328,7 +272,6 @@ func (cb *CircuitBreaker) RecordFailure() {
 	}
 }
 
-// Reset resets the circuit breaker to closed state.
 func (cb *CircuitBreaker) Reset() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
