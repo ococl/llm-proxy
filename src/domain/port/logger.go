@@ -66,11 +66,11 @@ type RequestLogger interface {
 // NopLogger is a no-op logger implementation for testing.
 type NopLogger struct{}
 
-func (n *NopLogger) Debug(msg string, fields ...Field)               {}
-func (n *NopLogger) Info(msg string, fields ...Field)                {}
-func (n *NopLogger) Warn(msg string, fields ...Field)                {}
-func (n *NopLogger) Error(msg string, fields ...Field)               {}
-func (n *NopLogger) Fatal(msg string, fields ...Field)               {}
-func (n *NopLogger) With(fields ...Field) Logger                     { return n }
-func (n *NopLogger) LogRequest(reqID string, content string)         {}
-func (n *NopLogger) LogError(reqID string, content string)           {}
+func (n *NopLogger) Debug(msg string, fields ...Field)       {}
+func (n *NopLogger) Info(msg string, fields ...Field)        {}
+func (n *NopLogger) Warn(msg string, fields ...Field)        {}
+func (n *NopLogger) Error(msg string, fields ...Field)       {}
+func (n *NopLogger) Fatal(msg string, fields ...Field)       {}
+func (n *NopLogger) With(fields ...Field) Logger             { return n }
+func (n *NopLogger) LogRequest(reqID string, content string) {}
+func (n *NopLogger) LogError(reqID string, content string)   {}

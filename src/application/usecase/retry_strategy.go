@@ -2,18 +2,16 @@ package usecase
 
 import (
 	"time"
-
-	"llm-proxy/domain/port"
 )
 
 // RetryStrategy implements configurable retry logic.
 type RetryStrategy struct {
-	maxRetries       int
-	enableBackoff    bool
-	backoffInitial   time.Duration
-	backoffMax       time.Duration
+	maxRetries        int
+	enableBackoff     bool
+	backoffInitial    time.Duration
+	backoffMax        time.Duration
 	backoffMultiplier float64
-	backoffJitter    float64
+	backoffJitter     float64
 }
 
 // NewRetryStrategy creates a new retry strategy.
@@ -85,11 +83,11 @@ func (rs *RetryStrategy) GetMaxRetries() int {
 // DefaultRetryStrategy returns a default retry strategy.
 func DefaultRetryStrategy() *RetryStrategy {
 	return NewRetryStrategy(
-		3,    // maxRetries
-		true, // enableBackoff
-		100*time.Millisecond,  // backoffInitial
-		5*time.Second,         // backoffMax
-		2.0,  // backoffMultiplier
-		0.1,  // backoffJitter
+		3,                    // maxRetries
+		true,                 // enableBackoff
+		100*time.Millisecond, // backoffInitial
+		5*time.Second,        // backoffMax
+		2.0,                  // backoffMultiplier
+		0.1,                  // backoffJitter
 	)
 }

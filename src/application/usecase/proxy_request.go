@@ -7,20 +7,21 @@ import (
 	"llm-proxy/domain/entity"
 	domainerror "llm-proxy/domain/error"
 	"llm-proxy/domain/port"
+	"llm-proxy/domain/service"
 )
 
 // ProxyRequestUseCase handles the core proxy request flow.
 type ProxyRequestUseCase struct {
-	logger          port.Logger
-	config          port.ConfigProvider
-	routeResolver   port.RouteResolver
-	protocolConv    port.ProtocolConverter
-	backendClient   port.BackendClient
-	retryStrategy   port.RetryStrategy
-	fallbackStrategy *FallbackStrategy
-	loadBalancer    port.LoadBalancer
-	metrics         port.MetricsProvider
-	requestLogger   port.RequestLogger
+	logger           port.Logger
+	config           port.ConfigProvider
+	routeResolver    port.RouteResolver
+	protocolConv     port.ProtocolConverter
+	backendClient    port.BackendClient
+	retryStrategy    port.RetryStrategy
+	fallbackStrategy *service.FallbackStrategy
+	loadBalancer     port.LoadBalancer
+	metrics          port.MetricsProvider
+	requestLogger    port.RequestLogger
 }
 
 // NewProxyRequestUseCase creates a new proxy request use case.
@@ -31,22 +32,22 @@ func NewProxyRequestUseCase(
 	protocolConv port.ProtocolConverter,
 	backendClient port.BackendClient,
 	retryStrategy port.RetryStrategy,
-	fallbackStrategy *FallbackStrategy,
+	fallbackStrategy *service.FallbackStrategy,
 	loadBalancer port.LoadBalancer,
 	metrics port.MetricsProvider,
 	requestLogger port.RequestLogger,
 ) *ProxyRequestUseCase {
 	return &ProxyRequestUseCase{
-		logger:          logger,
-		config:          config,
-		routeResolver:   routeResolver,
-		protocolConv:    protocolConv,
-		backendClient:   backendClient,
-		retryStrategy:   retryStrategy,
+		logger:           logger,
+		config:           config,
+		routeResolver:    routeResolver,
+		protocolConv:     protocolConv,
+		backendClient:    backendClient,
+		retryStrategy:    retryStrategy,
 		fallbackStrategy: fallbackStrategy,
-		loadBalancer:    loadBalancer,
-		metrics:         metrics,
-		requestLogger:   requestLogger,
+		loadBalancer:     loadBalancer,
+		metrics:          metrics,
+		requestLogger:    requestLogger,
 	}
 }
 
@@ -133,9 +134,8 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		}
 
 		// Send request
-		resp, err := uc.backendClient.Send(ctx, backendReq)
+		resp, err := uc.backendClient.Send(ctx, backendReq, backend)
 		if err == nil {
-			// Success
 			return resp, nil
 		}
 

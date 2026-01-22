@@ -1,4 +1,4 @@
-package domain
+package service
 
 import (
 	"math/rand"
@@ -12,10 +12,10 @@ import (
 type LoadBalancingStrategy string
 
 const (
-	StrategyRandom            LoadBalancingStrategy = "random"
-	StrategyRoundRobin        LoadBalancingStrategy = "round_robin"
-	StrategyLeastRequests     LoadBalancingStrategy = "least_requests"
-	StrategyWeighted          LoadBalancingStrategy = "weighted"
+	StrategyRandom        LoadBalancingStrategy = "random"
+	StrategyRoundRobin    LoadBalancingStrategy = "round_robin"
+	StrategyLeastRequests LoadBalancingStrategy = "least_requests"
+	StrategyWeighted      LoadBalancingStrategy = "weighted"
 )
 
 type LoadBalancer struct {

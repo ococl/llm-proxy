@@ -4,8 +4,8 @@ package types
 type Protocol string
 
 const (
-	ProtocolOpenAI     Protocol = "openai"
-	ProtocolAnthropic  Protocol = "anthropic"
+	ProtocolOpenAI    Protocol = "openai"
+	ProtocolAnthropic Protocol = "anthropic"
 )
 
 func (p Protocol) String() string {

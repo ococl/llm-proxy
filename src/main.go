@@ -14,8 +14,15 @@ import (
 	"syscall"
 	"time"
 
-	"llm-proxy/backend"
+	backend_adapter "llm-proxy/adapter/backend"
+	config_adapter "llm-proxy/adapter/config"
+	http_adapter "llm-proxy/adapter/http"
+	logging_adapter "llm-proxy/adapter/logging"
+	"llm-proxy/application/service"
+	"llm-proxy/application/usecase"
 	"llm-proxy/config"
+	"llm-proxy/domain/entity"
+	domain_service "llm-proxy/domain/service"
 	"llm-proxy/logging"
 	"llm-proxy/middleware"
 	"llm-proxy/proxy"
@@ -65,7 +72,10 @@ func main() {
 		return logging.InitLogger(c)
 	}
 
-	cooldown := backend.NewCooldownManager()
+	configAdapter := config_adapter.NewConfigAdapter(configMgr)
+	proxyLogger := logging_adapter.NewZapLoggerAdapter(logging.ProxySugar)
+
+	cooldownMgr := domain_service.NewCooldownManager(time.Duration(cfg.Fallback.CooldownSeconds) * time.Second)
 	shutdownCooldown := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(time.Minute)
@@ -73,19 +83,67 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				cooldown.ClearExpired()
+				cooldownMgr.Cleanup()
 			case <-shutdownCooldown:
 				return
 			}
 		}
 	}()
 
-	// 初始化 HTTP 客户端（带连接池和超时配置）
 	proxy.InitHTTPClient(cfg)
+	httpClient := backend_adapter.NewHTTPClient(proxy.GetHTTPClient())
+	backendClient := backend_adapter.NewBackendClientAdapter(httpClient)
 
-	router := proxy.NewRouter(configMgr, cooldown)
-	detector := proxy.NewDetector(configMgr)
-	p := proxy.NewProxy(configMgr, router, cooldown, detector)
+	loadBalancer := domain_service.NewLoadBalancer(domain_service.StrategyRandom)
+
+	fallbackAliases := make(map[string][]entity.ModelAlias)
+	for alias, targets := range cfg.Fallback.AliasFallback {
+		for _, target := range targets {
+			fallbackAliases[alias] = append(fallbackAliases[alias], entity.NewModelAlias(target))
+		}
+	}
+
+	retryConfig := entity.RetryConfig{
+		EnableBackoff:       cfg.Fallback.IsBackoffEnabled(),
+		BackoffInitialDelay: time.Duration(cfg.Fallback.GetBackoffInitialDelay()) * time.Millisecond,
+		BackoffMaxDelay:     time.Duration(cfg.Fallback.GetBackoffMaxDelay()) * time.Millisecond,
+		BackoffMultiplier:   cfg.Fallback.GetBackoffMultiplier(),
+		BackoffJitter:       cfg.Fallback.GetBackoffJitter(),
+		MaxRetries:          cfg.Fallback.MaxRetries,
+	}
+
+	fallbackStrategy := domain_service.NewFallbackStrategy(cooldownMgr, fallbackAliases, retryConfig)
+	retryStrategy := usecase.NewRetryStrategy(
+		cfg.Fallback.MaxRetries,
+		cfg.Fallback.IsBackoffEnabled(),
+		time.Duration(cfg.Fallback.GetBackoffInitialDelay())*time.Millisecond,
+		time.Duration(cfg.Fallback.GetBackoffMaxDelay())*time.Millisecond,
+		cfg.Fallback.GetBackoffMultiplier(),
+		cfg.Fallback.GetBackoffJitter(),
+	)
+
+	protocolConverter := service.NewProtocolConverter(loadSystemPrompts())
+
+	backendRepo := config_adapter.NewBackendRepository(configAdapter)
+	routeResolver := usecase.NewRouteResolveUseCase(configAdapter, backendRepo, cfg.Fallback.AliasFallback)
+
+	proxyUseCase := usecase.NewProxyRequestUseCase(
+		proxyLogger,
+		configAdapter,
+		routeResolver,
+		protocolConverter,
+		backendClient,
+		retryStrategy,
+		fallbackStrategy,
+		loadBalancer,
+		&NopMetricsProvider{},
+		&NopRequestLogger{},
+	)
+
+	errorPresenter := http_adapter.NewErrorPresenter(proxyLogger)
+	proxyHandler := http_adapter.NewProxyHandler(proxyUseCase, configAdapter, proxyLogger, errorPresenter)
+	healthHandler := http_adapter.NewHealthHandler(configAdapter, proxyLogger)
+	recoveryMiddleware := http_adapter.NewRecoveryMiddleware(proxyLogger)
 
 	rateLimiter := middleware.NewRateLimiter(configMgr)
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(configMgr)
@@ -99,9 +157,13 @@ func main() {
 		"models", len(cfg.Models),
 	)
 
+	mux := http.NewServeMux()
+	mux.Handle("/v1/chat/completions", proxyHandler)
+	mux.Handle("/health", healthHandler)
+
 	server := &http.Server{
 		Addr:    cfg.GetListen(),
-		Handler: middleware.RecoveryMiddleware(rateLimiter.Middleware(concurrencyLimiter.Middleware(p))),
+		Handler: recoveryMiddleware.Middleware(rateLimiter.Middleware(concurrencyLimiter.Middleware(mux))),
 	}
 
 	go func() {
@@ -127,6 +189,27 @@ func main() {
 	}
 
 	logging.GeneralSugar.Info("服务器已关闭")
+}
+
+func loadSystemPrompts() map[string]string {
+	prompts := make(map[string]string)
+	systemPromptsDir := "system_prompts"
+	files, err := os.ReadDir(systemPromptsDir)
+	if err != nil {
+		return prompts
+	}
+	for _, file := range files {
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".txt") {
+			continue
+		}
+		modelName := strings.TrimSuffix(file.Name(), ".txt")
+		data, err := os.ReadFile(systemPromptsDir + "/" + file.Name())
+		if err != nil {
+			continue
+		}
+		prompts[modelName] = string(data)
+	}
+	return prompts
 }
 
 func formatListenAddress(listen string) string {
@@ -182,3 +265,18 @@ func shouldUseColor() bool {
 	}
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
 }
+
+type NopMetricsProvider struct{}
+
+func (n *NopMetricsProvider) IncRequestsTotal(backend string)                       {}
+func (n *NopMetricsProvider) RecordDuration(backend string, duration time.Duration) {}
+func (n *NopMetricsProvider) IncBackendErrors(backend string)                       {}
+func (n *NopMetricsProvider) SetCircuitBreakerState(backend string, state int)      {}
+func (n *NopMetricsProvider) IncActiveRequests()                                    {}
+func (n *NopMetricsProvider) DecActiveRequests()                                    {}
+func (n *NopMetricsProvider) GetSnapshot() map[string]interface{}                   { return nil }
+
+type NopRequestLogger struct{}
+
+func (n *NopRequestLogger) LogRequest(reqID string, content string) {}
+func (n *NopRequestLogger) LogError(reqID string, content string)   {}

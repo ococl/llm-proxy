@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 	"time"
-	
+
 	"llm-proxy/domain/entity"
 	"llm-proxy/domain/types"
 )
@@ -49,24 +49,24 @@ type DetectionConfig struct {
 }
 
 type LoggingConfig struct {
-	Level            string
-	ConsoleLevel     string
-	BaseDir          string
-	EnableMetrics    bool
-	MaxFileSizeMB    int
-	MaxAgeDays       int
-	MaxBackups       int
-	Format           string
-	Colorize         bool
-	ConsoleFormat    string
-	DebugMode        bool
-	SeparateFiles    bool
-	RequestDir       string
-	ErrorDir         string
-	MaskSensitive    bool
-	BufferSize       int
-	FlushInterval    int
-	DropOnFull       bool
+	Level         string
+	ConsoleLevel  string
+	BaseDir       string
+	EnableMetrics bool
+	MaxFileSizeMB int
+	MaxAgeDays    int
+	MaxBackups    int
+	Format        string
+	Colorize      bool
+	ConsoleFormat string
+	DebugMode     bool
+	SeparateFiles bool
+	RequestDir    string
+	ErrorDir      string
+	MaskSensitive bool
+	BufferSize    int
+	FlushInterval int
+	DropOnFull    bool
 }
 
 type TimeoutConfig struct {
@@ -92,81 +92,16 @@ type ConcurrencyConfig struct {
 	PerBackendLimit int
 }
 
-type Request struct {
-	Model            string
-	Messages         []Message
-	MaxTokens        int
-	Temperature      float64
-	TopP             float64
-	Stream           bool
-	Stop             []string
-	Tools            []Tool
-	ToolChoice       any
-	User             string
-	StreamHandler    func(chunk []byte) error
-}
-
-type Message struct {
-	Role       string
-	Content    string
-	ToolCalls  []ToolCall
-	ToolCallID string
-}
-
-type Tool struct {
-	Type     string
-	Function ToolFunction
-}
-
-type ToolFunction struct {
-	Name        string
-	Description string
-	Parameters  map[string]any
-}
-
-type ToolCall struct {
-	ID       string
-	Type     string
-	Function ToolCallFunction
-}
-
-type ToolCallFunction struct {
-	Name      string
-	Arguments string
-}
-
-type Response struct {
-	ID      string
-	Object  string
-	Created int64
-	Model   string
-	Choices []Choice
-	Usage   Usage
-}
-
-type Choice struct {
-	Index        int
-	Message      Message
-	FinishReason string
-	Delta        *Message
-}
-
-type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-}
-
 type BackendClient interface {
-	Send(ctx context.Context, req *Request) (*Response, error)
+	Send(ctx context.Context, req *entity.Request, backend *entity.Backend) (*entity.Response, error)
 	GetHTTPClient() *http.Client
 }
 
 type ProtocolConverter interface {
-	ToBackend(req *Request, protocol types.Protocol) (*Request, error)
-	FromBackend(resp *Response, protocol types.Protocol) (*Response, error)
+	ToBackend(req *entity.Request, protocol types.Protocol) (*entity.Request, error)
+	FromBackend(resp *entity.Response, protocol types.Protocol) (*entity.Response, error)
 }
 
 type RequestValidator interface {
-	Validate(req *Request) error
+	Validate(req *entity.Request) error
 }

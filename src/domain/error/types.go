@@ -42,22 +42,22 @@ const (
 	CodeInvalidRequest   ErrorCode = "INVALID_REQUEST"
 
 	// Backend errors
-	CodeNoBackend        ErrorCode = "NO_BACKEND"
-	CodeBackendTimeout   ErrorCode = "BACKEND_TIMEOUT"
-	CodeBackendUnavail   ErrorCode = "BACKEND_UNAVAILABLE"
-	CodeBackendError     ErrorCode = "BACKEND_ERROR"
+	CodeNoBackend      ErrorCode = "NO_BACKEND"
+	CodeBackendTimeout ErrorCode = "BACKEND_TIMEOUT"
+	CodeBackendUnavail ErrorCode = "BACKEND_UNAVAILABLE"
+	CodeBackendError   ErrorCode = "BACKEND_ERROR"
 
 	// Protocol errors
-	CodeProtocolConvert  ErrorCode = "PROTOCOL_CONVERSION_ERROR"
-	CodeInvalidProtocol  ErrorCode = "INVALID_PROTOCOL"
+	CodeProtocolConvert ErrorCode = "PROTOCOL_CONVERSION_ERROR"
+	CodeInvalidProtocol ErrorCode = "INVALID_PROTOCOL"
 
 	// Config errors
 	CodeConfigLoad       ErrorCode = "CONFIG_LOAD_ERROR"
 	CodeConfigValidation ErrorCode = "CONFIG_VALIDATION_ERROR"
 
 	// Internal errors
-	CodeInternal         ErrorCode = "INTERNAL_ERROR"
-	CodeUnknown          ErrorCode = "UNKNOWN_ERROR"
+	CodeInternal ErrorCode = "INTERNAL_ERROR"
+	CodeUnknown  ErrorCode = "UNKNOWN_ERROR"
 )
 
 // LLMProxyError represents a structured error in the LLM proxy.
@@ -203,6 +203,12 @@ func GetBackendName(err error) string {
 // NewBadRequest creates a bad request error.
 func NewBadRequest(message string) *LLMProxyError {
 	return New(ErrorTypeClient, CodeBadRequest, message)
+}
+
+// NewInvalidRequest creates an invalid request error.
+func NewInvalidRequest(format string, args ...interface{}) *LLMProxyError {
+	message := fmt.Sprintf(format, args...)
+	return New(ErrorTypeValidation, CodeBadRequest, message)
 }
 
 // NewUnauthorized creates an unauthorized error.

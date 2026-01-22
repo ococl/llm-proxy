@@ -1,4 +1,4 @@
-package domain
+package service
 
 import (
 	"sync"
@@ -99,6 +99,11 @@ func (cm *CooldownManager) Cleanup() {
 			delete(cm.cooldowns, key)
 		}
 	}
+}
+
+// ClearExpired is an alias for Cleanup for port.CooldownProvider compatibility.
+func (cm *CooldownManager) ClearExpired() {
+	cm.Cleanup()
 }
 
 // Clear removes all cooldown entries.

@@ -75,7 +75,7 @@ func (r *Route) Protocol() types.Protocol {
 
 // String returns a string representation.
 func (r *Route) String() string {
-	return fmt.Sprintf("Route(%s -> %s, priority=%d, enabled=%v)", 
+	return fmt.Sprintf("Route(%s -> %s, priority=%d, enabled=%v)",
 		r.model, r.backend.Name(), r.priority, r.enabled)
 }
 

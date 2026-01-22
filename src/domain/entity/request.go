@@ -201,7 +201,7 @@ func (r *Request) WithStreamHandler(handler func(chunk []byte) error) *Request {
 
 // String returns a string representation.
 func (r *Request) String() string {
-	return fmt.Sprintf("Request(%s, model=%s, messages=%d, stream=%v)", 
+	return fmt.Sprintf("Request(%s, model=%s, messages=%d, stream=%v)",
 		r.id, r.model, len(r.messages), r.stream)
 }
 
@@ -460,7 +460,7 @@ func (r *Response) FirstChoice() *Choice {
 
 // String returns a string representation.
 func (r *Response) String() string {
-	return fmt.Sprintf("Response(%s, model=%s, choices=%d)", 
+	return fmt.Sprintf("Response(%s, model=%s, choices=%d)",
 		r.id, r.model, len(r.choices))
 }
 

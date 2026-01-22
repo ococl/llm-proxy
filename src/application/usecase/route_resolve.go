@@ -1,29 +1,27 @@
 package usecase
 
 import (
-	"fmt"
-
-	"llm-proxy/domain/entity"
-	"llm-proxy/domain/error"
+	domainerror "llm-proxy/domain/error"
 	"llm-proxy/domain/port"
 )
 
 // RouteResolveUseCase handles route resolution.
 type RouteResolveUseCase struct {
-	config       port.ConfigProvider
-	fallbackCfg  FallbackConfig
-}
-
-// FallbackConfig represents fallback alias configuration.
-type FallbackConfig struct {
-	Aliases map[string][]string
+	config          port.ConfigProvider
+	backendRepo     port.BackendRepository
+	fallbackAliases map[string][]string
 }
 
 // NewRouteResolveUseCase creates a new route resolve use case.
-func NewRouteResolveUseCase(config port.ConfigProvider, fallbackCfg FallbackConfig) *RouteResolveUseCase {
+func NewRouteResolveUseCase(
+	config port.ConfigProvider,
+	backendRepo port.BackendRepository,
+	fallbackAliases map[string][]string,
+) *RouteResolveUseCase {
 	return &RouteResolveUseCase{
-		config:      config,
-		fallbackCfg: fallbackCfg,
+		config:          config,
+		backendRepo:     backendRepo,
+		fallbackAliases: fallbackAliases,
 	}
 }
 
@@ -32,40 +30,30 @@ func (uc *RouteResolveUseCase) Resolve(alias string) ([]*port.Route, error) {
 	cfg := uc.config.Get()
 	modelAlias := cfg.Models[alias]
 	if modelAlias == nil || !modelAlias.IsEnabled() {
-		return nil, error.NewUnknownModel(alias)
+		return nil, domainerror.NewUnknownModel(alias)
 	}
 
 	var routes []*port.Route
 	for _, routeCfg := range modelAlias.Routes {
-		if !routeCfg.IsEnabled() {
+		if !routeCfg.Enabled {
 			continue
 		}
 
-		backend := uc.config.GetBackend(routeCfg.BackendName)
-		if backend == nil {
+		backend := uc.backendRepo.GetByName(routeCfg.Backend)
+		if backend == nil || !backend.IsEnabled() {
 			continue
-		}
-
-		route := entity.NewRoute(
-			convertToDomainBackend(backend),
-			routeCfg.Model,
-			routeCfg.Priority,
-			routeCfg.IsEnabled(),
-		)
-		if routeCfg.Protocol != "" {
-			route = route.WithProtocol(port.Protocol(routeCfg.Protocol))
 		}
 
 		routes = append(routes, &port.Route{
-			Backend:   convertToDomainBackend(backend),
-			Model:     routeCfg.Model,
-			Priority:  routeCfg.Priority,
-			Protocol:  route.GetProtocol(),
+			Backend:  backend,
+			Model:    routeCfg.Model,
+			Priority: routeCfg.Priority,
+			Protocol: backend.Protocol(),
 		})
 	}
 
 	if len(routes) == 0 {
-		return nil, error.NewUnknownModel(alias)
+		return nil, domainerror.NewUnknownModel(alias)
 	}
 
 	return routes, nil
@@ -73,25 +61,11 @@ func (uc *RouteResolveUseCase) Resolve(alias string) ([]*port.Route, error) {
 
 // GetFallbackAliases returns fallback aliases for a given model.
 func (uc *RouteResolveUseCase) GetFallbackAliases(alias string) []string {
-	return uc.fallbackCfg.Aliases[alias]
+	return uc.fallbackAliases[alias]
 }
 
 // HasFallback returns true if the alias has fallback configuration.
 func (uc *RouteResolveUseCase) HasFallback(alias string) bool {
-	_, ok := uc.fallbackCfg.Aliases[alias]
+	_, ok := uc.fallbackAliases[alias]
 	return ok
-}
-
-// convertToDomainBackend converts config.Backend to port.Backend.
-func convertToDomainBackend(b *port.Backend) *port.Backend {
-	if b == nil {
-		return nil
-	}
-	return &port.Backend{
-		Name:     b.Name,
-		URL:      b.URL,
-		APIKey:   b.APIKey,
-		Enabled:  b.Enabled,
-		Protocol: b.Protocol,
-	}
 }
