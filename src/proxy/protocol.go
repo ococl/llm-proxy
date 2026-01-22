@@ -89,7 +89,9 @@ func (pc *ProtocolConverter) ConvertToAnthropic(openAIBody map[string]interface{
 
 	if stop, ok := openAIBody["stop"]; ok {
 		meta.InputStop = stop
-		meta.OutputStop = stop
+		// Sanitize stop sequences to remove whitespace-only values
+		sanitized := sanitizeStopSequences(stop)
+		meta.OutputStop = sanitized
 	}
 
 	if tools, ok := openAIBody["tools"].([]interface{}); ok {

@@ -536,6 +536,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			reqID, time.Now().Format(time.RFC3339), route.BackendName, route.Model, resp.StatusCode, lastBody)
 		logging.WriteErrorLogFile(cfg, fmt.Sprintf("%s_%s", reqID, route.BackendName), errorContent)
 
+		// Convert Anthropic errors to OpenAI format when client expects OpenAI
+		if clientProtocol == ProtocolOpenAI && protocol == "anthropic" {
+			convertedErrResp, convErr := ConvertAnthropicErrorToOpenAI(respBody, resp.StatusCode)
+			if convErr == nil {
+				respBody = convertedErrResp
+				lastBody = string(respBody)
+			}
+		}
+
 		if p.detector.ShouldFallback(resp.StatusCode, lastBody) {
 			key := p.cooldown.Key(route.BackendName, route.Model)
 			p.cooldown.SetCooldown(key, time.Duration(cfg.Fallback.CooldownSeconds)*time.Second)
