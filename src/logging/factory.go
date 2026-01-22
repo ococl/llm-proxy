@@ -87,7 +87,9 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 	}
 	line.WriteString(" | ")
 
+	// Format level as 5 characters right-aligned
 	levelStr := entry.Level.CapitalString()
+	levelFormatted := fmt.Sprintf("%5s", levelStr)
 	if enc.colored {
 		switch entry.Level {
 		case zapcore.DebugLevel:
@@ -99,23 +101,41 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 		case zapcore.ErrorLevel, zapcore.DPanicLevel, zapcore.PanicLevel, zapcore.FatalLevel:
 			line.WriteString("\033[31m")
 		}
-		line.WriteString(levelStr)
+		line.WriteString(levelFormatted)
 		line.WriteString("\033[0m")
 	} else {
-		line.WriteString(levelStr)
+		line.WriteString(levelFormatted)
+	}
+	line.WriteString(" | ")
+
+	// Extract reqID from fields
+	var reqID string
+	filteredFields := make([]zapcore.Field, 0, len(fields))
+	for _, field := range fields {
+		if field.Key == "reqID" && field.Type == zapcore.StringType {
+			reqID = field.String
+		} else if field.Key != "logger" {
+			filteredFields = append(filteredFields, field)
+		}
+	}
+
+	// Write reqID if found
+	if reqID != "" {
+		if enc.colored {
+			line.WriteString("\033[36m")
+			line.WriteString(reqID)
+			line.WriteString("\033[0m")
+		} else {
+			line.WriteString(reqID)
+		}
 	}
 	line.WriteString(" | ")
 
 	msg := entry.Message
-	if enc.colored {
-		msg = reqIDPattern.ReplaceAllStringFunc(msg, func(match string) string {
-			return "\033[36m" + match + "\033[0m"
-		})
-	}
 	line.WriteString(msg)
 
-	if len(fields) > 0 {
-		enc.encodeFields(line, fields)
+	if len(filteredFields) > 0 {
+		enc.encodeFields(line, filteredFields)
 	}
 
 	line.WriteString("\n")
