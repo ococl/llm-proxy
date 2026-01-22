@@ -390,7 +390,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			logBuilder.WriteString(fmt.Sprintf("\n--- 响应详情 ---\n"))
 			logBuilder.WriteString(fmt.Sprintf("错误: %v\n", err))
 			logBuilder.WriteString(fmt.Sprintf("耗时: %dms\n", backendDuration.Milliseconds()))
-			logging.NetworkSugar.Warnw("后端请求失败", "reqID", reqID, "backend", route.BackendName, "error", err, "duration_ms", backendDuration.Milliseconds())
+			logging.NetworkSugar.Debugw("后端请求失败", "reqID", reqID, "backend", route.BackendName, "error", err, "duration_ms", backendDuration.Milliseconds())
 
 			errorContent := fmt.Sprintf("================== 错误日志 ==================\n请求ID: %s\n时间: %s\n后端: %s\n模型: %s\n错误: %v\n耗时: %dms\n",
 				reqID, time.Now().Format(time.RFC3339), route.BackendName, route.Model, err, backendDuration.Milliseconds())
@@ -478,7 +478,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						route.BackendName,
 					)
 					if convErr != nil {
-						logging.ProxySugar.Warnw("响应转换失败，使用原始响应",
+						logging.ProxySugar.Debugw("响应转换失败，使用原始响应",
 							"reqID", reqID,
 							"error", convErr)
 					} else {
@@ -522,7 +522,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lastBody = string(respBody)
 
 		logBuilder.WriteString(fmt.Sprintf("状态: %d\n响应: %s\n", resp.StatusCode, lastBody))
-		logging.NetworkSugar.Warnw("后端返回错误", "reqID", reqID, "backend", route.BackendName, "status", resp.StatusCode, "duration_ms", backendDuration.Milliseconds())
+		logging.NetworkSugar.Debugw("后端返回错误", "reqID", reqID, "backend", route.BackendName, "status", resp.StatusCode, "duration_ms", backendDuration.Milliseconds())
 
 		errorContent := fmt.Sprintf("================== 错误日志 ==================\n请求ID: %s\n时间: %s\n后端: %s\n模型: %s\n状态码: %d\n\n--- 响应内容 ---\n%s\n",
 			reqID, time.Now().Format(time.RFC3339), route.BackendName, route.Model, resp.StatusCode, lastBody)
@@ -617,6 +617,10 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 			logging.FileOnlySugar.Debugw("接收SSE数据块", "chunk_number", chunksReceived, "size", n, "total_bytes", bytesProcessed, "backend", backendName)
 
 			if _, writeErr := w.Write(chunk); writeErr != nil {
+				if isClientDisconnect(writeErr) {
+					logging.ProxySugar.Debugw("客户端断开连接", "backend", backendName, "error", writeErr)
+					break
+				}
 				logging.ProxySugar.Errorw("写入响应失败", "error", writeErr, "chunk_number", chunksReceived)
 				break
 			}
@@ -626,10 +630,13 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, body io.ReadCloser, backen
 			if err == io.EOF {
 				logging.FileOnlySugar.Debugw("SSE流结束", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
 				break
-			} else {
-				logging.ProxySugar.Errorw("读取SSE流错误", "error", err, "chunk_number", chunksReceived, "backend", backendName)
+			}
+			if isClientDisconnect(err) {
+				logging.ProxySugar.Debugw("客户端断开连接", "backend", backendName, "error", err)
 				break
 			}
+			logging.ProxySugar.Errorw("读取SSE流错误", "error", err, "chunk_number", chunksReceived, "backend", backendName)
+			break
 		}
 	}
 	logging.FileOnlySugar.Infow("SSE流传输完成", "total_bytes", bytesProcessed, "total_chunks", chunksReceived, "backend", backendName)
@@ -651,10 +658,14 @@ func (p *Proxy) streamAnthropicResponse(w http.ResponseWriter, body io.ReadClose
 			if eventBuffer.Len() > 0 {
 				convertedEvent, err := p.converter.ConvertAnthropicStreamToOpenAI(eventBuffer.String())
 				if err != nil {
-					logging.ProxySugar.Warnw("转换Anthropic SSE事件失败", "backend", backendName, "error", err)
+					logging.ProxySugar.Debugw("转换Anthropic SSE事件失败", "backend", backendName, "error", err)
 				} else if convertedEvent != "" {
 					if _, writeErr := w.Write([]byte(convertedEvent)); writeErr != nil {
-						logging.ProxySugar.Errorw("写入转换后的SSE事件失败", "backend", backendName, "error", writeErr)
+						if isClientDisconnect(writeErr) {
+							logging.ProxySugar.Debugw("客户端断开连接(写入SSE事件)", "backend", backendName, "error", writeErr)
+							return
+						}
+						logging.ProxySugar.Debugw("写入转换后的SSE事件失败", "backend", backendName, "error", writeErr)
 						return
 					}
 					flusher.Flush()
@@ -675,7 +686,7 @@ func (p *Proxy) streamAnthropicResponse(w http.ResponseWriter, body io.ReadClose
 	if eventBuffer.Len() > 0 {
 		convertedEvent, err := p.converter.ConvertAnthropicStreamToOpenAI(eventBuffer.String())
 		if err != nil {
-			logging.ProxySugar.Warnw("转换剩余Anthropic SSE事件失败", "backend", backendName, "error", err)
+			logging.ProxySugar.Debugw("转换剩余Anthropic SSE事件失败", "backend", backendName, "error", err)
 		} else if convertedEvent != "" {
 			w.Write([]byte(convertedEvent))
 			flusher.Flush()
@@ -683,7 +694,11 @@ func (p *Proxy) streamAnthropicResponse(w http.ResponseWriter, body io.ReadClose
 	}
 
 	if err := scanner.Err(); err != nil {
-		logging.ProxySugar.Errorw("读取Anthropic SSE流错误", "backend", backendName, "error", err)
+		if isClientDisconnect(err) {
+			logging.ProxySugar.Debugw("客户端断开连接(读取SSE流)", "backend", backendName, "error", err)
+		} else {
+			logging.ProxySugar.Debugw("读取Anthropic SSE流错误", "backend", backendName, "error", err)
+		}
 	}
 
 	logging.FileOnlySugar.Infow("Anthropic SSE流传输完成", "lines_processed", linesProcessed, "backend", backendName)
@@ -718,7 +733,7 @@ func (p *Proxy) streamOpenAIToAnthropicResponse(w http.ResponseWriter, body io.R
 			for _, event := range events {
 				eventType, ok := event["type"].(string)
 				if !ok || eventType == "" {
-					logging.ProxySugar.Warnw("事件缺少type字段", "event", event)
+					logging.ProxySugar.Debugw("事件缺少type字段", "event", event)
 					continue
 				}
 				eventJSON, _ := json.Marshal(event)
@@ -735,7 +750,7 @@ func (p *Proxy) streamOpenAIToAnthropicResponse(w http.ResponseWriter, body io.R
 
 		var chunk map[string]interface{}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			logging.ProxySugar.Warnw("解析OpenAI SSE chunk失败",
+			logging.ProxySugar.Debugw("解析OpenAI SSE chunk失败",
 				"backend", backendName,
 				"error", err,
 				"data", data)
@@ -750,7 +765,7 @@ func (p *Proxy) streamOpenAIToAnthropicResponse(w http.ResponseWriter, body io.R
 			for _, event := range events {
 				eventType, ok := event["type"].(string)
 				if !ok || eventType == "" {
-					logging.ProxySugar.Warnw("事件缺少type字段", "event", event)
+					logging.ProxySugar.Debugw("事件缺少type字段", "event", event)
 					continue
 				}
 				eventJSON, _ := json.Marshal(event)
@@ -763,7 +778,7 @@ func (p *Proxy) streamOpenAIToAnthropicResponse(w http.ResponseWriter, body io.R
 
 		event, err := p.converter.ConvertOpenAIStreamChunkToAnthropic(chunk)
 		if err != nil {
-			logging.ProxySugar.Warnw("转换OpenAI chunk失败",
+			logging.ProxySugar.Debugw("转换OpenAI chunk失败",
 				"backend", backendName,
 				"error", err)
 			continue
@@ -772,7 +787,7 @@ func (p *Proxy) streamOpenAIToAnthropicResponse(w http.ResponseWriter, body io.R
 		if event != nil {
 			eventType, ok := event["type"].(string)
 			if !ok || eventType == "" {
-				logging.ProxySugar.Warnw("事件缺少type字段", "event", event)
+				logging.ProxySugar.Debugw("事件缺少type字段", "event", event)
 				continue
 			}
 			eventJSON, _ := json.Marshal(event)
@@ -783,9 +798,13 @@ func (p *Proxy) streamOpenAIToAnthropicResponse(w http.ResponseWriter, body io.R
 	}
 
 	if err := scanner.Err(); err != nil {
-		logging.ProxySugar.Errorw("读取OpenAI SSE流错误",
-			"backend", backendName,
-			"error", err)
+		if isClientDisconnect(err) {
+			logging.ProxySugar.Debugw("客户端断开连接(读取SSE流)", "backend", backendName, "error", err)
+		} else {
+			logging.ProxySugar.Debugw("读取OpenAI SSE流错误",
+				"backend", backendName,
+				"error", err)
+		}
 	}
 
 	logging.FileOnlySugar.Infow("OpenAI→Anthropic SSE流传输完成",
