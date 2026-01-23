@@ -55,17 +55,17 @@ func NewProxyRequestUseCase(
 // Execute processes a proxy request and returns a response.
 func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request) (*entity.Response, error) {
 	startTime := time.Now()
-	traceID := req.ID().String()
+	reqID := req.ID().String()
 	modelName := req.Model().String()
 
 	uc.logger.Info("proxy request started",
-		port.String("trace_id", traceID),
+		port.String("req_id", reqID),
 		port.String("model", modelName),
 	)
 
 	if err := uc.validateRequest(req); err != nil {
 		uc.logger.Warn("request validation failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.Error(err),
 		)
@@ -75,7 +75,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	routes, err := uc.routeResolver.Resolve(req.Model().String())
 	if err != nil {
 		uc.logger.Error("route resolution failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.Error(err),
 		)
@@ -83,7 +83,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	}
 
 	uc.logger.Debug("routes resolved",
-		port.String("trace_id", traceID),
+		port.String("req_id", reqID),
 		port.String("model", modelName),
 		port.Int("total_routes", len(routes)),
 	)
@@ -91,7 +91,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	availableRoutes := uc.fallbackStrategy.FilterAvailableRoutes(routes)
 	if len(availableRoutes) == 0 {
 		uc.logger.Warn("all backends in cooldown, attempting fallback",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.Int("cooldown_count", len(routes)),
 		)
@@ -99,14 +99,14 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 		fallbackRoutes, err := uc.fallbackStrategy.GetFallbackRoutes(req.Model().String(), uc.routeResolver)
 		if err != nil || len(fallbackRoutes) == 0 {
 			uc.logger.Error("no backends available",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 			)
 			return nil, domainerror.NewNoBackend()
 		}
 
 		uc.logger.Info("fallback triggered",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("original_model", modelName),
 			port.Int("fallback_routes", len(fallbackRoutes)),
 		)
@@ -114,7 +114,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	}
 
 	uc.logger.Debug("available routes filtered",
-		port.String("trace_id", traceID),
+		port.String("req_id", reqID),
 		port.String("model", modelName),
 		port.Int("available_count", len(availableRoutes)),
 	)
@@ -122,7 +122,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	backend := uc.loadBalancer.Select(availableRoutes)
 	if backend == nil {
 		uc.logger.Error("backend selection failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 		)
 		return nil, domainerror.NewNoBackend()
@@ -135,7 +135,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	}
 
 	uc.logger.Debug("backend selected",
-		port.String("trace_id", traceID),
+		port.String("req_id", reqID),
 		port.String("model", modelName),
 		port.String("backend", backend.Name()),
 		port.String("backend_model", backendModelName),
@@ -144,7 +144,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
 	if err != nil {
 		uc.logger.Error("protocol conversion failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.String("backend", backend.Name()),
 			port.Error(err),
@@ -155,7 +155,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	resp, err := uc.executeWithRetry(ctx, backendReq, availableRoutes, backendModelName)
 	if err != nil {
 		uc.logger.Error("proxy request failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.Int64("duration_ms", time.Since(startTime).Milliseconds()),
 			port.Error(err),
@@ -166,7 +166,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	clientResp, err := uc.protocolConv.FromBackend(resp, backend.Protocol())
 	if err != nil {
 		uc.logger.Error("response conversion failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.String("backend", backend.Name()),
 			port.Error(err),
@@ -175,7 +175,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	}
 
 	uc.logger.Info("proxy request completed",
-		port.String("trace_id", traceID),
+		port.String("req_id", reqID),
 		port.String("model", modelName),
 		port.String("backend", backend.Name()),
 		port.Int64("duration_ms", time.Since(startTime).Milliseconds()),
@@ -201,14 +201,14 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 ) (*entity.Response, error) {
 	var lastErr error
 	maxRetries := uc.retryStrategy.GetMaxRetries()
-	traceID := req.ID().String()
+	reqID := req.ID().String()
 	modelName := req.Model().String()
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		backend := uc.loadBalancer.Select(routes)
 		if backend == nil {
 			uc.logger.Error("no backend available for retry",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 				port.Int("attempt", attempt),
 			)
@@ -223,7 +223,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 
 		if attempt > 0 {
 			uc.logger.Debug("retry attempt",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 				port.String("backend", backend.Name()),
 				port.Int("attempt", attempt),
@@ -234,7 +234,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
 		if err != nil {
 			uc.logger.Error("request conversion failed in retry",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 				port.String("backend", backend.Name()),
 				port.Int("attempt", attempt),
@@ -247,7 +247,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		if err == nil {
 			if attempt > 0 {
 				uc.logger.Info("retry succeeded",
-					port.String("trace_id", traceID),
+					port.String("req_id", reqID),
 					port.String("model", modelName),
 					port.String("backend", backend.Name()),
 					port.Int("attempt", attempt),
@@ -260,7 +260,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		uc.metrics.IncBackendErrors(backend.Name())
 
 		uc.logger.Warn("backend error, checking retry",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.String("backend", backend.Name()),
 			port.Int("attempt", attempt),
@@ -269,7 +269,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 
 		if !uc.retryStrategy.ShouldRetry(attempt, err) {
 			uc.logger.Error("max retries exceeded",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 				port.String("backend", backend.Name()),
 				port.Int("attempts", attempt+1),
@@ -281,7 +281,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		delay := uc.retryStrategy.GetDelay(attempt)
 		if delay > 0 {
 			uc.logger.Debug("waiting before retry",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 				port.Int64("delay_ms", delay.Milliseconds()),
 				port.Int("next_attempt", attempt+1),
@@ -290,7 +290,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 			case <-time.After(delay):
 			case <-ctx.Done():
 				uc.logger.Warn("request cancelled during retry",
-					port.String("trace_id", traceID),
+					port.String("req_id", reqID),
 					port.String("model", modelName),
 					port.Int("attempt", attempt),
 				)
@@ -312,17 +312,17 @@ func (uc *ProxyRequestUseCase) ExecuteStreaming(
 	handler func(*entity.Response) error,
 ) error {
 	startTime := time.Now()
-	traceID := req.ID().String()
+	reqID := req.ID().String()
 	modelName := req.Model().String()
 
 	uc.logger.Info("streaming request started",
-		port.String("trace_id", traceID),
+		port.String("req_id", reqID),
 		port.String("model", modelName),
 	)
 
 	if err := uc.validateRequest(req); err != nil {
 		uc.logger.Warn("streaming request validation failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.Error(err),
 		)
@@ -332,7 +332,7 @@ func (uc *ProxyRequestUseCase) ExecuteStreaming(
 	routes, err := uc.routeResolver.Resolve(req.Model().String())
 	if err != nil {
 		uc.logger.Error("streaming route resolution failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.Error(err),
 		)
@@ -342,21 +342,21 @@ func (uc *ProxyRequestUseCase) ExecuteStreaming(
 	availableRoutes := uc.fallbackStrategy.FilterAvailableRoutes(routes)
 	if len(availableRoutes) == 0 {
 		uc.logger.Warn("streaming: all backends in cooldown, attempting fallback",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 		)
 
 		fallbackRoutes, err := uc.fallbackStrategy.GetFallbackRoutes(req.Model().String(), uc.routeResolver)
 		if err != nil || len(fallbackRoutes) == 0 {
 			uc.logger.Error("streaming: no backends available",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 			)
 			return domainerror.NewNoBackend()
 		}
 
 		uc.logger.Info("streaming: fallback triggered",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("original_model", modelName),
 			port.Int("fallback_routes", len(fallbackRoutes)),
 		)
@@ -366,14 +366,14 @@ func (uc *ProxyRequestUseCase) ExecuteStreaming(
 	backend := uc.loadBalancer.Select(availableRoutes)
 	if backend == nil {
 		uc.logger.Error("streaming: backend selection failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 		)
 		return domainerror.NewNoBackend()
 	}
 
 	uc.logger.Debug("streaming: backend selected",
-		port.String("trace_id", traceID),
+		port.String("req_id", reqID),
 		port.String("model", modelName),
 		port.String("backend", backend.Name()),
 	)
@@ -381,7 +381,7 @@ func (uc *ProxyRequestUseCase) ExecuteStreaming(
 	backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
 	if err != nil {
 		uc.logger.Error("streaming: protocol conversion failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.String("backend", backend.Name()),
 			port.Error(err),
@@ -398,7 +398,7 @@ func (uc *ProxyRequestUseCase) ExecuteStreaming(
 	err = uc.executeStreamingWithRetry(ctx, backendReq, availableRoutes, backendModelName, handler)
 	if err != nil {
 		uc.logger.Error("streaming request failed",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.Int64("duration_ms", time.Since(startTime).Milliseconds()),
 			port.Error(err),
@@ -407,7 +407,7 @@ func (uc *ProxyRequestUseCase) ExecuteStreaming(
 	}
 
 	uc.logger.Info("streaming request completed",
-		port.String("trace_id", traceID),
+		port.String("req_id", reqID),
 		port.String("model", modelName),
 		port.String("backend", backend.Name()),
 		port.Int64("duration_ms", time.Since(startTime).Milliseconds()),
@@ -425,14 +425,14 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 ) error {
 	var lastErr error
 	maxRetries := uc.retryStrategy.GetMaxRetries()
-	traceID := req.ID().String()
+	reqID := req.ID().String()
 	modelName := req.Model().String()
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		backend := uc.loadBalancer.Select(routes)
 		if backend == nil {
 			uc.logger.Error("streaming: no backend available for retry",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 				port.Int("attempt", attempt),
 			)
@@ -447,7 +447,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 
 		if attempt > 0 {
 			uc.logger.Debug("streaming: retry attempt",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 				port.String("backend", backend.Name()),
 				port.Int("attempt", attempt),
@@ -458,7 +458,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 		backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
 		if err != nil {
 			uc.logger.Error("streaming: request conversion failed in retry",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 				port.String("backend", backend.Name()),
 				port.Int("attempt", attempt),
@@ -488,6 +488,17 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 				Model(model).
 				Object("chat.completion.chunk")
 
+			choicesArray := []entity.Choice{}
+
+			choicesRaw, choicesExists := chunkData["choices"]
+			if choicesExists && choicesRaw == nil {
+				uc.logger.Warn("streaming: upstream returned null choices, using empty array",
+					port.String("req_id", reqID),
+					port.String("backend", backend.Name()),
+					port.String("response_id", responseID),
+				)
+			}
+
 			if choices, ok := chunkData["choices"].([]interface{}); ok && len(choices) > 0 {
 				if choiceMap, ok := choices[0].(map[string]interface{}); ok {
 					index, _ := choiceMap["index"].(float64)
@@ -510,10 +521,11 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 						}
 					}
 
-					builder.Choices([]entity.Choice{choice})
+					choicesArray = append(choicesArray, choice)
 				}
 			}
 
+			builder.Choices(choicesArray)
 			resp := builder.BuildUnsafe()
 			return handler(resp)
 		}
@@ -523,7 +535,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 		if err == nil {
 			if attempt > 0 {
 				uc.logger.Info("streaming: retry succeeded",
-					port.String("trace_id", traceID),
+					port.String("req_id", reqID),
 					port.String("model", modelName),
 					port.String("backend", backend.Name()),
 					port.Int("attempt", attempt),
@@ -536,7 +548,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 		uc.metrics.IncBackendErrors(backend.Name())
 
 		uc.logger.Warn("streaming: backend error, checking retry",
-			port.String("trace_id", traceID),
+			port.String("req_id", reqID),
 			port.String("model", modelName),
 			port.String("backend", backend.Name()),
 			port.Int("attempt", attempt),
@@ -545,7 +557,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 
 		if !uc.retryStrategy.ShouldRetry(attempt, err) {
 			uc.logger.Error("streaming: max retries exceeded",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 				port.String("backend", backend.Name()),
 				port.Int("attempts", attempt+1),
@@ -557,7 +569,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 		delay := uc.retryStrategy.GetDelay(attempt)
 		if delay > 0 {
 			uc.logger.Debug("streaming: waiting before retry",
-				port.String("trace_id", traceID),
+				port.String("req_id", reqID),
 				port.String("model", modelName),
 				port.Int64("delay_ms", delay.Milliseconds()),
 				port.Int("next_attempt", attempt+1),
@@ -566,7 +578,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 			case <-time.After(delay):
 			case <-ctx.Done():
 				uc.logger.Warn("streaming: request cancelled during retry",
-					port.String("trace_id", traceID),
+					port.String("req_id", reqID),
 					port.String("model", modelName),
 					port.Int("attempt", attempt),
 				)

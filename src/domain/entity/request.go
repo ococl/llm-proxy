@@ -457,6 +457,7 @@ func NewResponseBuilder() *ResponseBuilder {
 	return &ResponseBuilder{
 		object:  "chat.completion",
 		created: time.Now().Unix(),
+		choices: []Choice{},
 	}
 }
 
@@ -486,7 +487,11 @@ func (rb *ResponseBuilder) Model(model string) *ResponseBuilder {
 
 // Choices sets the choices.
 func (rb *ResponseBuilder) Choices(choices []Choice) *ResponseBuilder {
-	rb.choices = choices
+	if choices == nil {
+		rb.choices = []Choice{}
+	} else {
+		rb.choices = choices
+	}
 	return rb
 }
 
@@ -536,7 +541,21 @@ func (rb *ResponseBuilder) Build() (*Response, error) {
 }
 
 // BuildUnsafe creates the response entity without validation.
+// It ensures choices is never nil to prevent JSON serialization issues.
 func (rb *ResponseBuilder) BuildUnsafe() *Response {
-	resp, _ := rb.Build()
-	return resp
+	// Ensure choices is never nil
+	if rb.choices == nil {
+		rb.choices = []Choice{}
+	}
+	return &Response{
+		ID:            rb.id,
+		Object:        rb.object,
+		Created:       rb.created,
+		Model:         rb.model,
+		Choices:       rb.choices,
+		Usage:         rb.usage,
+		StopReason:    rb.stopReason,
+		StopSequences: rb.stopSequences,
+		Headers:       rb.headers,
+	}
 }

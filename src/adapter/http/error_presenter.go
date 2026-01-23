@@ -18,15 +18,15 @@ func NewErrorPresenter(logger port.Logger) *ErrorPresenter {
 }
 
 func (ep *ErrorPresenter) WriteError(w http.ResponseWriter, r *http.Request, err error) {
-	traceID := extractTraceID(r)
+	reqID := extractReqID(r)
 
 	llmErr, ok := err.(*domainerror.LLMProxyError)
 	if !ok {
 		llmErr = domainerror.NewInternalError("unexpected error", err)
 	}
 
-	if traceID != "" {
-		llmErr = llmErr.WithTraceID(traceID)
+	if reqID != "" {
+		llmErr = llmErr.WithReqID(reqID)
 	}
 
 	ep.logError(llmErr)
@@ -34,15 +34,15 @@ func (ep *ErrorPresenter) WriteError(w http.ResponseWriter, r *http.Request, err
 	domainerror.WriteJSONError(w, llmErr)
 }
 
-func (ep *ErrorPresenter) WriteJSONError(w http.ResponseWriter, message string, statusCode int, traceID string) {
+func (ep *ErrorPresenter) WriteJSONError(w http.ResponseWriter, message string, statusCode int, reqID string) {
 	llmErr := domainerror.NewWithStatus(
 		domainerror.ErrorTypeInternal,
 		domainerror.CodeInternal,
 		message,
 		statusCode,
 	)
-	if traceID != "" {
-		llmErr = llmErr.WithTraceID(traceID)
+	if reqID != "" {
+		llmErr = llmErr.WithReqID(reqID)
 	}
 	domainerror.WriteJSONError(w, llmErr)
 }
@@ -54,8 +54,8 @@ func (ep *ErrorPresenter) logError(err *domainerror.LLMProxyError) {
 		port.String("message", err.Message),
 	}
 
-	if err.TraceID != "" {
-		fields = append(fields, port.String("trace_id", err.TraceID))
+	if err.ReqID != "" {
+		fields = append(fields, port.String("req_id", err.ReqID))
 	}
 	if err.BackendName != "" {
 		fields = append(fields, port.String("backend", err.BackendName))
@@ -82,15 +82,15 @@ func (ep *ErrorPresenter) logError(err *domainerror.LLMProxyError) {
 	}
 }
 
-func extractTraceID(r *http.Request) string {
-	if traceID := r.Header.Get("X-Trace-ID"); traceID != "" {
-		return traceID
+func extractReqID(r *http.Request) string {
+	if reqID := r.Header.Get("X-Request-ID"); reqID != "" {
+		return reqID
 	}
-	if traceID := r.Header.Get("X-Request-ID"); traceID != "" {
-		return traceID
+	if reqID := r.Header.Get("X-Trace-ID"); reqID != "" {
+		return reqID
 	}
-	if traceID := r.Context().Value("trace_id"); traceID != nil {
-		if id, ok := traceID.(string); ok {
+	if reqID := r.Context().Value("req_id"); reqID != nil {
+		if id, ok := reqID.(string); ok {
 			return id
 		}
 	}

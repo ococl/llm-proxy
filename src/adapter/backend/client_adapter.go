@@ -128,7 +128,11 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 		builder.Usage(entity.NewUsage(int(promptTokens), int(completionTokens)))
 	}
 
-	if choices, ok := respData["choices"].([]interface{}); ok && len(choices) > 0 {
+	choicesRaw, choicesExists := respData["choices"]
+	if choicesExists && choicesRaw == nil {
+		// TODO: Add logger to client_adapter for better diagnostics
+		builder.Choices([]entity.Choice{})
+	} else if choices, ok := respData["choices"].([]interface{}); ok && len(choices) > 0 {
 		if choiceMap, ok := choices[0].(map[string]interface{}); ok {
 			finishReason, _ := choiceMap["finish_reason"].(string)
 

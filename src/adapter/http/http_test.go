@@ -190,8 +190,8 @@ func TestErrorPresenter_WriteJSONError(t *testing.T) {
 			t.Error("Expected 'error' field in response")
 		}
 
-		if errorObj["trace_id"] != "trace-123" {
-			t.Errorf("Expected trace_id 'trace-123', got '%v'", errorObj["trace_id"])
+		if errorObj["req_id"] != "trace-123" {
+			t.Errorf("Expected req_id 'trace-123', got '%v'", errorObj["req_id"])
 		}
 	})
 }
@@ -294,14 +294,14 @@ func TestRecoveryMiddleware_Middleware(t *testing.T) {
 	})
 }
 
-func TestExtractTraceID(t *testing.T) {
+func TestExtractReqID(t *testing.T) {
 	t.Run("Extracts from X-Trace-ID header", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.Header.Set("X-Trace-ID", "trace-123")
 
-		traceID := extractTraceID(req)
-		if traceID != "trace-123" {
-			t.Errorf("Expected 'trace-123', got '%s'", traceID)
+		reqID := extractReqID(req)
+		if reqID != "trace-123" {
+			t.Errorf("Expected 'trace-123', got '%s'", reqID)
 		}
 	})
 
@@ -309,18 +309,18 @@ func TestExtractTraceID(t *testing.T) {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.Header.Set("X-Request-ID", "req-456")
 
-		traceID := extractTraceID(req)
-		if traceID != "req-456" {
-			t.Errorf("Expected 'req-456', got '%s'", traceID)
+		reqID := extractReqID(req)
+		if reqID != "req-456" {
+			t.Errorf("Expected 'req-456', got '%s'", reqID)
 		}
 	})
 
 	t.Run("Returns empty string when no headers", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/test", nil)
 
-		traceID := extractTraceID(req)
-		if traceID != "" {
-			t.Errorf("Expected empty string, got '%s'", traceID)
+		reqID := extractReqID(req)
+		if reqID != "" {
+			t.Errorf("Expected empty string, got '%s'", reqID)
 		}
 	})
 }

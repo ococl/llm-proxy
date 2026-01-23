@@ -77,7 +77,7 @@ func (z *ZapLoggerAdapter) With(fields ...port.Field) port.Logger {
 // LogRequest logs a complete request.
 func (z *ZapLoggerAdapter) LogRequest(reqID string, content string) {
 	z.sugar.Infow("request_log",
-		"trace_id", reqID,
+		"req_id", reqID,
 		"content", content,
 	)
 }
@@ -85,7 +85,7 @@ func (z *ZapLoggerAdapter) LogRequest(reqID string, content string) {
 // LogError logs an error with request context.
 func (z *ZapLoggerAdapter) LogError(reqID string, content string) {
 	z.sugar.Errorw("error_log",
-		"trace_id", reqID,
+		"req_id", reqID,
 		"content", content,
 	)
 }

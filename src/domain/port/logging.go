@@ -3,7 +3,7 @@ package port
 import "time"
 
 const (
-	FieldTraceID     = "trace_id"
+	FieldReqID       = "req_id"
 	FieldBackend     = "backend"
 	FieldModel       = "model"
 	FieldErrorType   = "error_type"
@@ -18,8 +18,8 @@ const (
 	FieldNextAttempt = "next_attempt"
 )
 
-func TraceID(id string) Field {
-	return String(FieldTraceID, id)
+func ReqID(id string) Field {
+	return String(FieldReqID, id)
 }
 
 func Backend(name string) Field {

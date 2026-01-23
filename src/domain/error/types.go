@@ -79,7 +79,7 @@ type LLMProxyError struct {
 	Code        ErrorCode
 	Message     string
 	Cause       error
-	TraceID     string
+	ReqID       string
 	BackendName string
 	HTTPStatus  int
 }
@@ -106,9 +106,9 @@ func (e *LLMProxyError) Is(target error) bool {
 	return e.Code == t.Code
 }
 
-// WithTraceID adds a trace ID to the error.
-func (e *LLMProxyError) WithTraceID(traceID string) *LLMProxyError {
-	e.TraceID = traceID
+// WithReqID adds a request ID to the error.
+func (e *LLMProxyError) WithReqID(reqID string) *LLMProxyError {
+	e.ReqID = reqID
 	return e
 }
 
@@ -193,11 +193,11 @@ func IsCode(err error, code ErrorCode) bool {
 	return false
 }
 
-// GetTraceID extracts the trace ID from an error.
-func GetTraceID(err error) string {
+// GetReqID extracts the request ID from an error.
+func GetReqID(err error) string {
 	var proxyErr *LLMProxyError
 	if errors.As(err, &proxyErr) {
-		return proxyErr.TraceID
+		return proxyErr.ReqID
 	}
 	return ""
 }

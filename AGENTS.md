@@ -156,7 +156,7 @@ if data == nil {
 ```go
 // ✅ 使用结构化日志 (go.uber.org/zap)
 logging.ProxySugar.Infow("请求成功",
-	"trace_id", traceID,
+	"req_id", reqID,
 	"backend", route.BackendName,
 	"model", route.Model,
 	"status", resp.StatusCode,
@@ -167,7 +167,7 @@ logging.ProxySugar.Infow("请求成功",
 logging.ProxySugar.Errorw("路由解析失败",
 	"error", err,
 	"model", model,
-	"trace_id", traceID,
+	"req_id", reqID,
 )
 
 // ❌ 避免: 非结构化日志

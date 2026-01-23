@@ -16,7 +16,7 @@ type ErrorDetail struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Type    string `json:"type,omitempty"`
-	TraceID string `json:"trace_id,omitempty"`
+	ReqID   string `json:"req_id,omitempty"`
 	Backend string `json:"backend,omitempty"`
 }
 
@@ -27,7 +27,7 @@ func ToAPIResponse(err *LLMProxyError) APIErrorResponse {
 			Code:    string(err.Code),
 			Message: err.Message,
 			Type:    string(err.Type),
-			TraceID: err.TraceID,
+			ReqID:   err.ReqID,
 			Backend: err.BackendName,
 		},
 	}
@@ -63,13 +63,13 @@ func WriteAPIError(w http.ResponseWriter, code, message string, status int) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// WriteAPIErrorWithTrace writes a simple API error response with trace ID.
-func WriteAPIErrorWithTrace(w http.ResponseWriter, code, message, traceID string, status int) {
+// WriteAPIErrorWithReqID writes a simple API error response with request ID.
+func WriteAPIErrorWithReqID(w http.ResponseWriter, code, message, reqID string, status int) {
 	resp := APIErrorResponse{
 		Error: ErrorDetail{
 			Code:    code,
 			Message: message,
-			TraceID: traceID,
+			ReqID:   reqID,
 		},
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -98,11 +98,11 @@ func WriteConcurrencyLimit(w http.ResponseWriter) {
 }
 
 // WriteBackendError writes a backend error response.
-func WriteBackendError(w http.ResponseWriter, backend string, traceID string) {
-	WriteAPIErrorWithTrace(w, "BACKEND_ERROR", "后端 "+backend+" 请求失败", traceID, http.StatusBadGateway)
+func WriteBackendError(w http.ResponseWriter, backend string, reqID string) {
+	WriteAPIErrorWithReqID(w, "BACKEND_ERROR", "后端 "+backend+" 请求失败", reqID, http.StatusBadGateway)
 }
 
 // WriteNoBackend writes a no backend available error response.
-func WriteNoBackend(w http.ResponseWriter, traceID string) {
-	WriteAPIErrorWithTrace(w, "NO_BACKEND", "所有后端均失败", traceID, http.StatusBadGateway)
+func WriteNoBackend(w http.ResponseWriter, reqID string) {
+	WriteAPIErrorWithReqID(w, "NO_BACKEND", "所有后端均失败", reqID, http.StatusBadGateway)
 }

@@ -143,7 +143,11 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 	defer cancel()
 
 	if err := h.proxyUseCase.ExecuteStreaming(ctx, req, streamHandler); err != nil {
-		h.logger.Error("streaming request failed", port.Error(err))
+		h.logger.Error("streaming request failed",
+			port.String("req_id", req.ID().String()),
+			port.String("model", req.Model().String()),
+			port.Error(err),
+		)
 		return
 	}
 
