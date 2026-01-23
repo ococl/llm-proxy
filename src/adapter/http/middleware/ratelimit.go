@@ -9,31 +9,32 @@ import (
 	"sync"
 
 	domainerror "llm-proxy/domain/error"
-	"llm-proxy/infrastructure/config"
+	"llm-proxy/domain/port"
 
 	"golang.org/x/time/rate"
 )
 
 type RateLimiter struct {
-	global    *rate.Limiter
-	perIP     map[string]*rate.Limiter
-	perModel  map[string]*rate.Limiter
-	mu        sync.RWMutex
-	config    *config.RateLimitConfig
-	configMgr *config.Manager
+	global       *rate.Limiter
+	perIP        map[string]*rate.Limiter
+	perModel     map[string]*rate.Limiter
+	mu           sync.RWMutex
+	configGetter func() port.RateLimitConfig
 }
 
-func NewRateLimiter(configMgr *config.Manager) *RateLimiter {
-	cfg := configMgr.Get().RateLimit
+func NewRateLimiter(configProvider port.ConfigProvider) *RateLimiter {
+	configGetter := func() port.RateLimitConfig {
+		return configProvider.Get().RateLimit
+	}
+	cfg := configGetter()
 	rl := &RateLimiter{
-		perIP:     make(map[string]*rate.Limiter),
-		perModel:  make(map[string]*rate.Limiter),
-		configMgr: configMgr,
-		config:    &cfg,
+		perIP:        make(map[string]*rate.Limiter),
+		perModel:     make(map[string]*rate.Limiter),
+		configGetter: configGetter,
 	}
 	if cfg.Enabled {
-		burst := int(cfg.GetGlobalRPS() * cfg.GetBurstFactor())
-		rl.global = rate.NewLimiter(rate.Limit(cfg.GetGlobalRPS()), burst)
+		burst := int(cfg.GlobalRPS * cfg.BurstFactor)
+		rl.global = rate.NewLimiter(rate.Limit(cfg.GlobalRPS), burst)
 	}
 	return rl
 }
@@ -51,9 +52,9 @@ func (rl *RateLimiter) getIPLimiter(ip string) *rate.Limiter {
 	if limiter, exists = rl.perIP[ip]; exists {
 		return limiter
 	}
-	cfg := rl.config
-	burst := int(cfg.GetPerIPRPS() * cfg.GetBurstFactor())
-	limiter = rate.NewLimiter(rate.Limit(cfg.GetPerIPRPS()), burst)
+	cfg := rl.configGetter()
+	burst := int(cfg.PerIPRPS * cfg.BurstFactor)
+	limiter = rate.NewLimiter(rate.Limit(cfg.PerIPRPS), burst)
 	rl.perIP[ip] = limiter
 	return limiter
 }
@@ -71,19 +72,19 @@ func (rl *RateLimiter) getModelLimiter(model string) *rate.Limiter {
 	if limiter, exists = rl.perModel[model]; exists {
 		return limiter
 	}
-	cfg := rl.config
-	rps := cfg.GetGlobalRPS()
+	cfg := rl.configGetter()
+	rps := cfg.GlobalRPS
 	if modelRPS, ok := cfg.PerModelRPS[model]; ok && modelRPS > 0 {
 		rps = modelRPS
 	}
-	burst := int(rps * cfg.GetBurstFactor())
+	burst := int(rps * cfg.BurstFactor)
 	limiter = rate.NewLimiter(rate.Limit(rps), burst)
 	rl.perModel[model] = limiter
 	return limiter
 }
 
 func (rl *RateLimiter) Allow(ip, model string) bool {
-	cfg := rl.configMgr.Get().RateLimit
+	cfg := rl.configGetter()
 	if !cfg.Enabled {
 		return true
 	}
@@ -101,7 +102,7 @@ func (rl *RateLimiter) Allow(ip, model string) bool {
 
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg := rl.configMgr.Get().RateLimit
+		cfg := rl.configGetter()
 		if !cfg.Enabled {
 			next.ServeHTTP(w, r)
 			return

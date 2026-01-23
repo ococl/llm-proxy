@@ -6,30 +6,33 @@ import (
 	"sync/atomic"
 
 	domainerror "llm-proxy/domain/error"
-	"llm-proxy/infrastructure/config"
+	"llm-proxy/domain/port"
 )
 
 type ConcurrencyLimiter struct {
-	global    chan struct{}
-	queueSize int64
-	maxQueue  int
-	configMgr *config.Manager
+	global       chan struct{}
+	queueSize    int64
+	maxQueue     int
+	configGetter func() port.ConcurrencyConfig
 }
 
-func NewConcurrencyLimiter(configMgr *config.Manager) *ConcurrencyLimiter {
-	cfg := configMgr.Get().Concurrency
+func NewConcurrencyLimiter(configProvider port.ConfigProvider) *ConcurrencyLimiter {
+	configGetter := func() port.ConcurrencyConfig {
+		return configProvider.Get().Concurrency
+	}
+	cfg := configGetter()
 	cl := &ConcurrencyLimiter{
-		configMgr: configMgr,
-		maxQueue:  cfg.GetMaxQueueSize(),
+		maxQueue:     cfg.MaxQueueSize,
+		configGetter: configGetter,
 	}
 	if cfg.Enabled {
-		cl.global = make(chan struct{}, cfg.GetMaxRequests())
+		cl.global = make(chan struct{}, cfg.MaxRequests)
 	}
 	return cl
 }
 
 func (cl *ConcurrencyLimiter) Acquire(ctx context.Context) error {
-	cfg := cl.configMgr.Get().Concurrency
+	cfg := cl.configGetter()
 	if !cfg.Enabled || cl.global == nil {
 		return nil
 	}
@@ -48,7 +51,7 @@ func (cl *ConcurrencyLimiter) Acquire(ctx context.Context) error {
 }
 
 func (cl *ConcurrencyLimiter) Release() {
-	cfg := cl.configMgr.Get().Concurrency
+	cfg := cl.configGetter()
 	if !cfg.Enabled || cl.global == nil {
 		return
 	}
@@ -60,12 +63,12 @@ func (cl *ConcurrencyLimiter) Release() {
 
 func (cl *ConcurrencyLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg := cl.configMgr.Get().Concurrency
+		cfg := cl.configGetter()
 		if !cfg.Enabled {
 			next.ServeHTTP(w, r)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), cfg.GetQueueTimeout())
+		ctx, cancel := context.WithTimeout(r.Context(), cfg.QueueTimeout)
 		defer cancel()
 
 		if err := cl.Acquire(ctx); err != nil {

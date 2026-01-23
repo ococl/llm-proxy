@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	adapter_config "llm-proxy/adapter/config"
 	"llm-proxy/infrastructure/config"
 )
 
@@ -30,8 +31,9 @@ func TestNewConcurrencyLimiter(t *testing.T) {
 			}
 			mgr := &config.Manager{}
 			mgr.SetConfigForTest(cfg)
+			adapter := adapter_config.NewConfigAdapter(mgr)
 
-			cl := NewConcurrencyLimiter(mgr)
+			cl := NewConcurrencyLimiter(adapter)
 			if cl == nil {
 				t.Fatal("NewConcurrencyLimiter returned nil")
 			}
@@ -45,6 +47,13 @@ func TestNewConcurrencyLimiter(t *testing.T) {
 	}
 }
 
+func createTestConcurrencyLimiter(t *testing.T, cfg *config.Config) *ConcurrencyLimiter {
+	mgr := &config.Manager{}
+	mgr.SetConfigForTest(cfg)
+	adapter := adapter_config.NewConfigAdapter(mgr)
+	return NewConcurrencyLimiter(adapter)
+}
+
 func TestConcurrencyLimiter_Acquire(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
 		cfg := &config.Config{
@@ -52,10 +61,7 @@ func TestConcurrencyLimiter_Acquire(t *testing.T) {
 				Enabled: false,
 			},
 		}
-		mgr := &config.Manager{}
-		mgr.SetConfigForTest(cfg)
-
-		cl := NewConcurrencyLimiter(mgr)
+		cl := createTestConcurrencyLimiter(t, cfg)
 		ctx := context.Background()
 		if err := cl.Acquire(ctx); err != nil {
 			t.Errorf("Expected Acquire to succeed when disabled, got error: %v", err)
@@ -69,10 +75,7 @@ func TestConcurrencyLimiter_Acquire(t *testing.T) {
 				MaxRequests: 2,
 			},
 		}
-		mgr := &config.Manager{}
-		mgr.SetConfigForTest(cfg)
-
-		cl := NewConcurrencyLimiter(mgr)
+		cl := createTestConcurrencyLimiter(t, cfg)
 		ctx := context.Background()
 
 		if err := cl.Acquire(ctx); err != nil {
@@ -93,10 +96,7 @@ func TestConcurrencyLimiter_Acquire(t *testing.T) {
 				MaxRequests: 1,
 			},
 		}
-		mgr := &config.Manager{}
-		mgr.SetConfigForTest(cfg)
-
-		cl := NewConcurrencyLimiter(mgr)
+		cl := createTestConcurrencyLimiter(t, cfg)
 
 		ctx1 := context.Background()
 		if err := cl.Acquire(ctx1); err != nil {
@@ -121,10 +121,7 @@ func TestConcurrencyLimiter_Acquire(t *testing.T) {
 				MaxQueueSize: 0,
 			},
 		}
-		mgr := &config.Manager{}
-		mgr.SetConfigForTest(cfg)
-
-		cl := NewConcurrencyLimiter(mgr)
+		cl := createTestConcurrencyLimiter(t, cfg)
 		ctx1 := context.Background()
 		if err := cl.Acquire(ctx1); err != nil {
 			t.Fatalf("First Acquire failed: %v", err)
@@ -154,7 +151,7 @@ func TestConcurrencyLimiter_Release(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		cl := NewConcurrencyLimiter(mgr)
+		cl := createTestConcurrencyLimiter(t, cfg)
 		cl.Release()
 	})
 
@@ -168,7 +165,7 @@ func TestConcurrencyLimiter_Release(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		cl := NewConcurrencyLimiter(mgr)
+		cl := createTestConcurrencyLimiter(t, cfg)
 		ctx := context.Background()
 		if err := cl.Acquire(ctx); err != nil {
 			t.Fatalf("Acquire failed: %v", err)
@@ -193,7 +190,7 @@ func TestConcurrencyLimiter_Middleware(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		cl := NewConcurrencyLimiter(mgr)
+		cl := createTestConcurrencyLimiter(t, cfg)
 		handler := cl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -218,7 +215,7 @@ func TestConcurrencyLimiter_Middleware(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		cl := NewConcurrencyLimiter(mgr)
+		cl := createTestConcurrencyLimiter(t, cfg)
 
 		slowHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(100 * time.Millisecond)
@@ -266,7 +263,7 @@ func TestConcurrencyLimiter_Concurrent(t *testing.T) {
 	mgr := &config.Manager{}
 	mgr.SetConfigForTest(cfg)
 
-	cl := NewConcurrencyLimiter(mgr)
+	cl := createTestConcurrencyLimiter(t, cfg)
 	ctx := context.Background()
 
 	var wg sync.WaitGroup

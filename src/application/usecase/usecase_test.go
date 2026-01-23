@@ -15,7 +15,8 @@ import (
 
 // MockBackendClient is a mock implementation of port.BackendClient
 type MockBackendClient struct {
-	sendFunc func(ctx context.Context, req *entity.Request, backend *entity.Backend) (*entity.Response, error)
+	sendFunc          func(ctx context.Context, req *entity.Request, backend *entity.Backend) (*entity.Response, error)
+	sendStreamingFunc func(ctx context.Context, req *entity.Request, backend *entity.Backend, handler func([]byte) error) error
 }
 
 func (m *MockBackendClient) Send(ctx context.Context, req *entity.Request, backend *entity.Backend) (*entity.Response, error) {
@@ -23,6 +24,13 @@ func (m *MockBackendClient) Send(ctx context.Context, req *entity.Request, backe
 		return m.sendFunc(ctx, req, backend)
 	}
 	return nil, nil
+}
+
+func (m *MockBackendClient) SendStreaming(ctx context.Context, req *entity.Request, backend *entity.Backend, handler func([]byte) error) error {
+	if m.sendStreamingFunc != nil {
+		return m.sendStreamingFunc(ctx, req, backend, handler)
+	}
+	return nil
 }
 
 func (m *MockBackendClient) GetHTTPClient() *http.Client {

@@ -157,8 +157,8 @@ func main() {
 	healthHandler := http_adapter.NewHealthHandler(configAdapter, proxyLogger)
 	recoveryMiddleware := http_adapter.NewRecoveryMiddleware(proxyLogger)
 
-	rateLimiter := http_middleware.NewRateLimiter(configMgr)
-	concurrencyLimiter := http_middleware.NewConcurrencyLimiter(configMgr)
+	rateLimiter := http_middleware.NewRateLimiter(configAdapter)
+	concurrencyLimiter := http_middleware.NewConcurrencyLimiter(configAdapter)
 
 	printBanner(Version, cfg.GetListen(), len(cfg.Backends), len(cfg.Models))
 

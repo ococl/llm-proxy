@@ -9,6 +9,19 @@ import (
 	"llm-proxy/domain/port"
 )
 
+// Logging field constants for consistent field names.
+const (
+	FieldStrategy          = "strategy"
+	FieldAvailableBackends = "available_backends"
+	FieldPriority          = "priority"
+	FieldSelectionMethod   = "selection_method"
+	FieldCircuitState      = "circuit_state"
+	FieldFailureCount      = "failure_count"
+	FieldSuccessCount      = "success_count"
+	FieldTotalRoutes       = "total_routes"
+	FieldFilteredRoutes    = "filtered_routes"
+)
+
 type LoadBalancingStrategy string
 
 const (
@@ -20,6 +33,7 @@ const (
 
 type LoadBalancer struct {
 	strategy LoadBalancingStrategy
+	logger   port.Logger
 	mu       sync.Mutex
 }
 
@@ -29,34 +43,67 @@ func NewLoadBalancer(strategy LoadBalancingStrategy) *LoadBalancer {
 	}
 	return &LoadBalancer{
 		strategy: strategy,
+		logger:   &port.NopLogger{},
 	}
+}
+
+func (lb *LoadBalancer) WithLogger(logger port.Logger) *LoadBalancer {
+	lb.logger = logger
+	return lb
 }
 
 func (lb *LoadBalancer) Select(routes []*port.Route) *entity.Backend {
 	if len(routes) == 0 {
+		lb.logger.Warn("no routes available for selection",
+			port.Int(FieldTotalRoutes, 0))
 		return nil
 	}
+
 	if len(routes) == 1 {
-		return routes[0].Backend
+		backend := routes[0].Backend
+		lb.logger.Debug("single route available, selected directly",
+			port.String("backend", backend.Name()),
+			port.Int(FieldPriority, routes[0].Priority))
+		return backend
 	}
 
+	lb.logger.Debug("selecting backend",
+		port.Int(FieldTotalRoutes, len(routes)),
+		port.String(FieldStrategy, string(lb.strategy)))
+
+	var backend *entity.Backend
 	switch lb.strategy {
 	case StrategyRandom:
-		return lb.selectRandom(routes)
+		backend = lb.selectRandom(routes)
 	case StrategyRoundRobin:
-		return lb.selectRoundRobin(routes)
+		backend = lb.selectRoundRobin(routes)
 	case StrategyLeastRequests:
-		return lb.selectLeastRequests(routes)
+		backend = lb.selectLeastRequests(routes)
 	case StrategyWeighted:
-		return lb.selectWeighted(routes)
+		backend = lb.selectWeighted(routes)
 	default:
-		return lb.selectRandom(routes)
+		backend = lb.selectRandom(routes)
 	}
+
+	if backend != nil {
+		lb.logger.Debug("backend selected",
+			port.String("backend", backend.Name()),
+			port.String(FieldSelectionMethod, string(lb.strategy)))
+	} else {
+		lb.logger.Warn("backend selection returned nil",
+			port.Int(FieldTotalRoutes, len(routes)),
+			port.String(FieldStrategy, string(lb.strategy)))
+	}
+
+	return backend
 }
 
 func (lb *LoadBalancer) selectRandom(routes []*port.Route) *entity.Backend {
 	enabled := filterEnabledBackends(routes)
 	if len(enabled) == 0 {
+		lb.logger.Warn("no enabled backends available",
+			port.Int(FieldTotalRoutes, len(routes)),
+			port.Int(FieldFilteredRoutes, 0))
 		return nil
 	}
 	idx := rand.Intn(len(enabled))
@@ -66,6 +113,9 @@ func (lb *LoadBalancer) selectRandom(routes []*port.Route) *entity.Backend {
 func (lb *LoadBalancer) selectRoundRobin(routes []*port.Route) *entity.Backend {
 	enabled := filterEnabledBackends(routes)
 	if len(enabled) == 0 {
+		lb.logger.Warn("no enabled backends available",
+			port.Int(FieldTotalRoutes, len(routes)),
+			port.Int(FieldFilteredRoutes, 0))
 		return nil
 	}
 	idx := rand.Intn(len(enabled))
@@ -75,6 +125,9 @@ func (lb *LoadBalancer) selectRoundRobin(routes []*port.Route) *entity.Backend {
 func (lb *LoadBalancer) selectLeastRequests(routes []*port.Route) *entity.Backend {
 	enabled := filterEnabledBackends(routes)
 	if len(enabled) == 0 {
+		lb.logger.Warn("no enabled backends available",
+			port.Int(FieldTotalRoutes, len(routes)),
+			port.Int(FieldFilteredRoutes, 0))
 		return nil
 	}
 	return enabled[rand.Intn(len(enabled))]
@@ -89,11 +142,18 @@ func (lb *LoadBalancer) selectWeighted(routes []*port.Route) *entity.Backend {
 	topRoutes := lb.filterByPriority(routes, highestPriority)
 
 	if len(topRoutes) == 0 {
+		lb.logger.Warn("no routes after priority filtering",
+			port.Int(FieldTotalRoutes, len(routes)),
+			port.Int(FieldPriority, highestPriority))
 		return nil
 	}
 
 	if len(topRoutes) == 1 {
-		return topRoutes[0].Backend
+		backend := topRoutes[0].Backend
+		lb.logger.Debug("single backend in priority group",
+			port.String("backend", backend.Name()),
+			port.Int(FieldPriority, highestPriority))
+		return backend
 	}
 
 	return lb.selectRandomBackend(topRoutes)
@@ -141,13 +201,20 @@ type WeightedBackend struct {
 
 type WeightedLoadBalancer struct {
 	backends []WeightedBackend
+	logger   port.Logger
 	mu       sync.Mutex
 }
 
 func NewWeightedLoadBalancer(backends []WeightedBackend) *WeightedLoadBalancer {
 	return &WeightedLoadBalancer{
 		backends: backends,
+		logger:   &port.NopLogger{},
 	}
+}
+
+func (wlb *WeightedLoadBalancer) WithLogger(logger port.Logger) *WeightedLoadBalancer {
+	wlb.logger = logger
+	return wlb
 }
 
 func (wlb *WeightedLoadBalancer) Select() *entity.Backend {
@@ -155,17 +222,23 @@ func (wlb *WeightedLoadBalancer) Select() *entity.Backend {
 	defer wlb.mu.Unlock()
 
 	if len(wlb.backends) == 0 {
+		wlb.logger.Warn("no backends configured in weighted load balancer")
 		return nil
 	}
 
 	totalWeight := 0
+	enabledCount := 0
 	for _, wb := range wlb.backends {
 		if wb.Backend.IsEnabled() {
 			totalWeight += wb.Weight
+			enabledCount++
 		}
 	}
 
 	if totalWeight == 0 {
+		wlb.logger.Warn("no enabled backends with positive weight",
+			port.Int(FieldTotalCount, len(wlb.backends)),
+			port.Int("enabled_count", enabledCount))
 		return nil
 	}
 
@@ -178,6 +251,10 @@ func (wlb *WeightedLoadBalancer) Select() *entity.Backend {
 		}
 		currentWeight += wb.Weight
 		if randWeight < currentWeight {
+			wlb.logger.Debug("weighted backend selected",
+				port.String("backend", wb.Backend.Name()),
+				port.Int("weight", wb.Weight),
+				port.Int("total_weight", totalWeight))
 			return wb.Backend
 		}
 	}
@@ -214,6 +291,7 @@ type CircuitBreaker struct {
 	successThreshold int
 	openTimeout      time.Duration
 	lastStateChange  time.Time
+	logger           port.Logger
 	mu               sync.RWMutex
 }
 
@@ -237,7 +315,13 @@ func NewCircuitBreaker(
 		successThreshold: successThreshold,
 		openTimeout:      openTimeout,
 		lastStateChange:  time.Now(),
+		logger:           &port.NopLogger{},
 	}
+}
+
+func (cb *CircuitBreaker) WithLogger(logger port.Logger) *CircuitBreaker {
+	cb.logger = logger
+	return cb
 }
 
 func (cb *CircuitBreaker) State() CircuitBreakerState {
@@ -259,6 +343,8 @@ func (cb *CircuitBreaker) AllowRequest() bool {
 			cb.successCount = 0
 			cb.failureCount = 0
 			cb.lastStateChange = time.Now()
+			cb.logger.Info("circuit breaker transitioned to half-open",
+				port.String(FieldCircuitState, cb.state.String()))
 			return true
 		}
 		return false
@@ -280,6 +366,9 @@ func (cb *CircuitBreaker) RecordSuccess() {
 			cb.state = CircuitStateClosed
 			cb.failureCount = 0
 			cb.lastStateChange = time.Now()
+			cb.logger.Info("circuit breaker closed after successful recovery",
+				port.String(FieldCircuitState, cb.state.String()),
+				port.Int(FieldSuccessCount, cb.successCount))
 		}
 	case CircuitStateClosed:
 		cb.failureCount = 0
@@ -294,11 +383,16 @@ func (cb *CircuitBreaker) RecordFailure() {
 	case CircuitStateHalfOpen:
 		cb.state = CircuitStateOpen
 		cb.lastStateChange = time.Now()
+		cb.logger.Warn("circuit breaker opened from half-open after failure",
+			port.String(FieldCircuitState, cb.state.String()))
 	case CircuitStateClosed:
 		cb.failureCount++
 		if cb.failureCount >= cb.failureThreshold {
 			cb.state = CircuitStateOpen
 			cb.lastStateChange = time.Now()
+			cb.logger.Warn("circuit breaker opened due to failure threshold",
+				port.String(FieldCircuitState, cb.state.String()),
+				port.Int(FieldFailureCount, cb.failureCount))
 		}
 	}
 }

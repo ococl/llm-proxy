@@ -276,17 +276,17 @@ func TestResponse_New(t *testing.T) {
 		usage := NewUsage(10, 5)
 		resp := NewResponse("resp-1", "gpt-4", choices, usage)
 
-		if resp.ID() != "resp-1" {
-			t.Errorf("Expected ID 'resp-1', got '%s'", resp.ID())
+		if resp.ID != "resp-1" {
+			t.Errorf("Expected ID 'resp-1', got '%s'", resp.ID)
 		}
-		if resp.Model() != "gpt-4" {
-			t.Errorf("Expected model 'gpt-4', got '%s'", resp.Model())
+		if resp.Model != "gpt-4" {
+			t.Errorf("Expected model 'gpt-4', got '%s'", resp.Model)
 		}
-		if len(resp.Choices()) != 1 {
-			t.Errorf("Expected 1 choice, got %d", len(resp.Choices()))
+		if len(resp.Choices) != 1 {
+			t.Errorf("Expected 1 choice, got %d", len(resp.Choices))
 		}
-		if resp.Usage().TotalTokens != 15 {
-			t.Errorf("Expected total tokens 15, got %d", resp.Usage().TotalTokens)
+		if resp.Usage.TotalTokens != 15 {
+			t.Errorf("Expected total tokens 15, got %d", resp.Usage.TotalTokens)
 		}
 	})
 
@@ -326,8 +326,8 @@ func TestResponseBuilder(t *testing.T) {
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
-		if resp.ID() != "resp-1" {
-			t.Errorf("Expected ID 'resp-1', got '%s'", resp.ID())
+		if resp.ID != "resp-1" {
+			t.Errorf("Expected ID 'resp-1', got '%s'", resp.ID)
 		}
 	})
 

@@ -8,8 +8,16 @@ import (
 	"sync"
 	"testing"
 
+	adapter_config "llm-proxy/adapter/config"
 	"llm-proxy/infrastructure/config"
 )
+
+func createTestRateLimiter(t *testing.T, cfg *config.Config) *RateLimiter {
+	mgr := &config.Manager{}
+	mgr.SetConfigForTest(cfg)
+	adapter := adapter_config.NewConfigAdapter(mgr)
+	return NewRateLimiter(adapter)
+}
 
 func TestNewRateLimiter(t *testing.T) {
 	tests := []struct {
@@ -31,7 +39,7 @@ func TestNewRateLimiter(t *testing.T) {
 			mgr := &config.Manager{}
 			mgr.SetConfigForTest(cfg)
 
-			rl := NewRateLimiter(mgr)
+			rl := createTestRateLimiter(t, cfg)
 			if rl == nil {
 				t.Fatal("NewRateLimiter returned nil")
 			}
@@ -55,7 +63,7 @@ func TestRateLimiter_Allow(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		rl := NewRateLimiter(mgr)
+		rl := createTestRateLimiter(t, cfg)
 		if !rl.Allow("192.168.1.1", "gpt-4") {
 			t.Error("Expected Allow to return true when disabled")
 		}
@@ -72,7 +80,7 @@ func TestRateLimiter_Allow(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		rl := NewRateLimiter(mgr)
+		rl := createTestRateLimiter(t, cfg)
 		if !rl.Allow("", "") {
 			t.Error("First request should be allowed")
 		}
@@ -94,7 +102,7 @@ func TestRateLimiter_Allow(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		rl := NewRateLimiter(mgr)
+		rl := createTestRateLimiter(t, cfg)
 		ip := "192.168.1.1"
 		if !rl.Allow(ip, "") {
 			t.Error("First request should be allowed")
@@ -116,7 +124,7 @@ func TestRateLimiter_Allow(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		rl := NewRateLimiter(mgr)
+		rl := createTestRateLimiter(t, cfg)
 		if !rl.Allow("", "gpt-4") {
 			t.Error("First request should be allowed")
 		}
@@ -136,7 +144,7 @@ func TestRateLimiter_getIPLimiter(t *testing.T) {
 	mgr := &config.Manager{}
 	mgr.SetConfigForTest(cfg)
 
-	rl := NewRateLimiter(mgr)
+	rl := createTestRateLimiter(t, cfg)
 	ip := "192.168.1.1"
 
 	limiter1 := rl.getIPLimiter(ip)
@@ -168,7 +176,7 @@ func TestRateLimiter_getModelLimiter(t *testing.T) {
 	mgr := &config.Manager{}
 	mgr.SetConfigForTest(cfg)
 
-	rl := NewRateLimiter(mgr)
+	rl := createTestRateLimiter(t, cfg)
 
 	limiter1 := rl.getModelLimiter("gpt-4")
 	if limiter1 == nil {
@@ -196,7 +204,7 @@ func TestRateLimiter_Middleware(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		rl := NewRateLimiter(mgr)
+		rl := createTestRateLimiter(t, cfg)
 		handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -220,7 +228,7 @@ func TestRateLimiter_Middleware(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		rl := NewRateLimiter(mgr)
+		rl := createTestRateLimiter(t, cfg)
 		handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -252,7 +260,7 @@ func TestRateLimiter_Middleware(t *testing.T) {
 		mgr := &config.Manager{}
 		mgr.SetConfigForTest(cfg)
 
-		rl := NewRateLimiter(mgr)
+		rl := createTestRateLimiter(t, cfg)
 		handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -339,7 +347,7 @@ func TestRateLimiter_Concurrent(t *testing.T) {
 	mgr := &config.Manager{}
 	mgr.SetConfigForTest(cfg)
 
-	rl := NewRateLimiter(mgr)
+	rl := createTestRateLimiter(t, cfg)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
@@ -367,7 +375,7 @@ func TestRateLimiter_BurstFactor(t *testing.T) {
 	mgr := &config.Manager{}
 	mgr.SetConfigForTest(cfg)
 
-	rl := NewRateLimiter(mgr)
+	rl := createTestRateLimiter(t, cfg)
 	if rl.global == nil {
 		t.Fatal("global limiter not initialized")
 	}
