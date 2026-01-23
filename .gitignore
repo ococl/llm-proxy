@@ -18,3 +18,16 @@ temp_*
 coverage.out
 logs
 *.log
+
+# Python
+scripts/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/

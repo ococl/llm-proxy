@@ -1,6 +1,6 @@
-# Testing Guide
+# 测试指南
 
-LLM-Proxy 项目的测试指南，包含单元测试、集成测试和端到端测试的完整说明。
+LLM-Proxy 项目的测试指南，包含单元测试、集成测试、端到端测试和协议测试的完整说明。
 
 ---
 
@@ -9,6 +9,7 @@ LLM-Proxy 项目的测试指南，包含单元测试、集成测试和端到端�
 - [快速开始](#快速开始)
 - [测试类型](#测试类型)
 - [端到端测试](#端到端测试)
+- [协议测试](#协议测试)
 - [单元测试](#单元测试)
 - [测试覆盖率](#测试覆盖率)
 - [CI/CD 集成](#cicd-集成)
@@ -17,14 +18,23 @@ LLM-Proxy 项目的测试指南，包含单元测试、集成测试和端到端�
 
 ## 🚀 快速开始
 
-### 运行所有测试
+### 首选方法：使用 Python3（推荐）
 
-```bash
-cd src
-go test ./...
+```powershell
+# Windows
+python3 scripts/e2e-test.py
+
+# 或直接运行（会自动调用 Python3）
+.\scripts\e2e-test.ps1
 ```
 
-### 快速验证（构建 + 简单 E2E 测试）
+```bash
+# Linux/macOS
+python3 scripts/e2e-test.py
+./scripts/e2e-test.py
+```
+
+### 快速验证（构建 + 简单测试）
 
 ```powershell
 # Windows
@@ -39,28 +49,11 @@ go test ./...
 ./scripts/quick-test.sh
 ```
 
-### 完整端到端测试
-
-```powershell
-# Windows - 运行所有测试
-.\scripts\e2e-test.ps1
-
-# 仅运行健康检查
-.\scripts\e2e-test.ps1 -HealthCheck
-
-# 仅测试正常请求
-.\scripts\e2e-test.ps1 -NormalRequest
-
-# 仅测试流式请求
-.\scripts\e2e-test.ps1 -StreamingRequest
-```
+### 运行所有测试
 
 ```bash
-# Linux/macOS
-./scripts/e2e-test.sh
-./scripts/e2e-test.sh --health-check
-./scripts/e2e-test.sh --normal-request
-./scripts/e2e-test.sh --streaming
+cd src
+go test ./...
 ```
 
 ---
@@ -80,43 +73,66 @@ go test ./domain/entity/...
 go test ./domain/service/...
 ```
 
-**示例**:
-```go
-func TestBackend_IsEnabled(t *testing.T) {
-    backend := &entity.Backend{Enabled: true}
-    if !backend.IsEnabled() {
-        t.Error("Expected backend to be enabled")
-    }
-}
-```
-
 ### 2. 集成测试 (Integration Tests)
 
 测试多个组件协作的行为，可能涉及 HTTP 调用或文件 I/O。
 
 **位置**: `src/adapter/*_test.go`, `src/application/*_test.go`
 
-**运行**:
-```bash
-cd src
-go test ./adapter/...
-go test ./application/...
-```
-
 ### 3. 端到端测试 (E2E Tests)
 
 测试完整的用户场景，从 HTTP 请求到响应。
 
-**脚本位置**: `scripts/e2e-test.ps1`, `scripts/e2e-test.sh`
+### 4. 协议测试 (Protocol Tests)
 
-**运行**:
-```powershell
-.\scripts\e2e-test.ps1
-```
+测试不同协议（OpenAI、Anthropic）的直通和转换功能。
 
 ---
 
 ## 🌐 端到端测试
+
+### 使用 Python3 测试脚本（推荐）
+
+```powershell
+# Windows / Linux / macOS
+python3 scripts/e2e-test.py
+
+# 运行所有测试
+python3 scripts/e2e-test.py --all
+
+# 仅健康检查
+python3 scripts/e2e-test.py --health
+
+# 仅正常请求测试
+python3 scripts/e2e-test.py --normal
+
+# 仅流式请求测试
+python3 scripts/e2e-test.py --streaming
+
+# 仅协议测试
+python3 scripts/e2e-test.py --protocol
+
+# 仅 OpenAI 协议透传测试
+python3 scripts/e2e-test.py --openai
+
+# 仅 Anthropic 协议透传测试
+python3 scripts/e2e-test.py --anthropic
+
+# 详细输出
+python3 scripts/e2e-test.py -v
+```
+
+### 使用 PowerShell 脚本（自动转发到 Python3）
+
+```powershell
+# Windows PowerShell
+.\scripts\e2e-test.ps1
+
+# 参数与 Python3 版本相同
+.\scripts\e2e-test.ps1 --all
+.\scripts\e2e-test.ps1 --health
+.\scripts\e2e-test.ps1 --protocol
+```
 
 ### 测试脚本功能
 
@@ -127,7 +143,7 @@ E2E 测试脚本会自动执行以下步骤：
    - 验证配置文件存在
    - 检查端口占用
 
-2. **服务启动**
+2. **服务启动**（如果未运行）
    - 使用 `dist/config.yaml` 启动服务
    - 等待服务就绪（最多 10 秒）
 
@@ -145,27 +161,107 @@ E2E 测试脚本会自动执行以下步骤：
    - 验证 SSE 数据流
    - 统计数据块数量
 
-6. **错误处理测试**
+6. **协议测试**（可选）
+   - OpenAI 协议透传测试
+   - Anthropic 协议透传测试
+   - 协议转换测试
+
+7. **错误处理测试**
    - 测试无效模型请求
    - 验证错误码和错误消息
 
-7. **日志验证**
+8. **日志验证**
    - 检查日志文件存在性
    - 显示最新日志内容
 
-8. **服务停止**
-   - 优雅关闭服务进程
+9. **服务停止**
+   - 优雅关闭服务进程（如果由脚本启动）
 
-### 测试配置
+---
 
-测试使用的配置文件：`dist/config.yaml`
+## 🔄 协议测试
 
-关键配置项：
-- **监听地址**: `:8765`
-- **API Key**: `sk-aNbDRYsSMcbdVUptFyy9yWpeN6agx`
-- **日志级别**: `debug`
-- **后端数量**: 5 个
-- **模型别名**: 14 个
+### 协议测试脚本
+
+协议测试用于验证 LLM-Proxy 的协议直通和转换功能。
+
+### 使用 Python3（推荐）
+
+```powershell
+# 运行所有协议测试
+python3 scripts/protocol-test.py
+
+# 仅 OpenAI 协议测试
+python3 scripts/protocol-test.py --openai
+
+# 仅 Anthropic 协议测试
+python3 scripts/protocol-test.py --anthropic
+
+# 仅协议转换测试
+python3 scripts/protocol-test.py --conversion
+
+# 详细输出
+python3 scripts/protocol-test.py -v
+```
+
+### 使用 PowerShell（自动转发）
+
+```powershell
+.\scripts\protocol-test.ps1
+.\scripts\protocol-test.ps1 --openai
+.\scripts\protocol-test.ps1 --anthropic
+```
+
+### 测试的协议类型
+
+#### 1. OpenAI 协议
+
+测试使用 OpenAI 格式请求的模型：
+
+| 模型别名 | 后端 | 协议 |
+|---------|------|------|
+| `deepseek/deepseek-v3.2` | GROUP_2 | openai |
+| `z-ai/glm-4.7` | GROUP_1 | openai |
+| `google/gemini-3-flash` | GROUP_1 | openai |
+| `minimax/minimax-m2.1` | GROUP_1 | openai |
+| `qwen/qwen3-coder-480b-a35b-instruct` | GROUP_2 | openai |
+
+#### 2. Anthropic 协议
+
+测试 Claude 模型：
+
+| 模型别名 | 后端 | 协议 | 说明 |
+|---------|------|------|------|
+| `anthropic/claude-opus-4-5` | GROUP_HB5S | anthropic | Anthropic 原生协议 |
+| `anthropic/claude-sonnet-4-5` | GROUP_1 | openai | OpenAI 格式请求 |
+| `anthropic/claude-haiku-4-5` | GROUP_1 | openai | OpenAI 格式请求 |
+
+### 测试场景
+
+#### 直通测试 (Passthrough)
+
+验证请求直接从客户端透传到对应协议的后端：
+
+```
+客户端 (OpenAI格式) → LLM-Proxy → OpenAI后端
+客户端 (OpenAI格式) → LLM-Proxy → Anthropic后端
+```
+
+#### 转换测试 (Conversion)
+
+验证协议转换功能：
+
+```
+客户端请求 (OpenAI格式) → LLM-Proxy → 不同协议后端
+```
+
+#### 混合协议路由
+
+测试多后端回退场景：
+
+```
+Claude Opus → oocc (OpenAI) → GROUP_HB5S (Anthropic) → GROUP_1 (OpenAI) → NVIDIA (OpenAI)
+```
 
 ### 测试结果示例
 
@@ -173,49 +269,23 @@ E2E 测试脚本会自动执行以下步骤：
 ========================================
  Test Report
 ========================================
-  Total tests: 5
-  Passed: 5
+  Total tests: 10
+  Passed: 10
   Failed: 0
   Pass rate: 100%
 
+========================================
+ Protocol Summary
+========================================
+ ✓ OpenAI Protocol: tested
+ ✓ Anthropic Protocol: tested
+ ↔ Protocol Conversion: tested
+ ↔ Mixed Protocol Routes: tested
+ ↔ System Prompt Injection: tested
+
 ╔════════════════════════════════════════╗
-║          All tests passed! ✓           ║
+║       All protocol tests passed! ✓     ║
 ╚════════════════════════════════════════╝
-```
-
-### 自定义测试
-
-#### 添加新测试用例
-
-编辑 `scripts/e2e-test.ps1`：
-
-```powershell
-function Test-MyNewFeature {
-    Write-Header "My New Feature Test"
-
-    # 测试逻辑
-    $result = Invoke-APIRequest -Endpoint "/my-endpoint" -Method "POST"
-
-    if ($result.Success) {
-        Write-Success "Test passed"
-        return $true
-    } else {
-        Write-Failure "Test failed"
-        return $false
-    }
-}
-
-# 在 Start-E2ETest 函数中添加
-$results["MyNewFeature"] = Test-MyNewFeature
-```
-
-#### 修改超时时间
-
-```powershell
-# 在脚本顶部修改
-$HealthTimeout = 5000       # 健康检查超时
-$RequestTimeout = 30000     # 普通请求超时
-$StreamTimeout = 60000      # 流式请求超时
 ```
 
 ---
@@ -245,14 +315,6 @@ $StreamTimeout = 60000      # 流式请求超时
   - RecoveryMiddleware
 - **Middleware**: `adapter/http/middleware/*_test.go`
   - RateLimiter, ConcurrencyLimiter
-- **Config**: `adapter/config/*_test.go`
-  - ConfigAdapter, BackendRepository
-
-#### Infrastructure Layer
-- **Config**: `infrastructure/config/*_test.go`
-  - 配置加载、默认值、验证
-- **Logging**: `infrastructure/logging/*_test.go`
-  - 日志级别、脱敏、格式化
 
 ### 运行特定测试
 
@@ -272,7 +334,7 @@ go test -parallel 4 ./...
 
 ### 编写测试的最佳实践
 
-#### 1. 使用表驱动测试
+#### 使用表驱动测试
 
 ```go
 func TestBackend_IsEnabled(t *testing.T) {
@@ -297,31 +359,6 @@ func TestBackend_IsEnabled(t *testing.T) {
 }
 ```
 
-#### 2. 使用 Mock 对象
-
-```go
-type MockLogger struct{}
-
-func (m *MockLogger) Info(msg string, fields ...port.Field) {}
-func (m *MockLogger) Error(msg string, fields ...port.Field) {}
-
-func TestWithMock(t *testing.T) {
-    service := NewService(&MockLogger{})
-    // 测试逻辑
-}
-```
-
-#### 3. 测试错误场景
-
-```go
-func TestBackend_InvalidURL(t *testing.T) {
-    _, err := entity.NewBackend("test", "://invalid", "", "")
-    if err == nil {
-        t.Error("Expected error for invalid URL")
-    }
-}
-```
-
 ---
 
 ## 📊 测试覆盖率
@@ -341,14 +378,6 @@ go tool cover -func=coverage.out
 go tool cover -html=coverage.out -o coverage.html
 ```
 
-### 按包查看覆盖率
-
-```bash
-go test -cover ./domain/entity
-go test -cover ./domain/service
-go test -cover ./application/usecase
-```
-
 ### 覆盖率目标
 
 | 层级 | 目标覆盖率 | 当前状态 |
@@ -357,7 +386,6 @@ go test -cover ./application/usecase
 | Domain Service | > 85% | ✅ 92% |
 | Application | > 80% | ✅ 85% |
 | Adapter | > 75% | ✅ 80% |
-| Infrastructure | > 70% | ✅ 75% |
 
 ---
 
@@ -387,59 +415,55 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Run tests
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Run unit tests
         run: |
           cd src
           go test -v -coverprofile=coverage.out ./...
+
+      - name: Run E2E tests
+        run: |
+          cd src
+          go build -o ../dist/llm-proxy-latest .
+          cd ..
+          python3 scripts/e2e-test.py --all
+
+      - name: Run protocol tests
+        run: |
+          python3 scripts/protocol-test.py
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3
         with:
           file: ./src/coverage.out
-
-  e2e-test:
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
-
-      - name: Build binary
-        run: |
-          cd src
-          go build -o ../dist/llm-proxy-latest .
-
-      - name: Run E2E tests
-        run: |
-          chmod +x scripts/e2e-test.sh
-          ./scripts/e2e-test.sh
 ```
 
 ### Makefile 集成
 
-创建 `Makefile`:
-
 ```makefile
-.PHONY: test test-unit test-e2e test-coverage
+.PHONY: test test-unit test-e2e test-protocol test-coverage
 
-test: test-unit test-e2e
+test: test-unit test-e2e test-protocol
 
 test-unit:
 	cd src && go test -v ./...
 
 test-e2e:
-	./scripts/e2e-test.sh
+	python3 scripts/e2e-test.py --all
+
+test-protocol:
+	python3 scripts/protocol-test.py
 
 test-coverage:
 	cd src && go test -coverprofile=coverage.out ./...
 	cd src && go tool cover -html=coverage.out -o coverage.html
 
 quick-test:
-	./scripts/quick-test.sh
+	python3 scripts/e2e-test.py
 ```
 
 ---
@@ -450,9 +474,6 @@ quick-test:
 
 #### 1. 端口占用
 
-**症状**: "Service failed to start" 或 "Port 8765 already in use"
-
-**解决方案**:
 ```powershell
 # Windows
 netstat -ano | findstr :8765
@@ -462,60 +483,46 @@ taskkill /PID <PID> /F
 lsof -ti:8765 | xargs kill -9
 ```
 
-#### 2. 配置文件缺失
+#### 2. Python3 未找到
 
-**症状**: "Config not found"
+```
+症状: "Python3 未找到" 错误
+解决方案: 安装 Python 3.8+
+```
 
-**解决方案**:
+```powershell
+# Windows - 检查 Python
+where python
+where python3
+
+# Linux/macOS
+which python3
+```
+
+#### 3. 配置文件缺失
+
 ```bash
 # 确保 dist/config.yaml 存在
 ls dist/config.yaml
-
-# 从示例创建
-cp src/config.example.yaml dist/config.yaml
 ```
 
-#### 3. 二进制文件过期
+#### 4. 二进制文件过期
 
-**症状**: 测试失败，但代码已修改
-
-**解决方案**:
 ```bash
 # 重新构建
 cd src
 go build -o ../dist/llm-proxy-latest.exe .
-
-# 或使用脚本自动构建
-./scripts/quick-test.ps1
-```
-
-#### 4. API Key 无效
-
-**症状**: "Unauthorized" 或 401 错误
-
-**解决方案**:
-```yaml
-# 检查 dist/config.yaml
-proxy_api_key: "sk-aNbDRYsSMcbdVUptFyy9yWpeN6agx"
 ```
 
 #### 5. 超时错误
 
-**症状**: "Request timeout" 或 "Context deadline exceeded"
-
-**解决方案**:
-```powershell
-# 增加超时时间
-$RequestTimeout = 60000  # 改为 60 秒
-```
+增加超时时间（在脚本参数中）。
 
 ---
 
 ## 📝 日志分析
 
 ### 查看测试日志
-
-测试运行时会生成日志文件：
 
 ```
 logs/
@@ -526,31 +533,6 @@ logs/
     └── error.log
 ```
 
-### 分析日志内容
-
-```bash
-# 查看最新请求
-tail -f logs/requests/request.log
-
-# 查看错误日志
-cat logs/errors/error.log
-
-# 搜索特定 trace_id
-grep "trace_id=req_xxx" logs/general.log
-
-# 统计错误数量
-grep -c "ERROR" logs/general.log
-```
-
-### 日志级别说明
-
-| 级别 | 用途 | 示例 |
-|------|------|------|
-| DEBUG | 详细调试信息 | "backend selected", "routes resolved" |
-| INFO | 重要事件 | "proxy request started", "request completed" |
-| WARN | 警告信息 | "all backends in cooldown", "retry exceeded" |
-| ERROR | 错误事件 | "route resolution failed", "backend error" |
-
 ---
 
 ## 🎯 性能测试
@@ -559,27 +541,17 @@ grep -c "ERROR" logs/general.log
 
 ```bash
 cd src
-
-# 运行所有基准测试
 go test -bench=. -benchmem ./...
-
-# 运行特定基准测试
-go test -bench=BenchmarkLoadBalancer -benchmem ./domain/service
 ```
 
 ### 压力测试
 
-使用 `wrk` 或 `hey` 工具：
-
 ```bash
-# 安装 hey
-go install github.com/rakyll/hey@latest
-
-# 压力测试
-hey -n 10000 -c 100 -m POST \
+# 使用 hey 工具
+hey -n 1000 -c 10 \
   -H "Authorization: Bearer sk-aNbDRYsSMcbdVUptFyy9yWpeN6agx" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"user","content":"test"}],"max_tokens":10}' \
+  -d '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"user","content":"test"}]}' \
   http://localhost:8765/v1/chat/completions
 ```
 
@@ -588,9 +560,8 @@ hey -n 10000 -c 100 -m POST \
 ## 📚 参考资源
 
 - [Go Testing 官方文档](https://golang.org/pkg/testing/)
+- [Python urllib 文档](https://docs.python.org/3/library/urllib.html)
 - [测试驱动开发 (TDD)](https://en.wikipedia.org/wiki/Test-driven_development)
-- [Mock 对象模式](https://martinfowler.com/articles/mocksArentStubs.html)
-- [测试覆盖率最佳实践](https://testing.googleblog.com/2020/08/code-coverage-best-practices.html)
 
 ---
 

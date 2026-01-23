@@ -38,6 +38,7 @@
 
 ### 环境要求
 - Go 1.25.5 或更高版本
+- Python 3.8+ (用于测试脚本)
 - 支持平台: Windows, Linux, macOS (AMD64/ARM64)
 
 ### 安装
@@ -57,6 +58,31 @@ make build-all
 
 #### 使用预编译二进制
 从 [Releases](https://github.com/ococl/llm-proxy/releases) 下载对应平台的二进制文件。
+
+### 测试环境设置
+
+项目使用 Python 虚拟环境管理测试脚本（位于 `scripts/` 目录）：
+
+```bash
+# 进入 scripts 目录创建虚拟环境
+cd scripts
+python -m venv venv
+
+# 激活虚拟环境
+# Windows (PowerShell)
+.\venv\Scripts\Activate.ps1
+
+# Linux/macOS
+source venv/bin/activate
+
+# 安装依赖（当前无额外依赖）
+pip install -r requirements.txt
+
+# 返回项目根目录运行测试
+cd ..
+```
+
+详细说明请参考 [VENV_SETUP.md](scripts/VENV_SETUP.md)。
 
 ---
 
@@ -272,7 +298,7 @@ print(response.choices[0].message.content)
 
 ## 🧪 开发与测试
 
-### 运行测试
+### Go 测试
 
 ```bash
 # 所有测试
@@ -288,6 +314,38 @@ cd src && go test -v -run TestDetector_Wildcard ./proxy
 cd src && go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
 ```
+
+### Python 测试脚本
+
+项目提供 Python 测试脚本用于端到端和协议测试（位于 `scripts/` 目录）：
+
+```bash
+# 创建 Python 虚拟环境
+cd scripts
+python -m venv venv
+
+# 激活虚拟环境
+.\venv\Scripts\Activate.ps1  # Windows
+source venv/bin/activate     # Linux/macOS
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 返回项目根目录运行测试
+cd ..
+
+# 运行测试
+python run_tests.py                    # E2E 测试
+python run_tests.py --protocol         # 协议测试
+python run_tests.py --health           # 健康检查
+python run_tests.py --all              # 所有测试
+
+# 或直接运行测试脚本
+python scripts/e2e-test.py --all
+python scripts/protocol-test.py --openai
+```
+
+详细说明请参考 [VENV_SETUP.md](scripts/VENV_SETUP.md)。
 
 ### 代码检查
 
