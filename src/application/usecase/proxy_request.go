@@ -128,10 +128,17 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 		return nil, domainerror.NewNoBackend()
 	}
 
+	selectedRoute := findRouteForBackend(availableRoutes, backend)
+	backendModelName := modelName
+	if selectedRoute != nil {
+		backendModelName = selectedRoute.Model
+	}
+
 	uc.logger.Debug("backend selected",
 		port.String("trace_id", traceID),
 		port.String("model", modelName),
 		port.String("backend", backend.Name()),
+		port.String("backend_model", backendModelName),
 	)
 
 	backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
@@ -145,7 +152,7 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 		return nil, domainerror.NewProtocolError("failed to convert request", err)
 	}
 
-	resp, err := uc.executeWithRetry(ctx, backendReq, availableRoutes)
+	resp, err := uc.executeWithRetry(ctx, backendReq, availableRoutes, backendModelName)
 	if err != nil {
 		uc.logger.Error("proxy request failed",
 			port.String("trace_id", traceID),
@@ -190,6 +197,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 	ctx context.Context,
 	req *entity.Request,
 	routes []*port.Route,
+	backendModelName string,
 ) (*entity.Response, error) {
 	var lastErr error
 	maxRetries := uc.retryStrategy.GetMaxRetries()
@@ -205,6 +213,12 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 				port.Int("attempt", attempt),
 			)
 			return nil, domainerror.NewNoBackend()
+		}
+
+		selectedRoute := findRouteForBackend(routes, backend)
+		currentBackendModel := backendModelName
+		if selectedRoute != nil {
+			currentBackendModel = selectedRoute.Model
 		}
 
 		if attempt > 0 {
@@ -229,7 +243,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 			return nil, domainerror.NewProtocolError("request conversion failed", err)
 		}
 
-		resp, err := uc.backendClient.Send(ctx, backendReq, backend)
+		resp, err := uc.backendClient.Send(ctx, backendReq, backend, currentBackendModel)
 		if err == nil {
 			if attempt > 0 {
 				uc.logger.Info("retry succeeded",
@@ -375,7 +389,13 @@ func (uc *ProxyRequestUseCase) ExecuteStreaming(
 		return domainerror.NewProtocolError("failed to convert request", err)
 	}
 
-	err = uc.executeStreamingWithRetry(ctx, backendReq, availableRoutes, handler)
+	selectedRoute := findRouteForBackend(availableRoutes, backend)
+	backendModelName := modelName
+	if selectedRoute != nil {
+		backendModelName = selectedRoute.Model
+	}
+
+	err = uc.executeStreamingWithRetry(ctx, backendReq, availableRoutes, backendModelName, handler)
 	if err != nil {
 		uc.logger.Error("streaming request failed",
 			port.String("trace_id", traceID),
@@ -400,6 +420,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 	ctx context.Context,
 	req *entity.Request,
 	routes []*port.Route,
+	backendModelName string,
 	handler func(*entity.Response) error,
 ) error {
 	var lastErr error
@@ -416,6 +437,12 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 				port.Int("attempt", attempt),
 			)
 			return domainerror.NewNoBackend()
+		}
+
+		selectedRoute := findRouteForBackend(routes, backend)
+		currentBackendModel := backendModelName
+		if selectedRoute != nil {
+			currentBackendModel = selectedRoute.Model
 		}
 
 		if attempt > 0 {
@@ -475,11 +502,12 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 						content, _ := deltaMap["content"].(string)
 						role, _ := deltaMap["role"].(string)
 
-						delta := entity.Message{
-							Role:    role,
-							Content: content,
+						if role != "" || content != "" {
+							choice.Delta = &entity.Message{
+								Role:    role,
+								Content: content,
+							}
 						}
-						choice.Delta = &delta
 					}
 
 					builder.Choices([]entity.Choice{choice})
@@ -491,7 +519,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 		}
 
 		clientAdapter := uc.backendClient
-		err = clientAdapter.SendStreaming(ctx, backendReq, backend, streamHandler)
+		err = clientAdapter.SendStreaming(ctx, backendReq, backend, currentBackendModel, streamHandler)
 		if err == nil {
 			if attempt > 0 {
 				uc.logger.Info("streaming: retry succeeded",
@@ -551,4 +579,14 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 		return domainerror.NewNoBackend().WithCause(lastErr)
 	}
 	return domainerror.NewNoBackend()
+}
+
+// findRouteForBackend finds the route that corresponds to the given backend.
+func findRouteForBackend(routes []*port.Route, backend *entity.Backend) *port.Route {
+	for _, route := range routes {
+		if route.Backend.Name() == backend.Name() {
+			return route
+		}
+	}
+	return nil
 }

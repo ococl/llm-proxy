@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -70,7 +71,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reqBody = h.injectSystemPrompt(reqBody)
 	}
 
-	req, err := h.buildDomainRequest(ctx, reqID, reqBody, clientProtocol)
+	req, err := h.buildDomainRequest(ctx, reqID, reqBody, clientProtocol, r.Header)
 	if err != nil {
 		h.errorPresenter.WriteError(w, r, err)
 		return
@@ -106,15 +107,24 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
 
+	var headersWritten bool
 	streamHandler := func(resp *entity.Response) error {
+		if !headersWritten {
+			for k, v := range resp.Headers {
+				for _, val := range v {
+					w.Header().Add(k, val)
+				}
+			}
+			w.WriteHeader(http.StatusOK)
+			headersWritten = true
+		}
+
 		respJSON, err := json.Marshal(resp)
 		if err != nil {
 			return err
 		}
 		if len(respJSON) > 0 {
-			// SSE format: "data: <json>\n\n"
 			if _, err := w.Write([]byte("data: ")); err != nil {
 				return err
 			}
@@ -129,8 +139,6 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 		return nil
 	}
 
-	// Use a background context that won't be canceled when client disconnects
-	// This allows the streaming request to complete even if client disconnects
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
 	defer cancel()
 
@@ -139,20 +147,33 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Send [DONE] message
 	w.Write([]byte("data: [DONE]\n\n"))
 	flusher.Flush()
 }
 
 func (h *ProxyHandler) writeResponse(w http.ResponseWriter, resp *entity.Response) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	for k, v := range resp.Headers {
+		if k == "Content-Length" || k == "Transfer-Encoding" {
+			continue
+		}
+		for _, val := range v {
+			w.Header().Add(k, val)
+		}
+	}
+
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
 
 	respJSON, err := json.Marshal(resp)
 	if err != nil {
 		h.logger.Error("failed to marshal response", port.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(respJSON)))
+	w.WriteHeader(http.StatusOK)
 
 	if _, err := w.Write(respJSON); err != nil {
 		h.logger.Error("failed to write response", port.Error(err))
@@ -164,6 +185,7 @@ func (h *ProxyHandler) buildDomainRequest(
 	reqID string,
 	reqBody map[string]interface{},
 	clientProtocol types.Protocol,
+	clientHeaders http.Header,
 ) (*entity.Request, error) {
 	modelAlias, ok := reqBody["model"].(string)
 	if !ok || modelAlias == "" {
@@ -179,7 +201,8 @@ func (h *ProxyHandler) buildDomainRequest(
 		ID(entity.NewRequestID(reqID)).
 		Model(entity.NewModelAlias(modelAlias)).
 		Messages(messages).
-		Context(ctx)
+		Context(ctx).
+		Headers(extractForwardHeaders(clientHeaders))
 
 	if maxTokens, ok := reqBody["max_tokens"].(float64); ok {
 		builder.MaxTokens(int(maxTokens))
@@ -334,4 +357,30 @@ func getString(m map[string]interface{}, key string) string {
 		return v
 	}
 	return ""
+}
+
+func extractForwardHeaders(clientHeaders http.Header) map[string][]string {
+	headers := make(map[string][]string)
+	forwardHeaders := []string{
+		"X-Request-ID",
+		"X-Forwarded-For",
+		"X-Real-IP",
+		"User-Agent",
+		"Accept",
+		"Accept-Language",
+		"Accept-Encoding",
+	}
+
+	for _, key := range forwardHeaders {
+		if values := clientHeaders.Values(key); len(values) > 0 {
+			headers[key] = values
+		}
+	}
+
+	// If no User-Agent from client, set default for AI coding agents
+	if len(headers["User-Agent"]) == 0 {
+		headers["User-Agent"] = []string{"opencode/1.1.34 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5"}
+	}
+
+	return headers
 }

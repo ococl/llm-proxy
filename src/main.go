@@ -155,6 +155,7 @@ func main() {
 	errorPresenter := http_adapter.NewErrorPresenter(proxyLogger)
 	proxyHandler := http_adapter.NewProxyHandler(proxyUseCase, configAdapter, proxyLogger, errorPresenter)
 	healthHandler := http_adapter.NewHealthHandler(configAdapter, proxyLogger)
+	modelsHandler := http_adapter.NewModelsHandler(configAdapter, proxyLogger)
 	recoveryMiddleware := http_adapter.NewRecoveryMiddleware(proxyLogger)
 
 	rateLimiter := http_middleware.NewRateLimiter(configAdapter)
@@ -171,6 +172,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/v1/chat/completions", proxyHandler)
+	mux.Handle("/v1/models", modelsHandler)
+	mux.Handle("/models", modelsHandler)
 	mux.Handle("/health", healthHandler)
 
 	server := &http.Server{

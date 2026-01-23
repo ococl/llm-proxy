@@ -26,7 +26,7 @@ func (id RequestID) IsEmpty() bool {
 
 // Message represents a chat message.
 type Message struct {
-	Role       string     `json:"role"`
+	Role       string     `json:"role,omitempty"`
 	Content    string     `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
@@ -96,6 +96,7 @@ type Request struct {
 	user          string
 	ctx           context.Context
 	streamHandler func(chunk []byte) error
+	headers       map[string][]string // Client headers to forward to backend
 }
 
 // NewRequest creates a new request.
@@ -178,6 +179,11 @@ func (r *Request) StreamHandler() func(chunk []byte) error {
 	return r.streamHandler
 }
 
+// Headers returns the client headers to forward to backend.
+func (r *Request) Headers() map[string][]string {
+	return r.headers
+}
+
 // WithModel creates a new request with a different model.
 func (r *Request) WithModel(model ModelAlias) *Request {
 	newReq := *r
@@ -220,6 +226,7 @@ type RequestBuilder struct {
 	user          string
 	ctx           context.Context
 	streamHandler func(chunk []byte) error
+	headers       map[string][]string
 }
 
 // NewRequestBuilder creates a new request builder.
@@ -309,6 +316,12 @@ func (rb *RequestBuilder) StreamHandler(handler func(chunk []byte) error) *Reque
 	return rb
 }
 
+// Headers sets the client headers to forward to backend.
+func (rb *RequestBuilder) Headers(headers map[string][]string) *RequestBuilder {
+	rb.headers = headers
+	return rb
+}
+
 // Build creates the request entity.
 func (rb *RequestBuilder) Build() (*Request, error) {
 	if rb.id.IsEmpty() {
@@ -334,6 +347,7 @@ func (rb *RequestBuilder) Build() (*Request, error) {
 		user:          rb.user,
 		ctx:           rb.ctx,
 		streamHandler: rb.streamHandler,
+		headers:       rb.headers,
 	}, nil
 }
 
@@ -388,14 +402,15 @@ func (c Choice) IsComplete() bool {
 
 // Response represents a chat completion response.
 type Response struct {
-	ID            string   `json:"id"`
-	Object        string   `json:"object"`
-	Created       int64    `json:"created"`
-	Model         string   `json:"model"`
-	Choices       []Choice `json:"choices"`
-	Usage         Usage    `json:"usage"`
-	StopReason    string   `json:"stop_reason,omitempty"`
-	StopSequences []string `json:"stop_sequences,omitempty"`
+	ID            string              `json:"id"`
+	Object        string              `json:"object"`
+	Created       int64               `json:"created"`
+	Model         string              `json:"model"`
+	Choices       []Choice            `json:"choices"`
+	Usage         Usage               `json:"usage"`
+	StopReason    string              `json:"stop_reason,omitempty"`
+	StopSequences []string            `json:"stop_sequences,omitempty"`
+	Headers       map[string][]string `json:"-"` // HTTP headers from upstream, not serialized to JSON
 }
 
 // NewResponse creates a new response.
@@ -434,6 +449,7 @@ type ResponseBuilder struct {
 	usage         Usage
 	stopReason    string
 	stopSequences []string
+	headers       map[string][]string
 }
 
 // NewResponseBuilder creates a new response builder.
@@ -492,6 +508,12 @@ func (rb *ResponseBuilder) StopSequences(stopSequences []string) *ResponseBuilde
 	return rb
 }
 
+// Headers sets the HTTP headers.
+func (rb *ResponseBuilder) Headers(headers map[string][]string) *ResponseBuilder {
+	rb.headers = headers
+	return rb
+}
+
 // Build creates the response entity.
 func (rb *ResponseBuilder) Build() (*Response, error) {
 	if rb.id == "" {
@@ -509,6 +531,7 @@ func (rb *ResponseBuilder) Build() (*Response, error) {
 		Usage:         rb.usage,
 		StopReason:    rb.stopReason,
 		StopSequences: rb.stopSequences,
+		Headers:       rb.headers,
 	}, nil
 }
 

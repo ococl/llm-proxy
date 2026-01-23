@@ -45,9 +45,9 @@ func getKeys(m map[string]interface{}) string {
 }
 
 // Send sends a non-streaming request to the backend and returns a response.
-func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, backend *entity.Backend) (*entity.Response, error) {
+func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*entity.Response, error) {
 	body := map[string]interface{}{
-		"model":    req.Model().String(),
+		"model":    backendModel, // Use backend's model name instead of client's alias
 		"messages": req.Messages(),
 	}
 
@@ -77,11 +77,9 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
-		Headers: map[string][]string{
-			"Content-Type": {"application/json"},
-		},
-		Path:   "/chat/completions",
-		Stream: false,
+		Headers: mergeHeadersWithDefaults(req.Headers()),
+		Path:    "/chat/completions",
+		Stream:  false,
 	}
 
 	httpResp, err := a.client.Send(ctx, backendReq)
@@ -112,9 +110,17 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 		responseID = "resp-" + req.ID().String()
 	}
 
+	headers := make(map[string][]string)
+	for k, v := range httpResp.Header {
+		if !isHopByHopHeader(k) {
+			headers[k] = v
+		}
+	}
+
 	builder := entity.NewResponseBuilder().
 		ID(responseID).
-		Model(req.Model().String())
+		Model(req.Model().String()).
+		Headers(headers)
 
 	if usage, ok := respData["usage"].(map[string]interface{}); ok {
 		promptTokens, _ := usage["prompt_tokens"].(float64)
@@ -152,10 +158,11 @@ func (a *BackendClientAdapter) SendStreaming(
 	ctx context.Context,
 	req *entity.Request,
 	backend *entity.Backend,
+	backendModel string,
 	handler func([]byte) error,
 ) error {
 	body := map[string]interface{}{
-		"model":    req.Model().String(),
+		"model":    backendModel, // Use backend's model name instead of client's alias
 		"messages": req.Messages(),
 	}
 
@@ -185,11 +192,9 @@ func (a *BackendClientAdapter) SendStreaming(
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
-		Headers: map[string][]string{
-			"Content-Type": {"application/json"},
-		},
-		Path:   "/chat/completions",
-		Stream: true,
+		Headers: mergeHeadersWithDefaults(req.Headers()),
+		Path:    "/chat/completions",
+		Stream:  true,
 	}
 
 	httpResp, err := a.client.Send(ctx, backendReq)
@@ -250,3 +255,16 @@ func (a *BackendClientAdapter) GetHTTPClient() *http.Client {
 
 // Ensure BackendClientAdapter implements port.BackendClient.
 var _ port.BackendClient = (*BackendClientAdapter)(nil)
+
+func mergeHeadersWithDefaults(clientHeaders map[string][]string) map[string][]string {
+	headers := make(map[string][]string)
+	headers["Content-Type"] = []string{"application/json"}
+
+	for k, v := range clientHeaders {
+		if k != "Content-Type" && k != "Authorization" && k != "X-Api-Key" {
+			headers[k] = v
+		}
+	}
+
+	return headers
+}
