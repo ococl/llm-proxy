@@ -6,7 +6,7 @@
 - Domain 层（实体、端口、领域服务）+ 测试
 - Application 层（用例、服务）+ 测试  
 - Adapter 层（HTTP、配置、后端、日志）+ 测试
-- Infrastructure 层基础（HTTP 客户端工厂）
+- Infrastructure 层（HTTP 服务器、配置加载器、日志工厂）
 - 所有测试通过，编译成功
 
 ## 待完成工作
@@ -14,10 +14,10 @@
 ### 高优先级
 
 #### 1. 完善 Infrastructure 层
-- [ ] `infrastructure/http/server.go` - HTTP 服务器封装（优雅关闭、中间件链）
-- [ ] `infrastructure/config/loader.go` - 配置加载器（整合现有 config/ 包）
-- [ ] `infrastructure/logging/factory.go` - 日志工厂（整合现有 logging/ 包）
-- [ ] `infrastructure/di/container.go` - 依赖注入容器（简化 main.go）
+- [x] `infrastructure/http/server.go` - HTTP 服务器封装（优雅关闭、中间件链）
+- [x] `infrastructure/config/loader.go` - 配置加载器（整合现有 config/ 包）
+- [x] `infrastructure/logging/factory.go` - 日志工厂（整合现有 logging/ 包）
+- [ ] `infrastructure/di/container.go` - 依赖注入容器（简化 main.go）（可选）
 
 #### 2. 重构 main.go
 - [ ] 移除对旧 `proxy/` 包的依赖（proxy.InitHTTPClient, proxy.GetHTTPClient）
