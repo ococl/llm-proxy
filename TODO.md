@@ -20,9 +20,9 @@
 - [ ] `infrastructure/di/container.go` - 依赖注入容器（简化 main.go）（可选）
 
 #### 2. 重构 main.go
-- [ ] 移除对旧 `proxy/` 包的依赖（proxy.InitHTTPClient, proxy.GetHTTPClient）
-- [ ] 使用 Infrastructure 层组件替代直接依赖
-- [ ] 简化依赖注入逻辑，提高可读性
+- [x] 移除对旧 `proxy/` 包的依赖（proxy.InitHTTPClient, proxy.GetHTTPClient）
+- [x] 使用 Infrastructure 层组件替代直接依赖
+- [x] 简化依赖注入逻辑，提高可读性
 
 #### 3. 清理旧代码
 - [ ] 删除或重构 `proxy/` 包（保留必要的检测器逻辑）
