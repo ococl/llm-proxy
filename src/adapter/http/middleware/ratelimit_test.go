@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"llm-proxy/config"
+	"llm-proxy/infrastructure/config"
 )
 
 func TestNewRateLimiter(t *testing.T) {

@@ -66,6 +66,9 @@ func (ep *ErrorPresenter) logError(err *domainerror.LLMProxyError) {
 		ep.logger.Warn("request validation failed", fields...)
 	case domainerror.ErrorTypeBackend:
 		ep.logger.Error("backend error", fields...)
+		if err.Cause != nil {
+			ep.logger.Error("error cause", port.Error(err.Cause))
+		}
 	case domainerror.ErrorTypeInternal:
 		ep.logger.Error("internal error", fields...)
 		if err.Cause != nil {
@@ -73,6 +76,9 @@ func (ep *ErrorPresenter) logError(err *domainerror.LLMProxyError) {
 		}
 	default:
 		ep.logger.Error("unknown error", fields...)
+		if err.Cause != nil {
+			ep.logger.Error("error cause", port.Error(err.Cause))
+		}
 	}
 }
 

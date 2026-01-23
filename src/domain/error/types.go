@@ -60,6 +60,19 @@ const (
 	CodeUnknown  ErrorCode = "UNKNOWN_ERROR"
 )
 
+// Convenience error constructors for common API errors
+var (
+	ErrBadRequest       = New(ErrorTypeClient, CodeBadRequest, "无效的请求")
+	ErrUnauthorized     = New(ErrorTypeClient, CodeUnauthorized, "无效的 API Key")
+	ErrMissingModel     = New(ErrorTypeClient, CodeMissingModel, "缺少 model 字段")
+	ErrInvalidJSON      = New(ErrorTypeClient, CodeInvalidJSON, "无效的 JSON 请求体")
+	ErrUnknownModel     = New(ErrorTypeClient, CodeUnknownModel, "未知的模型别名")
+	ErrNoBackend        = New(ErrorTypeBackend, CodeNoBackend, "所有后端均失败")
+	ErrRateLimited      = New(ErrorTypeRateLimit, CodeRateLimited, "请求过于频繁")
+	ErrConcurrencyLimit = New(ErrorTypeConcurrency, CodeConcurrencyLimit, "并发请求数超限")
+	ErrInvalidRequest   = New(ErrorTypeValidation, CodeInvalidRequest, "无效的请求")
+)
+
 // LLMProxyError represents a structured error in the LLM proxy.
 type LLMProxyError struct {
 	Type        ErrorType

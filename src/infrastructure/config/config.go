@@ -135,34 +135,33 @@ type Detection struct {
 }
 
 type Logging struct {
-	Level               string   `yaml:"level"`
-	ConsoleLevel        string   `yaml:"console_level"`
-	BaseDir             string   `yaml:"base_dir"`
-	RequestDir          string   `yaml:"request_dir"`
-	ErrorDir            string   `yaml:"error_dir"`
-	GeneralFile         string   `yaml:"general_file"`
-	SeparateFiles       bool     `yaml:"separate_files"`
-	MaskSensitive       *bool    `yaml:"mask_sensitive,omitempty"`
-	EnableMetrics       bool     `yaml:"enable_metrics"`
-	MaxFileSizeMB       int      `yaml:"max_file_size_mb"`
-	MaxAgeDays          int      `yaml:"max_age_days,omitempty"`
-	MaxBackups          int      `yaml:"max_backups,omitempty"`
-	Compress            bool     `yaml:"compress,omitempty"`
-	Format              string   `yaml:"format,omitempty"`
-	Colorize            *bool    `yaml:"colorize,omitempty"`
-	ConsoleStyle        string   `yaml:"console_style,omitempty"`
-	ConsoleFormat       string   `yaml:"console_format,omitempty"`
-	DebugMode           bool     `yaml:"debug_mode,omitempty"`
-	Async               bool     `yaml:"async"`
-	BufferSize          int      `yaml:"buffer_size"`
-	FlushInterval       int      `yaml:"flush_interval,omitempty"`
-	DropOnFull          bool     `yaml:"drop_on_full"`
-	RotateBySize        bool     `yaml:"rotate_by_size,omitempty"`
-	RotateByTime        bool     `yaml:"rotate_by_time,omitempty"`
-	TimeRotation        string   `yaml:"time_rotation,omitempty"`
-	DetailedMasking     *bool    `yaml:"detailed_masking,omitempty"`
-	ProblematicBackends []string `yaml:"problematic_backends,omitempty"`
-	MaxLogContentSize   int      `yaml:"max_log_content_size,omitempty"` // 最大日志内容大小(字节),0表示不限制
+	Level             string `yaml:"level"`
+	ConsoleLevel      string `yaml:"console_level"`
+	BaseDir           string `yaml:"base_dir"`
+	RequestDir        string `yaml:"request_dir"`
+	ErrorDir          string `yaml:"error_dir"`
+	GeneralFile       string `yaml:"general_file"`
+	SeparateFiles     bool   `yaml:"separate_files"`
+	MaskSensitive     *bool  `yaml:"mask_sensitive,omitempty"`
+	EnableMetrics     bool   `yaml:"enable_metrics"`
+	MaxFileSizeMB     int    `yaml:"max_file_size_mb"`
+	MaxAgeDays        int    `yaml:"max_age_days,omitempty"`
+	MaxBackups        int    `yaml:"max_backups,omitempty"`
+	Compress          bool   `yaml:"compress,omitempty"`
+	Format            string `yaml:"format,omitempty"`
+	Colorize          *bool  `yaml:"colorize,omitempty"`
+	ConsoleStyle      string `yaml:"console_style,omitempty"`
+	ConsoleFormat     string `yaml:"console_format,omitempty"`
+	DebugMode         bool   `yaml:"debug_mode,omitempty"`
+	Async             bool   `yaml:"async"`
+	BufferSize        int    `yaml:"buffer_size"`
+	FlushInterval     int    `yaml:"flush_interval,omitempty"`
+	DropOnFull        bool   `yaml:"drop_on_full"`
+	RotateBySize      bool   `yaml:"rotate_by_size,omitempty"`
+	RotateByTime      bool   `yaml:"rotate_by_time,omitempty"`
+	TimeRotation      string `yaml:"time_rotation,omitempty"`
+	DetailedMasking   *bool  `yaml:"detailed_masking,omitempty"`
+	MaxLogContentSize int    `yaml:"max_log_content_size,omitempty"` // 最大日志内容大小(字节),0表示不限制
 }
 
 func (l *Logging) ShouldMaskSensitive() bool {

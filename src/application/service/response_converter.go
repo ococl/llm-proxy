@@ -14,38 +14,33 @@ func NewResponseConverter() *ResponseConverter {
 
 // NormalizeResponse normalizes a response to ensure consistent format.
 func (rc *ResponseConverter) NormalizeResponse(resp *entity.Response) *entity.Response {
-	// Ensure response has required fields
 	if resp == nil {
 		return nil
 	}
 
-	// Normalize choices
-	choices := resp.Choices()
+	choices := resp.Choices
 	if len(choices) == 0 {
-		// Create empty choice if none exist
 		choices = []entity.Choice{
 			entity.NewChoice(0, entity.NewMessage("assistant", ""), "stop"),
 		}
 	}
 
-	// Build normalized response
 	builder := entity.NewResponseBuilder().
-		ID(resp.ID()).
-		Model(resp.Model()).
-		Created(resp.Created()).
+		ID(resp.ID).
+		Model(resp.Model).
+		Created(resp.Created).
 		Choices(choices).
-		Usage(resp.Usage())
+		Usage(resp.Usage)
 
-	if resp.StopReason() != "" {
-		builder = builder.StopReason(resp.StopReason())
+	if resp.StopReason != "" {
+		builder = builder.StopReason(resp.StopReason)
 	}
-	if len(resp.StopSequences()) > 0 {
-		builder = builder.StopSequences(resp.StopSequences())
+	if len(resp.StopSequences) > 0 {
+		builder = builder.StopSequences(resp.StopSequences)
 	}
 
 	normalized, err := builder.Build()
 	if err != nil {
-		// If normalization fails, return original
 		return resp
 	}
 
@@ -58,13 +53,11 @@ func (rc *ResponseConverter) MergeStreamChunks(chunks []*entity.Response) *entit
 		return nil
 	}
 
-	// Use first chunk as base
 	base := chunks[0]
 	if len(chunks) == 1 {
 		return base
 	}
 
-	// Merge content from all chunks
 	var mergedContent string
 	var lastFinishReason string
 	var totalUsage entity.Usage
@@ -78,15 +71,13 @@ func (rc *ResponseConverter) MergeStreamChunks(chunks []*entity.Response) *entit
 				lastFinishReason = firstChoice.FinishReason
 			}
 		}
-		// Accumulate usage
-		usage := chunk.Usage()
+		usage := chunk.Usage
 		totalUsage = entity.NewUsage(
 			totalUsage.PromptTokens+usage.PromptTokens,
 			totalUsage.CompletionTokens+usage.CompletionTokens,
 		)
 	}
 
-	// Build merged response
 	mergedChoice := entity.NewChoice(
 		0,
 		entity.NewMessage("assistant", mergedContent),
@@ -94,8 +85,8 @@ func (rc *ResponseConverter) MergeStreamChunks(chunks []*entity.Response) *entit
 	)
 
 	return entity.NewResponse(
-		base.ID(),
-		base.Model(),
+		base.ID,
+		base.Model,
 		[]entity.Choice{mergedChoice},
 		totalUsage,
 	)

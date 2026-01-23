@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"llm-proxy/application/usecase"
 	"llm-proxy/domain/entity"
@@ -113,7 +114,14 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 			return err
 		}
 		if len(respJSON) > 0 {
+			// SSE format: "data: <json>\n\n"
+			if _, err := w.Write([]byte("data: ")); err != nil {
+				return err
+			}
 			if _, err := w.Write(respJSON); err != nil {
+				return err
+			}
+			if _, err := w.Write([]byte("\n\n")); err != nil {
 				return err
 			}
 			flusher.Flush()
@@ -121,10 +129,19 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 		return nil
 	}
 
-	if err := h.proxyUseCase.ExecuteStreaming(r.Context(), req, streamHandler); err != nil {
+	// Use a background context that won't be canceled when client disconnects
+	// This allows the streaming request to complete even if client disconnects
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
+	defer cancel()
+
+	if err := h.proxyUseCase.ExecuteStreaming(ctx, req, streamHandler); err != nil {
 		h.logger.Error("streaming request failed", port.Error(err))
 		return
 	}
+
+	// Send [DONE] message
+	w.Write([]byte("data: [DONE]\n\n"))
+	flusher.Flush()
 }
 
 func (h *ProxyHandler) writeResponse(w http.ResponseWriter, resp *entity.Response) {

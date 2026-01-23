@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"sync"
 
-	"llm-proxy/config"
-	"llm-proxy/errors"
+	domainerror "llm-proxy/domain/error"
+	"llm-proxy/infrastructure/config"
 
 	"golang.org/x/time/rate"
 )
@@ -113,7 +113,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 		if r.URL.Path == "/v1/chat/completions" || r.URL.Path == "/v1/completions" {
 			bodyBytes, err := io.ReadAll(r.Body)
 			if err != nil {
-				errors.WriteJSONError(w, errors.ErrBadRequest, http.StatusBadRequest, "")
+				domainerror.WriteBadRequest(w, "无法读取请求体")
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -127,7 +127,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 		}
 
 		if !rl.Allow(ip, model) {
-			errors.WriteJSONError(w, errors.ErrRateLimited, http.StatusTooManyRequests, "")
+			domainerror.WriteRateLimited(w)
 			return
 		}
 		next.ServeHTTP(w, r)

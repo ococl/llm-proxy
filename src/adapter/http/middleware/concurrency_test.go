@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"llm-proxy/config"
+	"llm-proxy/infrastructure/config"
 )
 
 func TestNewConcurrencyLimiter(t *testing.T) {

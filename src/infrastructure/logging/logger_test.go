@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"llm-proxy/config"
+	"llm-proxy/infrastructure/config"
 )
 
 func TestMaskSensitiveData(t *testing.T) {

@@ -84,13 +84,44 @@ func (lb *LoadBalancer) selectWeighted(routes []*port.Route) *entity.Backend {
 	if len(routes) == 0 {
 		return nil
 	}
-	best := routes[0]
+
+	highestPriority := lb.findHighestPriority(routes)
+	topRoutes := lb.filterByPriority(routes, highestPriority)
+
+	if len(topRoutes) == 0 {
+		return nil
+	}
+
+	if len(topRoutes) == 1 {
+		return topRoutes[0].Backend
+	}
+
+	return lb.selectRandomBackend(topRoutes)
+}
+
+func (lb *LoadBalancer) findHighestPriority(routes []*port.Route) int {
+	minPriority := routes[0].Priority
 	for _, route := range routes {
-		if route.IsEnabled() && route.Priority < best.Priority {
-			best = route
+		if route.IsEnabled() && route.Priority < minPriority {
+			minPriority = route.Priority
 		}
 	}
-	return best.Backend
+	return minPriority
+}
+
+func (lb *LoadBalancer) filterByPriority(routes []*port.Route, priority int) []*port.Route {
+	var filtered []*port.Route
+	for _, route := range routes {
+		if route.IsEnabled() && route.Priority == priority {
+			filtered = append(filtered, route)
+		}
+	}
+	return filtered
+}
+
+func (lb *LoadBalancer) selectRandomBackend(routes []*port.Route) *entity.Backend {
+	idx := rand.Intn(len(routes))
+	return routes[idx].Backend
 }
 
 func filterEnabledBackends(routes []*port.Route) []*entity.Backend {

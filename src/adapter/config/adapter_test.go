@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"llm-proxy/config"
+	"llm-proxy/infrastructure/config"
 )
 
 func TestConfigAdapter_GetBackend(t *testing.T) {

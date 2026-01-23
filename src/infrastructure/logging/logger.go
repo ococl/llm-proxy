@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"llm-proxy/config"
+	"llm-proxy/infrastructure/config"
 )
 
 var (

@@ -45,8 +45,6 @@ func (c *ProtocolConverter) FromBackend(resp *entity.Response, protocol types.Pr
 		return nil, domainerror.NewInvalidRequest("response is nil")
 	}
 
-	// For now, we just pass through the response
-	// In a full implementation, we would transform the response based on protocol
 	switch protocol {
 	case types.ProtocolOpenAI:
 		return c.fromOpenAIFormat(resp)

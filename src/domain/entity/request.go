@@ -26,10 +26,10 @@ func (id RequestID) IsEmpty() bool {
 
 // Message represents a chat message.
 type Message struct {
-	Role       string
-	Content    string
-	ToolCalls  []ToolCall
-	ToolCallID string
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
 // NewMessage creates a new message.
@@ -345,9 +345,9 @@ func (rb *RequestBuilder) BuildUnsafe() *Request {
 
 // Usage represents token usage.
 type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // NewUsage creates a new usage.
@@ -366,10 +366,10 @@ func (u Usage) IsEmpty() bool {
 
 // Choice represents a completion choice.
 type Choice struct {
-	Index        int
-	Message      Message
-	FinishReason string
-	Delta        *Message
+	Index        int      `json:"index"`
+	Message      Message  `json:"message"`
+	FinishReason string   `json:"finish_reason,omitempty"`
+	Delta        *Message `json:"delta,omitempty"`
 }
 
 // NewChoice creates a new choice.
@@ -388,80 +388,40 @@ func (c Choice) IsComplete() bool {
 
 // Response represents a chat completion response.
 type Response struct {
-	id            string
-	object        string
-	created       int64
-	model         string
-	choices       []Choice
-	usage         Usage
-	stopReason    string
-	stopSequences []string
+	ID            string   `json:"id"`
+	Object        string   `json:"object"`
+	Created       int64    `json:"created"`
+	Model         string   `json:"model"`
+	Choices       []Choice `json:"choices"`
+	Usage         Usage    `json:"usage"`
+	StopReason    string   `json:"stop_reason,omitempty"`
+	StopSequences []string `json:"stop_sequences,omitempty"`
 }
 
 // NewResponse creates a new response.
 func NewResponse(id, model string, choices []Choice, usage Usage) *Response {
 	return &Response{
-		id:      id,
-		object:  "chat.completion",
-		created: time.Now().Unix(),
-		model:   model,
-		choices: choices,
-		usage:   usage,
+		ID:      id,
+		Object:  "chat.completion",
+		Created: time.Now().Unix(),
+		Model:   model,
+		Choices: choices,
+		Usage:   usage,
 	}
-}
-
-// ID returns the response ID.
-func (r *Response) ID() string {
-	return r.id
-}
-
-// Object returns the object type.
-func (r *Response) Object() string {
-	return r.object
-}
-
-// Created returns the creation timestamp.
-func (r *Response) Created() int64 {
-	return r.created
-}
-
-// Model returns the model name.
-func (r *Response) Model() string {
-	return r.model
-}
-
-// Choices returns the choices.
-func (r *Response) Choices() []Choice {
-	return r.choices
-}
-
-// Usage returns the usage.
-func (r *Response) Usage() Usage {
-	return r.usage
-}
-
-// StopReason returns the stop reason.
-func (r *Response) StopReason() string {
-	return r.stopReason
-}
-
-// StopSequences returns the stop sequences.
-func (r *Response) StopSequences() []string {
-	return r.stopSequences
 }
 
 // FirstChoice returns the first choice or nil.
 func (r *Response) FirstChoice() *Choice {
-	if len(r.choices) == 0 {
+	if len(r.Choices) == 0 {
 		return nil
 	}
-	return &r.choices[0]
+	return &r.Choices[0]
 }
 
 // String returns a string representation.
 func (r *Response) String() string {
 	return fmt.Sprintf("Response(%s, model=%s, choices=%d)",
-		r.id, r.model, len(r.choices))
+		r.ID, r.Model, len(r.Choices))
 }
 
 // ResponseBuilder is a builder for creating Response entities.
@@ -541,14 +501,14 @@ func (rb *ResponseBuilder) Build() (*Response, error) {
 		return nil, fmt.Errorf("model is required")
 	}
 	return &Response{
-		id:            rb.id,
-		object:        rb.object,
-		created:       rb.created,
-		model:         rb.model,
-		choices:       rb.choices,
-		usage:         rb.usage,
-		stopReason:    rb.stopReason,
-		stopSequences: rb.stopSequences,
+		ID:            rb.id,
+		Object:        rb.object,
+		Created:       rb.created,
+		Model:         rb.model,
+		Choices:       rb.choices,
+		Usage:         rb.usage,
+		StopReason:    rb.stopReason,
+		StopSequences: rb.stopSequences,
 	}, nil
 }
 

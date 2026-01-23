@@ -12,7 +12,9 @@ dist
 .DS_Store
 Thumbs.db
 nul
-src/*.exe
+*.exe
 tmp
 temp_*
 coverage.out
+logs
+*.log

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"llm-proxy/config"
-	"llm-proxy/errors"
+	domainerror "llm-proxy/domain/error"
+	"llm-proxy/infrastructure/config"
 )
 
 type ConcurrencyLimiter struct {
@@ -69,7 +69,7 @@ func (cl *ConcurrencyLimiter) Middleware(next http.Handler) http.Handler {
 		defer cancel()
 
 		if err := cl.Acquire(ctx); err != nil {
-			errors.WriteJSONError(w, errors.ErrConcurrencyLimit, http.StatusServiceUnavailable, "")
+			domainerror.WriteConcurrencyLimit(w)
 			return
 		}
 		defer cl.Release()

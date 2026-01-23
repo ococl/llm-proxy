@@ -17,15 +17,15 @@ import (
 	backend_adapter "llm-proxy/adapter/backend"
 	config_adapter "llm-proxy/adapter/config"
 	http_adapter "llm-proxy/adapter/http"
+	http_middleware "llm-proxy/adapter/http/middleware"
 	logging_adapter "llm-proxy/adapter/logging"
 	"llm-proxy/application/service"
 	"llm-proxy/application/usecase"
-	"llm-proxy/config"
 	"llm-proxy/domain/entity"
 	domain_service "llm-proxy/domain/service"
+	infra_config "llm-proxy/infrastructure/config"
 	infra_http "llm-proxy/infrastructure/http"
-	"llm-proxy/logging"
-	"llm-proxy/middleware"
+	infra_logging "llm-proxy/infrastructure/logging"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
@@ -51,7 +51,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	configMgr, err := config.NewManager(*configPath)
+	configMgr, err := infra_config.NewManager(*configPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
@@ -63,17 +63,17 @@ func main() {
 		cfg.Logging.Colorize = &falseValue
 	}
 
-	if err := logging.InitLogger(cfg); err != nil {
+	if err := infra_logging.InitLogger(cfg); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
 
-	config.LoggingConfigChangedFunc = func(c *config.Config) error {
-		logging.ShutdownLogger()
-		return logging.InitLogger(c)
+	infra_config.LoggingConfigChangedFunc = func(c *infra_config.Config) error {
+		infra_logging.ShutdownLogger()
+		return infra_logging.InitLogger(c)
 	}
 
 	configAdapter := config_adapter.NewConfigAdapter(configMgr)
-	proxyLogger := logging_adapter.NewZapLoggerAdapter(logging.ProxySugar)
+	proxyLogger := logging_adapter.NewZapLoggerAdapter(infra_logging.ProxySugar)
 
 	cooldownMgr := domain_service.NewCooldownManager(time.Duration(cfg.Fallback.CooldownSeconds) * time.Second)
 	shutdownCooldown := make(chan struct{})
@@ -106,7 +106,7 @@ func main() {
 	httpClient := backend_adapter.NewHTTPClient(infra_http.NewHTTPClient(clientConfig))
 	backendClient := backend_adapter.NewBackendClientAdapter(httpClient)
 
-	loadBalancer := domain_service.NewLoadBalancer(domain_service.StrategyRandom)
+	loadBalancer := domain_service.NewLoadBalancer(domain_service.StrategyWeighted)
 
 	fallbackAliases := make(map[string][]entity.ModelAlias)
 	for alias, targets := range cfg.Fallback.AliasFallback {
@@ -157,12 +157,12 @@ func main() {
 	healthHandler := http_adapter.NewHealthHandler(configAdapter, proxyLogger)
 	recoveryMiddleware := http_adapter.NewRecoveryMiddleware(proxyLogger)
 
-	rateLimiter := middleware.NewRateLimiter(configMgr)
-	concurrencyLimiter := middleware.NewConcurrencyLimiter(configMgr)
+	rateLimiter := http_middleware.NewRateLimiter(configMgr)
+	concurrencyLimiter := http_middleware.NewConcurrencyLimiter(configMgr)
 
 	printBanner(Version, cfg.GetListen(), len(cfg.Backends), len(cfg.Models))
 
-	logging.GeneralSugar.Infow("LLM Proxy started",
+	infra_logging.GeneralSugar.Infow("LLM Proxy started",
 		"version", Version,
 		"address", formatListenAddress(cfg.GetListen()),
 		"backends", len(cfg.Backends),
@@ -188,19 +188,19 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	logging.GeneralSugar.Info("正在关闭服务器...")
+	infra_logging.GeneralSugar.Info("正在关闭服务器...")
 
 	close(shutdownCooldown)
-	logging.ShutdownLogger()
+	infra_logging.ShutdownLogger()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		logging.GeneralSugar.Errorw("服务器关闭失败", "error", err)
+		infra_logging.GeneralSugar.Errorw("服务器关闭失败", "error", err)
 	}
 
-	logging.GeneralSugar.Info("服务器已关闭")
+	infra_logging.GeneralSugar.Info("服务器已关闭")
 }
 
 func loadSystemPrompts() map[string]string {
@@ -271,7 +271,7 @@ func printBanner(version, listen string, backends, models int) {
 }
 
 func shouldUseColor() bool {
-	cfg := logging.GetLoggingConfig()
+	cfg := infra_logging.GetLoggingConfig()
 	if cfg != nil && cfg.Colorize != nil && !*cfg.Colorize {
 		return false
 	}

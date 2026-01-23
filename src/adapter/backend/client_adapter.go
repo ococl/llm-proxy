@@ -1,16 +1,29 @@
 package backend
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
 
 	"llm-proxy/domain/entity"
 	"llm-proxy/domain/port"
 )
 
-// BackendClientAdapter adapts HTTPClient to port.BackendClient interface.
 type BackendClientAdapter struct {
 	client *HTTPClient
+}
+
+type BackendError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *BackendError) Error() string {
+	return fmt.Sprintf("backend error: status=%d, body=%s", e.StatusCode, e.Body)
 }
 
 // NewBackendClientAdapter creates a new backend client adapter.
@@ -20,7 +33,18 @@ func NewBackendClientAdapter(client *HTTPClient) *BackendClientAdapter {
 	}
 }
 
-// Send sends a request to the backend and returns a response.
+func getKeys(m map[string]interface{}) string {
+	keys := ""
+	for k := range m {
+		if keys != "" {
+			keys += ", "
+		}
+		keys += k
+	}
+	return keys
+}
+
+// Send sends a non-streaming request to the backend and returns a response.
 func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, backend *entity.Backend) (*entity.Response, error) {
 	body := map[string]interface{}{
 		"model":    req.Model().String(),
@@ -48,7 +72,7 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	if req.User() != "" {
 		body["user"] = req.User()
 	}
-	body["stream"] = req.IsStream()
+	body["stream"] = false // Non-streaming request
 
 	backendReq := &BackendRequest{
 		Backend: backend,
@@ -57,20 +81,166 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 			"Content-Type": {"application/json"},
 		},
 		Path:   "/chat/completions",
-		Stream: req.IsStream(),
+		Stream: false,
 	}
 
 	httpResp, err := a.client.Send(ctx, backendReq)
 	if err != nil {
 		return nil, err
 	}
+	defer httpResp.Body.Close()
 
-	resp := entity.NewResponseBuilder().
-		ID(httpResp.Header.Get("x-request-id")).
-		Model(req.Model().String()).
-		BuildUnsafe()
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, err
+	}
 
-	return resp, nil
+	if httpResp.StatusCode >= 400 {
+		return nil, &BackendError{
+			StatusCode: httpResp.StatusCode,
+			Body:       string(respBody),
+		}
+	}
+
+	var respData map[string]interface{}
+	if err := json.Unmarshal(respBody, &respData); err != nil {
+		return nil, err
+	}
+
+	responseID := httpResp.Header.Get("x-request-id")
+	if responseID == "" {
+		responseID = "resp-" + req.ID().String()
+	}
+
+	builder := entity.NewResponseBuilder().
+		ID(responseID).
+		Model(req.Model().String())
+
+	if usage, ok := respData["usage"].(map[string]interface{}); ok {
+		promptTokens, _ := usage["prompt_tokens"].(float64)
+		completionTokens, _ := usage["completion_tokens"].(float64)
+		builder.Usage(entity.NewUsage(int(promptTokens), int(completionTokens)))
+	}
+
+	if choices, ok := respData["choices"].([]interface{}); ok && len(choices) > 0 {
+		if choiceMap, ok := choices[0].(map[string]interface{}); ok {
+			finishReason, _ := choiceMap["finish_reason"].(string)
+
+			if messageMap, ok := choiceMap["message"].(map[string]interface{}); ok {
+				content, _ := messageMap["content"].(string)
+				role, _ := messageMap["role"].(string)
+
+				choice := entity.Choice{
+					Index: 0,
+					Message: entity.Message{
+						Role:    role,
+						Content: content,
+					},
+					FinishReason: finishReason,
+				}
+
+				builder.Choices([]entity.Choice{choice})
+			}
+		}
+	}
+
+	return builder.BuildUnsafe(), nil
+}
+
+// SendStreaming sends a streaming request to the backend and calls handler for each chunk.
+func (a *BackendClientAdapter) SendStreaming(
+	ctx context.Context,
+	req *entity.Request,
+	backend *entity.Backend,
+	handler func([]byte) error,
+) error {
+	body := map[string]interface{}{
+		"model":    req.Model().String(),
+		"messages": req.Messages(),
+	}
+
+	if req.MaxTokens() > 0 {
+		body["max_tokens"] = req.MaxTokens()
+	}
+	if req.Temperature() != 1.0 {
+		body["temperature"] = req.Temperature()
+	}
+	if req.TopP() != 1.0 {
+		body["top_p"] = req.TopP()
+	}
+	if len(req.Stop()) > 0 {
+		body["stop"] = req.Stop()
+	}
+	if len(req.Tools()) > 0 {
+		body["tools"] = req.Tools()
+	}
+	if req.ToolChoice() != nil {
+		body["tool_choice"] = req.ToolChoice()
+	}
+	if req.User() != "" {
+		body["user"] = req.User()
+	}
+	body["stream"] = true // Streaming request
+
+	backendReq := &BackendRequest{
+		Backend: backend,
+		Body:    body,
+		Headers: map[string][]string{
+			"Content-Type": {"application/json"},
+		},
+		Path:   "/chat/completions",
+		Stream: true,
+	}
+
+	httpResp, err := a.client.Send(ctx, backendReq)
+	if err != nil {
+		return err
+	}
+
+	if httpResp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		return &BackendError{
+			StatusCode: httpResp.StatusCode,
+			Body:       string(respBody),
+		}
+	}
+
+	reader := bufio.NewReader(httpResp.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		line = strings.TrimSpace(line)
+
+		// Skip empty lines
+		if line == "" {
+			continue
+		}
+
+		// SSE format: "data: <json>"
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+
+		// Check for [DONE] message
+		if data == "[DONE]" {
+			break
+		}
+
+		if err := handler([]byte(data)); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // GetHTTPClient returns the underlying HTTP client.

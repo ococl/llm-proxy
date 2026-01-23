@@ -1,10 +1,10 @@
 package config
 
 import (
-	"llm-proxy/config"
 	"llm-proxy/domain/entity"
 	"llm-proxy/domain/port"
 	"llm-proxy/domain/types"
+	"llm-proxy/infrastructure/config"
 )
 
 // ConfigAdapter adapts config.Config to port.ConfigProvider interface.

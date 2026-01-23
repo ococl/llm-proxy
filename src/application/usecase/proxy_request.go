@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"llm-proxy/domain/entity"
@@ -53,21 +54,17 @@ func NewProxyRequestUseCase(
 
 // Execute processes a proxy request and returns a response.
 func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request) (*entity.Response, error) {
-	// 1. Validate request
 	if err := uc.validateRequest(req); err != nil {
 		return nil, err
 	}
 
-	// 2. Resolve routes
 	routes, err := uc.routeResolver.Resolve(req.Model().String())
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. Filter available routes (not in cooldown)
 	availableRoutes := uc.fallbackStrategy.FilterAvailableRoutes(routes)
 	if len(availableRoutes) == 0 {
-		// Try fallback aliases
 		fallbackRoutes, err := uc.fallbackStrategy.GetFallbackRoutes(req.Model().String(), uc.routeResolver)
 		if err != nil || len(fallbackRoutes) == 0 {
 			return nil, domainerror.NewNoBackend()
@@ -75,22 +72,17 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 		availableRoutes = fallbackRoutes
 	}
 
-	// 4. Select backend using load balancer
 	backend := uc.loadBalancer.Select(availableRoutes)
 	if backend == nil {
 		return nil, domainerror.NewNoBackend()
 	}
 
-	// 5. Convert request to backend format
 	backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
 	if err != nil {
 		return nil, domainerror.NewProtocolError("failed to convert request", err)
 	}
 
-	// 6. Execute with retry
 	resp, err := uc.executeWithRetry(ctx, backendReq, availableRoutes)
-
-	// 7. Convert response to client format
 	if err != nil {
 		return nil, err
 	}
@@ -121,35 +113,28 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 	maxRetries := uc.retryStrategy.GetMaxRetries()
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		// Select backend
 		backend := uc.loadBalancer.Select(routes)
 		if backend == nil {
 			return nil, domainerror.NewNoBackend()
 		}
 
-		// Convert request
 		backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
 		if err != nil {
 			return nil, domainerror.NewProtocolError("request conversion failed", err)
 		}
 
-		// Send request
 		resp, err := uc.backendClient.Send(ctx, backendReq, backend)
 		if err == nil {
 			return resp, nil
 		}
 
 		lastErr = err
-
-		// Record error
 		uc.metrics.IncBackendErrors(backend.Name())
 
-		// Check if should retry
 		if !uc.retryStrategy.ShouldRetry(attempt, err) {
-			return nil, err
+			return nil, domainerror.NewBackendError(backend.Name(), err)
 		}
 
-		// Get backoff delay
 		delay := uc.retryStrategy.GetDelay(attempt)
 		if delay > 0 {
 			select {
@@ -160,7 +145,10 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		}
 	}
 
-	return nil, lastErr
+	if lastErr != nil {
+		return nil, domainerror.NewNoBackend().WithCause(lastErr)
+	}
+	return nil, domainerror.NewNoBackend()
 }
 
 // ExecuteStreaming processes a streaming proxy request.
@@ -169,6 +157,132 @@ func (uc *ProxyRequestUseCase) ExecuteStreaming(
 	req *entity.Request,
 	handler func(*entity.Response) error,
 ) error {
-	// Implementation for streaming
-	return nil
+	if err := uc.validateRequest(req); err != nil {
+		return err
+	}
+
+	routes, err := uc.routeResolver.Resolve(req.Model().String())
+	if err != nil {
+		return err
+	}
+
+	availableRoutes := uc.fallbackStrategy.FilterAvailableRoutes(routes)
+	if len(availableRoutes) == 0 {
+		fallbackRoutes, err := uc.fallbackStrategy.GetFallbackRoutes(req.Model().String(), uc.routeResolver)
+		if err != nil || len(fallbackRoutes) == 0 {
+			return domainerror.NewNoBackend()
+		}
+		availableRoutes = fallbackRoutes
+	}
+
+	backend := uc.loadBalancer.Select(availableRoutes)
+	if backend == nil {
+		return domainerror.NewNoBackend()
+	}
+
+	backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
+	if err != nil {
+		return domainerror.NewProtocolError("failed to convert request", err)
+	}
+
+	return uc.executeStreamingWithRetry(ctx, backendReq, availableRoutes, handler)
+}
+
+func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
+	ctx context.Context,
+	req *entity.Request,
+	routes []*port.Route,
+	handler func(*entity.Response) error,
+) error {
+	var lastErr error
+	maxRetries := uc.retryStrategy.GetMaxRetries()
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		backend := uc.loadBalancer.Select(routes)
+		if backend == nil {
+			return domainerror.NewNoBackend()
+		}
+
+		backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
+		if err != nil {
+			return domainerror.NewProtocolError("request conversion failed", err)
+		}
+
+		streamHandler := func(chunk []byte) error {
+			var chunkData map[string]interface{}
+			if err := json.Unmarshal(chunk, &chunkData); err != nil {
+				return err
+			}
+
+			responseID, _ := chunkData["id"].(string)
+			if responseID == "" {
+				responseID = "resp-" + req.ID().String()
+			}
+
+			model, _ := chunkData["model"].(string)
+			if model == "" {
+				model = req.Model().String()
+			}
+
+			builder := entity.NewResponseBuilder().
+				ID(responseID).
+				Model(model).
+				Object("chat.completion.chunk")
+
+			if choices, ok := chunkData["choices"].([]interface{}); ok && len(choices) > 0 {
+				if choiceMap, ok := choices[0].(map[string]interface{}); ok {
+					index, _ := choiceMap["index"].(float64)
+					finishReason, _ := choiceMap["finish_reason"].(string)
+
+					choice := entity.Choice{
+						Index:        int(index),
+						FinishReason: finishReason,
+					}
+
+					if deltaMap, ok := choiceMap["delta"].(map[string]interface{}); ok {
+						content, _ := deltaMap["content"].(string)
+						role, _ := deltaMap["role"].(string)
+
+						delta := entity.Message{
+							Role:    role,
+							Content: content,
+						}
+						choice.Delta = &delta
+					}
+
+					builder.Choices([]entity.Choice{choice})
+				}
+			}
+
+			resp := builder.BuildUnsafe()
+			return handler(resp)
+		}
+
+		clientAdapter := uc.backendClient
+		err = clientAdapter.SendStreaming(ctx, backendReq, backend, streamHandler)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		uc.metrics.IncBackendErrors(backend.Name())
+
+		if !uc.retryStrategy.ShouldRetry(attempt, err) {
+			return domainerror.NewBackendError(backend.Name(), err)
+		}
+
+		delay := uc.retryStrategy.GetDelay(attempt)
+		if delay > 0 {
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+
+	if lastErr != nil {
+		return domainerror.NewNoBackend().WithCause(lastErr)
+	}
+	return domainerror.NewNoBackend()
 }

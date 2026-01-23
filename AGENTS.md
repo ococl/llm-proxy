@@ -242,6 +242,68 @@ log.Println("请求成功 backend=" + backend)
 
 ---
 
+## 🧪 后端配置与测试验证
+
+### 已知后端状态
+
+| 后端 | 状态 | 说明 |
+|------|------|------|
+| `GROUP_1` | ⚠️ 预期不可用 | "X-AIO Code Plan is currently only available for Coding Agents" |
+| `oocc` | ⚠️ 预期不可用 | 内部服务，仅特定网络可访问 |
+| `GROUP_HB5S` | ✅ 可用 | Anthropic 协议兼容 |
+| `GROUP_2` | ✅ 可用 | 多种开源模型 (DeepSeek, Qwen, Kimi 等) |
+| `NVIDIA` | ✅ 可用 | NVIDIA NGC API |
+
+### 测试验证要点
+
+**故意不配置备用后端的模型**（用于测试故障转移行为）：
+- `anthropic/claude-haiku-4-5` → 仅 GROUP_1
+- `anthropic/claude-sonnet-4-5` → 仅 GROUP_1
+
+**预期行为**：
+- 当唯一后端返回错误时，返回 `BACKEND_ERROR` 响应
+- 错误信息包含具体的后端名称和原始错误原因
+- 日志记录完整的错误堆栈（便于调试）
+
+**正常工作的模型配置**：
+- `deepseek/deepseek-v3.2` → GROUP_2 (有备用回退)
+- `z-ai/glm-4.7` → GROUP_1 → GROUP_2 → NVIDIA
+- `minimax/minimax-m2.1` → GROUP_1 → NVIDIA
+
+### 验证命令
+
+```bash
+# 启动服务器
+cd src && ./llm-proxy.exe -config ../dist/config.yaml
+
+# 测试健康检查
+curl http://localhost:8765/health
+# 预期: {"status":"healthy","backends":5,"models":14}
+
+# 测试预期失败的模型（无备用后端）
+curl -X POST http://localhost:8765/v1/chat/completions \
+  -H "Authorization: Bearer sk-aNbDRYsSMcbdVUptFyy9yWpeN6agx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"anthropic/claude-haiku-4-5","messages":[{"role":"user","content":"Hi"}]}'
+# 预期: {"error":{"code":"BACKEND_ERROR","message":"后端 GROUP_1 请求失败"}}
+
+# 测试正常工作的模型
+curl -X POST http://localhost:8765/v1/chat/completions \
+  -H "Authorization: Bearer sk-aNbDRYsSMcbdVUptFyy9yWpeN6agx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"user","content":"Hi"}]}'
+# 预期: 正常响应
+
+# 测试流式请求
+curl -N -X POST http://localhost:8765/v1/chat/completions \
+  -H "Authorization: Bearer sk-aNbDRYsSMcbdVUptFyy9yWpeN6agx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"user","content":"Count from 1 to 3"}],"stream":true}'
+# 预期: SSE 流式响应
+```
+
+---
+
 ## 🤖 工具调用规范
 
 **重要**: 在调用任何工具时,必须严格遵循工具列表中的参数命名和说明,切勿臆测参数名称或类型!
