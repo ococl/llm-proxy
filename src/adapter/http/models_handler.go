@@ -64,7 +64,7 @@ func (h *ModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		h.logger.Error("failed to encode models response",
+		h.logger.Error("编码模型响应失败",
 			port.Error(err),
 		)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)

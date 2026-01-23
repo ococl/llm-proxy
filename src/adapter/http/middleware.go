@@ -27,7 +27,7 @@ func (rm *RecoveryMiddleware) Middleware(next http.Handler) http.Handler {
 					stackStr = stackStr[:500] + "..."
 				}
 
-				rm.logger.Error("Panic recovered",
+				rm.logger.Error("Panic已恢复",
 					port.String("req_id", reqID),
 					port.String("error", fmt.Sprintf("%v", err)),
 					port.String("stack", stackStr),

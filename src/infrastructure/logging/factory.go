@@ -87,7 +87,6 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 	}
 	line.WriteString(" | ")
 
-	// Format level as 5 characters right-aligned
 	levelStr := entry.Level.CapitalString()
 	levelFormatted := fmt.Sprintf("%5s", levelStr)
 	if enc.colored {
@@ -108,21 +107,37 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 	}
 	line.WriteString(" | ")
 
-	// Extract reqID from fields
-	var reqID string
+	var reqID, model, backendModel, backend string
 	filteredFields := make([]zapcore.Field, 0, len(fields))
 	for _, field := range fields {
-		if field.Key == "reqID" && field.Type == zapcore.StringType {
-			reqID = field.String
-		} else if field.Key != "logger" {
+		switch field.Key {
+		case "req_id":
+			if field.Type == zapcore.StringType {
+				reqID = field.String
+			}
+		case "model":
+			if field.Type == zapcore.StringType {
+				model = field.String
+			}
+		case "backend_model":
+			if field.Type == zapcore.StringType {
+				backendModel = field.String
+			}
+		case "backend":
+			if field.Type == zapcore.StringType {
+				backend = field.String
+			}
+		case "logger":
+		default:
 			filteredFields = append(filteredFields, field)
 		}
 	}
 
-	// Write reqID if found
 	if reqID != "" {
-		if enc.colored {
-			line.WriteString("\033[36m")
+		colorMgr := GetGlobalColorManager()
+		reqColor := colorMgr.GetRequestColor(reqID)
+		if enc.colored && reqColor != "" {
+			line.WriteString(reqColor)
 			line.WriteString(reqID)
 			line.WriteString("\033[0m")
 		} else {
@@ -133,6 +148,32 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 
 	msg := entry.Message
 	line.WriteString(msg)
+
+	if model != "" || backendModel != "" || backend != "" {
+		colorMgr := GetGlobalColorManager()
+		reqColor := colorMgr.GetRequestColor(reqID)
+		if enc.colored && reqColor != "" {
+			line.WriteString(" [backend=")
+			line.WriteString(reqColor)
+			line.WriteString(backend)
+			if backendModel != "" {
+				line.WriteString("\033[0m")
+				line.WriteString(", model=")
+				line.WriteString(reqColor)
+				line.WriteString(backendModel)
+			}
+			line.WriteString("\033[0m")
+			line.WriteString("]")
+		} else {
+			line.WriteString(" [backend=")
+			line.WriteString(backend)
+			if backendModel != "" {
+				line.WriteString(", model=")
+				line.WriteString(backendModel)
+			}
+			line.WriteString("]")
+		}
+	}
 
 	if len(filteredFields) > 0 {
 		enc.encodeFields(line, filteredFields)

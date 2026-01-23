@@ -63,21 +63,21 @@ func (ep *ErrorPresenter) logError(err *domainerror.LLMProxyError) {
 
 	switch err.Type {
 	case domainerror.ErrorTypeValidation, domainerror.ErrorTypeClient:
-		ep.logger.Warn("request validation failed", fields...)
+		ep.logger.Warn("验证失败", fields...)
 	case domainerror.ErrorTypeBackend:
-		ep.logger.Error("backend error", fields...)
+		ep.logger.Error("后端错误", fields...)
 		if err.Cause != nil {
-			ep.logger.Error("error cause", port.Error(err.Cause))
+			ep.logger.Error("错误详情", port.Error(err.Cause))
 		}
 	case domainerror.ErrorTypeInternal:
-		ep.logger.Error("internal error", fields...)
+		ep.logger.Error("内部错误", fields...)
 		if err.Cause != nil {
-			ep.logger.Error("error cause", port.Error(err.Cause))
+			ep.logger.Error("错误详情", port.Error(err.Cause))
 		}
 	default:
-		ep.logger.Error("unknown error", fields...)
+		ep.logger.Error("未知错误", fields...)
 		if err.Cause != nil {
-			ep.logger.Error("error cause", port.Error(err.Cause))
+			ep.logger.Error("错误详情", port.Error(err.Cause))
 		}
 	}
 }

@@ -54,20 +54,20 @@ func (lb *LoadBalancer) WithLogger(logger port.Logger) *LoadBalancer {
 
 func (lb *LoadBalancer) Select(routes []*port.Route) *entity.Backend {
 	if len(routes) == 0 {
-		lb.logger.Warn("no routes available for selection",
+		lb.logger.Warn("无路由可用",
 			port.Int(FieldTotalRoutes, 0))
 		return nil
 	}
 
 	if len(routes) == 1 {
 		backend := routes[0].Backend
-		lb.logger.Debug("single route available, selected directly",
+		lb.logger.Debug("单路由直达",
 			port.String("backend", backend.Name()),
 			port.Int(FieldPriority, routes[0].Priority))
 		return backend
 	}
 
-	lb.logger.Debug("selecting backend",
+	lb.logger.Debug("开始选择后端",
 		port.Int(FieldTotalRoutes, len(routes)),
 		port.String(FieldStrategy, string(lb.strategy)))
 
@@ -86,11 +86,11 @@ func (lb *LoadBalancer) Select(routes []*port.Route) *entity.Backend {
 	}
 
 	if backend != nil {
-		lb.logger.Debug("backend selected",
+		lb.logger.Debug("后端选择完成",
 			port.String("backend", backend.Name()),
 			port.String(FieldSelectionMethod, string(lb.strategy)))
 	} else {
-		lb.logger.Warn("backend selection returned nil",
+		lb.logger.Warn("后端选择失败",
 			port.Int(FieldTotalRoutes, len(routes)),
 			port.String(FieldStrategy, string(lb.strategy)))
 	}
@@ -101,7 +101,7 @@ func (lb *LoadBalancer) Select(routes []*port.Route) *entity.Backend {
 func (lb *LoadBalancer) selectRandom(routes []*port.Route) *entity.Backend {
 	enabled := filterEnabledBackends(routes)
 	if len(enabled) == 0 {
-		lb.logger.Warn("no enabled backends available",
+		lb.logger.Warn("随机选择无可用后端",
 			port.Int(FieldTotalRoutes, len(routes)),
 			port.Int(FieldFilteredRoutes, 0))
 		return nil
@@ -113,7 +113,7 @@ func (lb *LoadBalancer) selectRandom(routes []*port.Route) *entity.Backend {
 func (lb *LoadBalancer) selectRoundRobin(routes []*port.Route) *entity.Backend {
 	enabled := filterEnabledBackends(routes)
 	if len(enabled) == 0 {
-		lb.logger.Warn("no enabled backends available",
+		lb.logger.Warn("轮询无可用后端",
 			port.Int(FieldTotalRoutes, len(routes)),
 			port.Int(FieldFilteredRoutes, 0))
 		return nil
@@ -125,7 +125,7 @@ func (lb *LoadBalancer) selectRoundRobin(routes []*port.Route) *entity.Backend {
 func (lb *LoadBalancer) selectLeastRequests(routes []*port.Route) *entity.Backend {
 	enabled := filterEnabledBackends(routes)
 	if len(enabled) == 0 {
-		lb.logger.Warn("no enabled backends available",
+		lb.logger.Warn("最少请求无可用后端",
 			port.Int(FieldTotalRoutes, len(routes)),
 			port.Int(FieldFilteredRoutes, 0))
 		return nil
@@ -142,7 +142,7 @@ func (lb *LoadBalancer) selectWeighted(routes []*port.Route) *entity.Backend {
 	topRoutes := lb.filterByPriority(routes, highestPriority)
 
 	if len(topRoutes) == 0 {
-		lb.logger.Warn("no routes after priority filtering",
+		lb.logger.Warn("优先级过滤后无路由",
 			port.Int(FieldTotalRoutes, len(routes)),
 			port.Int(FieldPriority, highestPriority))
 		return nil
@@ -150,7 +150,7 @@ func (lb *LoadBalancer) selectWeighted(routes []*port.Route) *entity.Backend {
 
 	if len(topRoutes) == 1 {
 		backend := topRoutes[0].Backend
-		lb.logger.Debug("single backend in priority group",
+		lb.logger.Debug("单后端优先",
 			port.String("backend", backend.Name()),
 			port.Int(FieldPriority, highestPriority))
 		return backend
@@ -222,7 +222,7 @@ func (wlb *WeightedLoadBalancer) Select() *entity.Backend {
 	defer wlb.mu.Unlock()
 
 	if len(wlb.backends) == 0 {
-		wlb.logger.Warn("no backends configured in weighted load balancer")
+		wlb.logger.Warn("加权LB未配置后端")
 		return nil
 	}
 
@@ -236,7 +236,7 @@ func (wlb *WeightedLoadBalancer) Select() *entity.Backend {
 	}
 
 	if totalWeight == 0 {
-		wlb.logger.Warn("no enabled backends with positive weight",
+		wlb.logger.Warn("无可用正权重后端",
 			port.Int(FieldTotalCount, len(wlb.backends)),
 			port.Int("enabled_count", enabledCount))
 		return nil
@@ -251,7 +251,7 @@ func (wlb *WeightedLoadBalancer) Select() *entity.Backend {
 		}
 		currentWeight += wb.Weight
 		if randWeight < currentWeight {
-			wlb.logger.Debug("weighted backend selected",
+			wlb.logger.Debug("加权选择完成",
 				port.String("backend", wb.Backend.Name()),
 				port.Int("weight", wb.Weight),
 				port.Int("total_weight", totalWeight))
@@ -343,7 +343,7 @@ func (cb *CircuitBreaker) AllowRequest() bool {
 			cb.successCount = 0
 			cb.failureCount = 0
 			cb.lastStateChange = time.Now()
-			cb.logger.Info("circuit breaker transitioned to half-open",
+			cb.logger.Info("熔断器转为半开",
 				port.String(FieldCircuitState, cb.state.String()))
 			return true
 		}
@@ -366,7 +366,7 @@ func (cb *CircuitBreaker) RecordSuccess() {
 			cb.state = CircuitStateClosed
 			cb.failureCount = 0
 			cb.lastStateChange = time.Now()
-			cb.logger.Info("circuit breaker closed after successful recovery",
+			cb.logger.Info("熔断器恢复关闭",
 				port.String(FieldCircuitState, cb.state.String()),
 				port.Int(FieldSuccessCount, cb.successCount))
 		}
@@ -383,14 +383,14 @@ func (cb *CircuitBreaker) RecordFailure() {
 	case CircuitStateHalfOpen:
 		cb.state = CircuitStateOpen
 		cb.lastStateChange = time.Now()
-		cb.logger.Warn("circuit breaker opened from half-open after failure",
+		cb.logger.Warn("熔断器半开失败转打开",
 			port.String(FieldCircuitState, cb.state.String()))
 	case CircuitStateClosed:
 		cb.failureCount++
 		if cb.failureCount >= cb.failureThreshold {
 			cb.state = CircuitStateOpen
 			cb.lastStateChange = time.Now()
-			cb.logger.Warn("circuit breaker opened due to failure threshold",
+			cb.logger.Warn("熔断器达阈值打开",
 				port.String(FieldCircuitState, cb.state.String()),
 				port.Int(FieldFailureCount, cb.failureCount))
 		}

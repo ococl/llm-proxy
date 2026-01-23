@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"strconv"
 	"time"
 
 	"llm-proxy/application/usecase"
@@ -14,8 +14,6 @@ import (
 	domainerror "llm-proxy/domain/error"
 	"llm-proxy/domain/port"
 	"llm-proxy/domain/types"
-
-	"github.com/google/uuid"
 )
 
 type ProxyHandler struct {
@@ -143,7 +141,7 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 	defer cancel()
 
 	if err := h.proxyUseCase.ExecuteStreaming(ctx, req, streamHandler); err != nil {
-		h.logger.Error("streaming request failed",
+		h.logger.Error("流式请求失败",
 			port.String("req_id", req.ID().String()),
 			port.String("model", req.Model().String()),
 			port.Error(err),
@@ -171,7 +169,7 @@ func (h *ProxyHandler) writeResponse(w http.ResponseWriter, resp *entity.Respons
 
 	respJSON, err := json.Marshal(resp)
 	if err != nil {
-		h.logger.Error("failed to marshal response", port.Error(err))
+		h.logger.Error("序列化响应失败", port.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -180,7 +178,7 @@ func (h *ProxyHandler) writeResponse(w http.ResponseWriter, resp *entity.Respons
 	w.WriteHeader(http.StatusOK)
 
 	if _, err := w.Write(respJSON); err != nil {
-		h.logger.Error("failed to write response", port.Error(err))
+		h.logger.Error("写入响应失败", port.Error(err))
 	}
 }
 
@@ -353,7 +351,13 @@ func (h *ProxyHandler) isStreamRequest(reqBody map[string]interface{}) bool {
 }
 
 func (h *ProxyHandler) generateRequestID() string {
-	return "req_" + strings.ReplaceAll(uuid.New().String(), "-", "")[:18]
+	now := time.Now()
+	timestamp := now.UnixMilli()
+	reqIDStr := strconv.FormatInt(timestamp, 16)
+	if len(reqIDStr) > 10 {
+		reqIDStr = reqIDStr[len(reqIDStr)-10:]
+	}
+	return reqIDStr
 }
 
 func getString(m map[string]interface{}, key string) string {
@@ -381,7 +385,6 @@ func extractForwardHeaders(clientHeaders http.Header) map[string][]string {
 		}
 	}
 
-	// If no User-Agent from client, set default for AI coding agents
 	if len(headers["User-Agent"]) == 0 {
 		headers["User-Agent"] = []string{"opencode/1.1.34 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5"}
 	}

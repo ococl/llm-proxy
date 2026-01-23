@@ -37,7 +37,7 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if err := json.NewEncoder(w).Encode(status); err != nil {
-		h.logger.Error("failed to encode health status", port.Error(err))
+		h.logger.Error("编码健康状态失败", port.Error(err))
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

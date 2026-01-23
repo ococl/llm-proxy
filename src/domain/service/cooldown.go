@@ -70,7 +70,7 @@ func (cm *CooldownManager) IsCoolingDown(backend, model string) bool {
 
 	if isCooling {
 		remaining := time.Until(until).Seconds()
-		cm.logger.Debug("cooldown check: backend is cooling down",
+		cm.logger.Debug("冷却检查：后端冷却中",
 			port.String(FieldBackend, backend),
 			port.String(FieldModel, model),
 			port.Bool(FieldIsCoolingDown, true),
@@ -95,7 +95,7 @@ func (cm *CooldownManager) SetCooldown(backend, model string, duration time.Dura
 	defer cm.mu.Unlock()
 	cm.cooldowns[key] = time.Now().Add(duration)
 
-	cm.logger.Info("backend entered cooldown",
+	cm.logger.Info("后端进入冷却",
 		port.String(FieldBackend, backend),
 		port.String(FieldModel, model),
 		port.Int64(FieldCooldownDuration, int64(duration.Seconds())))
@@ -116,7 +116,7 @@ func (cm *CooldownManager) RemoveCooldown(backend, model string) {
 
 	if _, exists := cm.cooldowns[key]; exists {
 		delete(cm.cooldowns, key)
-		cm.logger.Info("backend cooldown removed",
+		cm.logger.Info("冷却已移除",
 			port.String(FieldBackend, backend),
 			port.String(FieldModel, model))
 	}
@@ -143,7 +143,7 @@ func (cm *CooldownManager) Cleanup() {
 	}
 
 	if expiredCount > 0 {
-		cm.logger.Debug("cooldown cleanup completed",
+		cm.logger.Debug("清理冷却完成",
 			port.Int(FieldExpiredCount, expiredCount),
 			port.Int(FieldActiveCount, len(cm.cooldowns)))
 	}

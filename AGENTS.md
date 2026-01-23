@@ -1,16 +1,39 @@
-# AGENTS.md - AI 编码助手指南
+# AI 编码助手开发指南
 
-本文档为 AI 编码助手提供项目开发规范和命令参考。
+**本文档专为 AI 编码助手设计,提供项目开发规范、命令参考和架构指导。**
+
+---
+
+## ⚠️ 核心原则
+
+### 语言要求
+- **所有交流、推理、输出必须使用中文**
+- **所有代码注释必须使用中文**
+- **所有日志消息、错误提示必须使用中文**
+- **所有文档必须使用中文**
+
+### 注释规范
+- **必须保留必要的注释**,包括:
+  - 接口和公开类型的文档注释
+  - 复杂业务逻辑的解释
+  - 非显而易见的实现细节
+  - 重要配置项的说明
+- **鼓励添加合理的注释**,帮助理解代码意图
+- **避免明显多余的注释**,如 `i++  // 自增`
 
 ---
 
 ## 📦 项目概览
 
-**llm-proxy** 是一个高性能的 LLM API 代理服务,提供负载均衡、故障转移、限流、并发控制等企业级功能。
+**llm-proxy** 是一个高性能的 LLM API 代理服务,采用 Clean Architecture 架构设计,提供负载均衡、故障转移、限流、并发控制等企业级功能。
 
 - **语言**: Go 1.25.5
-- **架构**: 分层中间件 + 代理模式
-- **主要模块**: proxy, router, middleware, config, backend, logging
+- **架构**: Clean Architecture (分层架构)
+- **核心层级**:
+  - `domain/` - 领域层(实体、端口接口、领域服务)
+  - `application/` - 应用层(用例、应用服务)
+  - `adapter/` - 适配器层(HTTP、配置、后端客户端、日志)
+  - `infrastructure/` - 基础设施层(HTTP 服务器、配置加载、日志实现)
 
 ---
 
@@ -20,34 +43,47 @@
 ```bash
 # 快速开发构建(当前平台)
 make dev
+# 输出: dist/llm-proxy.exe
 
 # 完整多平台构建
 make build-all
+# 输出: dist/llm-proxy-{platform}-{arch}.exe
 
 # 清理构建产物
 make clean
 ```
 
 ### 测试命令
+
+#### 运行所有测试
 ```bash
-# 运行所有测试
 make test
 # 等同于: cd src && go test -v ./...
+```
 
-# 运行指定包的测试
-cd src && go test -v ./proxy
-cd src && go test -v ./config
+#### 运行指定包的测试
+```bash
+cd src && go test -v ./domain/entity
+cd src && go test -v ./application/usecase
+cd src && go test -v ./adapter/http/middleware
+```
 
-# 运行单个测试用例
-cd src && go test -v -run TestDetector_EmptyConfig ./proxy
-cd src && go test -v -run TestFallback_L2 ./proxy
+#### 运行单个测试函数
+```bash
+# 测试函数命名规范: Test<功能>_<场景>
+cd src && go test -v -run TestBackend_New ./domain/entity
+cd src && go test -v -run TestProxyRequestUseCase_ValidateRequest ./application/usecase
+cd src && go test -v -run TestRateLimiter_Allow ./adapter/http/middleware
+```
 
-# 运行测试并显示覆盖率
+#### 测试覆盖率
+```bash
+# 显示覆盖率
 cd src && go test -v -cover ./...
 
 # 生成覆盖率报告
 cd src && go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
+cd src && go tool cover -html=coverage.out
 ```
 
 ### 代码检查
@@ -75,335 +111,519 @@ cd src && go mod verify
 - **工具**: 使用 `gofmt -s` 格式化
 
 ### 导入规范
+
+**严格遵守三段式导入**:
+
 ```go
 import (
-	// 1. 标准库
-	"bytes"
+	// 1. 标准库(按字母排序)
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 	
-	// 2. 本项目包 (使用 llm-proxy/ 前缀)
-	"llm-proxy/backend"
-	"llm-proxy/config"
-	"llm-proxy/errors"
-	"llm-proxy/logging"
+	// 2. 本项目包(使用 llm-proxy/ 前缀,按分层排序)
+	"llm-proxy/domain/entity"
+	"llm-proxy/domain/port"
+	domain_service "llm-proxy/domain/service"  // 使用别名避免冲突
+	"llm-proxy/application/usecase"
+	http_adapter "llm-proxy/adapter/http"
 	
-	// 3. 第三方库
+	// 3. 第三方库(按字母排序)
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
 ```
 
+**别名命名规范**:
+- 同名包冲突时使用 `<层级>_<包名>` 格式
+- 例: `domain_service`, `http_adapter`, `infra_config`
+
 ### 命名约定
-- **包名**: 小写单词,无下划线 (`proxy`, `config`, `middleware`)
-- **导出**: 首字母大写 (`type Proxy struct`, `func NewProxy()`)
-- **私有**: 首字母小写 (`func isHopByHopHeader()`)
-- **接口**: 名词或形容词 (`type Manager interface`)
-- **常量**: 驼峰命名 (`const maxRetries = 3`)
+
+- **包名**: 小写单词,无下划线 (`entity`, `usecase`, `middleware`)
+- **导出标识符**: 首字母大写 (`type Backend struct`, `func NewBackend()`)
+- **私有标识符**: 首字母小写 (`func validateRequest()`, `type requestContext struct`)
+- **接口**: 名词或形容词,通常以 -er 结尾 (`Logger`, `ConfigProvider`, `BackendClient`)
+- **常量**: 驼峰命名 (`const maxRetries = 3`, `const defaultTimeout = 30 * time.Second`)
 
 ### 类型定义
+
 ```go
-// ✅ 推荐: 显式字段类型,YAML 标签清晰
-type Backend struct {
-	Name    string `yaml:"name"`
-	URL     string `yaml:"url"`
-	APIKey  string `yaml:"api_key,omitempty"`
-	Enabled *bool  `yaml:"enabled,omitempty"` // 使用指针区分零值和未设置
+// ✅ 推荐: 明确的值对象
+type BackendID string
+
+func NewBackendID(name string) BackendID {
+	return BackendID(name)
 }
 
-// ✅ 推荐: 为配置项提供默认值获取方法
-func (b *Backend) IsEnabled() bool {
-	return b.Enabled == nil || *b.Enabled
+func (id BackendID) String() string {
+	return string(id)
+}
+
+// ✅ 推荐: 使用 Builder 模式构建复杂对象
+type Backend struct {
+	id       BackendID
+	name     string
+	url      BackendURL
+	apiKey   APIKey
+	protocol types.Protocol
+	enabled  bool
+}
+
+func NewBackendBuilder() *BackendBuilder {
+	return &BackendBuilder{
+		enabled: true,  // 默认值
+	}
+}
+
+type BackendBuilder struct {
+	id       BackendID
+	name     string
+	// ... 其他字段
+}
+
+func (b *BackendBuilder) WithName(name string) *BackendBuilder {
+	b.name = name
+	return b
+}
+
+func (b *BackendBuilder) Build() (*Backend, error) {
+	// 验证必填字段
+	if b.name == "" {
+		return nil, fmt.Errorf("后端名称不能为空")
+	}
+	// 返回不可变对象
+	return &Backend{
+		id:       NewBackendID(b.name),
+		name:     b.name,
+		url:      b.url,
+		apiKey:   b.apiKey,
+		protocol: b.protocol,
+		enabled:  b.enabled,
+	}, nil
+}
+
+// ✅ 推荐: 使用指针区分零值和未设置
+type Config struct {
+	Enabled *bool `yaml:"enabled,omitempty"`
+}
+
+func (c *Config) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
 }
 ```
 
 ### 错误处理
-```go
-// ✅ 标准错误检查模式
-resp, err := client.Do(proxyReq)
-if err != nil {
-	logging.ProxySugar.Errorw("请求失败", "error", err, "backend", route.BackendName)
-	continue // 故障转移到下一个后端
-}
-defer resp.Body.Close()
 
-// ✅ 使用自定义错误类型 (见 src/errors/errors.go)
-errors.WriteJSONError(w, errors.ErrNoBackend, http.StatusBadGateway, traceID)
+```go
+// ✅ 推荐: 使用自定义错误类型(domain/error/types.go)
+import domainerror "llm-proxy/domain/error"
+
+func processRequest(req *Request) error {
+	if req.Model == "" {
+		return domainerror.ErrMissingModel
+	}
+	
+	backend, err := repo.GetBackend(req.Model)
+	if err != nil {
+		return domainerror.Wrap(err, domainerror.CodeNoBackend, "获取后端失败")
+	}
+	
+	return nil
+}
+
+// ✅ 推荐: 提前返回,避免嵌套
+func validate(req *Request) error {
+	if req == nil {
+		return domainerror.ErrInvalidRequest
+	}
+	if req.Model == "" {
+		return domainerror.ErrMissingModel
+	}
+	// 正常路径
+	return nil
+}
 
 // ❌ 避免: 忽略错误
-io.ReadAll(resp.Body) // 缺少错误检查
+body, _ := io.ReadAll(resp.Body)  // 缺少错误检查
 
 // ❌ 避免: 过度嵌套
 if err == nil {
 	if data != nil {
-		// 处理
+		if valid {
+			// 处理
+		}
 	}
 }
-// ✅ 推荐: 提前返回
-if err != nil {
-	return err
-}
-if data == nil {
-	return errors.New("data is nil")
-}
-// 处理正常路径
 ```
 
 ### 日志记录
+
+**使用结构化日志,所有消息和字段名必须是中文**:
+
 ```go
-// ✅ 使用结构化日志 (go.uber.org/zap)
-logging.ProxySugar.Infow("请求成功",
-	"req_id", reqID,
-	"backend", route.BackendName,
-	"model", route.Model,
-	"status", resp.StatusCode,
-	"duration_ms", time.Since(start).Milliseconds(),
+// ✅ 推荐: 结构化日志 (port.Logger 接口)
+logger.Info("代理请求成功",
+	port.Field{Key: "请求ID", Value: reqID},
+	port.Field{Key: "后端", Value: backend.Name()},
+	port.Field{Key: "模型", Value: req.Model()},
+	port.Field{Key: "状态码", Value: resp.StatusCode()},
+	port.Field{Key: "耗时毫秒", Value: duration.Milliseconds()},
 )
 
-// ✅ 错误日志包含上下文
-logging.ProxySugar.Errorw("路由解析失败",
-	"error", err,
-	"model", model,
-	"req_id", reqID,
+// ✅ 推荐: 错误日志包含上下文
+logger.Error("后端请求失败",
+	port.Field{Key: "错误", Value: err.Error()},
+	port.Field{Key: "后端", Value: backend.Name()},
+	port.Field{Key: "重试次数", Value: retryCount},
+	port.Field{Key: "请求ID", Value: reqID},
 )
 
 // ❌ 避免: 非结构化日志
 log.Println("请求成功 backend=" + backend)
+
+// ❌ 避免: 使用英文字段名
+logger.Info("Request success", 
+	port.Field{Key: "backend", Value: backend},  // 错误: 字段名必须是中文
+)
 ```
 
----
-
-## 🏗️ 架构模式
-
-### 中间件链 (见 src/main.go:100)
-```
-请求流 → RecoveryMiddleware → RateLimiter → ConcurrencyLimiter → Proxy
-```
-
-### 故障转移逻辑 (见 src/proxy/proxy.go:141-311)
-1. **L1 回退**: 同模型别名内多后端重试 (按优先级)
-2. **L2 回退**: 跨模型别名回退 (通过 `alias_fallback` 配置)
-3. **冷却机制**: 失败后端进入冷却期 (默认 300 秒)
-4. **错误检测**: 通过 HTTP 状态码和响应体模式触发回退
-
-### 配置热重载 (见 src/config/config.go:301-349)
-- 每次 `Get()` 检查文件修改时间
-- 检测到变化时自动重新加载
-- 日志配置变更会触发回调 (`LoggingConfigChangedFunc`)
-
----
-
-## 🔍 关键组件说明
-
-### 1. Proxy (src/proxy/proxy.go)
-- **入口**: `ServeHTTP()` - 处理所有 HTTP 请求
-- **核心流程**:
-  1. API Key 验证 (line 64-72)
-  2. 请求体解析和系统提示词注入 (line 81-96)
-  3. 模型路由解析 (line 107)
-  4. 多后端重试循环 (line 141-311)
-  5. 响应流式/非流式处理 (line 253-277)
-- **已知问题**: HTTP 客户端超时硬编码为 5 分钟,`TimeoutConfig` 未生效
-
-### 2. Router (src/proxy/router.go)
-- **路由解析**: `Resolve()` - 将模型别名映射到后端列表
-- **负载均衡**: 同优先级后端随机打散 (line 50-59)
-- **L2 回退**: `ResolutionWithFallback()` - 收集跨别名回退路由
-
-### 3. Middleware
-- **限流** (src/middleware/ratelimit.go): Token Bucket 算法,支持全局/IP/模型级限流
-- **并发** (src/middleware/concurrency.go): 基于 channel 的信号量,支持队列超时
-- **恢复** (src/middleware/recovery.go): Panic 捕获和恢复
-
-### 4. Detector (src/proxy/detector.go)
-- **错误检测**: `ShouldFallback()` - 根据 HTTP 状态码和响应体判断是否回退
-- **通配符支持**: `4xx`, `5xx` 匹配整个状态码范围
-- **默认规则**: 未配置时默认 `["4xx", "5xx"]`
-
----
-
-## ⚠️ 已知问题与注意事项
-
-1. **超时配置未生效** (src/proxy/proxy.go:208)
-   - 当前硬编码 5 分钟: `client := &http.Client{Timeout: 5 * time.Minute}`
-   - `TimeoutConfig` 结构体已定义但未应用到 HTTP 客户端
-   - 缺少 `http.Transport` 配置 (连接池、TLS 超时等)
-
-2. **HTTP 客户端效率**
-   - 每个请求创建新客户端,无连接池复用
-   - 建议改用单例客户端 + 自定义 Transport
-
-3. **测试覆盖**
-   - 主要模块有单元测试 (detector, router, fallback)
-   - 缺少集成测试和端到端测试
-
----
-
-## 🧪 后端配置与测试验证
-
-### 已知后端状态
-
-| 后端 | 状态 | 说明 |
-|------|------|------|
-| `GROUP_1` | ⚠️ 预期不可用 | "X-AIO Code Plan is currently only available for Coding Agents" |
-| `oocc` | ⚠️ 预期不可用 | 内部服务，仅特定网络可访问 |
-| `GROUP_HB5S` | ✅ 可用 | Anthropic 协议兼容 |
-| `GROUP_2` | ✅ 可用 | 多种开源模型 (DeepSeek, Qwen, Kimi 等) |
-| `NVIDIA` | ✅ 可用 | NVIDIA NGC API |
-
-### 测试验证要点
-
-**故意不配置备用后端的模型**（用于测试故障转移行为）：
-- `anthropic/claude-haiku-4-5` → 仅 GROUP_1
-- `anthropic/claude-sonnet-4-5` → 仅 GROUP_1
-
-**预期行为**：
-- 当唯一后端返回错误时，返回 `BACKEND_ERROR` 响应
-- 错误信息包含具体的后端名称和原始错误原因
-- 日志记录完整的错误堆栈（便于调试）
-
-**正常工作的模型配置**：
-- `deepseek/deepseek-v3.2` → GROUP_2 (有备用回退)
-- `z-ai/glm-4.7` → GROUP_1 → GROUP_2 → NVIDIA
-- `minimax/minimax-m2.1` → GROUP_1 → NVIDIA
-
-### 验证命令
-
-```bash
-# 启动服务器
-cd src && ./llm-proxy.exe -config ../dist/config.yaml
-
-# 测试健康检查
-curl http://localhost:8765/health
-# 预期: {"status":"healthy","backends":5,"models":14}
-
-# 测试预期失败的模型（无备用后端）
-curl -X POST http://localhost:8765/v1/chat/completions \
-  -H "Authorization: Bearer sk-aNbDRYsSMcbdVUptFyy9yWpeN6agx" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"anthropic/claude-haiku-4-5","messages":[{"role":"user","content":"Hi"}]}'
-# 预期: {"error":{"code":"BACKEND_ERROR","message":"后端 GROUP_1 请求失败"}}
-
-# 测试正常工作的模型
-curl -X POST http://localhost:8765/v1/chat/completions \
-  -H "Authorization: Bearer sk-aNbDRYsSMcbdVUptFyy9yWpeN6agx" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"user","content":"Hi"}]}'
-# 预期: 正常响应
-
-# 测试流式请求
-curl -N -X POST http://localhost:8765/v1/chat/completions \
-  -H "Authorization: Bearer sk-aNbDRYsSMcbdVUptFyy9yWpeN6agx" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"deepseek/deepseek-v3.2","messages":[{"role":"user","content":"Count from 1 to 3"}],"stream":true}'
-# 预期: SSE 流式响应
-```
-
----
-
-## 🤖 工具调用规范
-
-**重要**: 在调用任何工具时,必须严格遵循工具列表中的参数命名和说明,切勿臆测参数名称或类型!
-
-### 规范要求
-
-1. **精确参数匹配**
-   - 使用工具前,仔细阅读工具描述中的参数定义
-   - 参数名称必须与文档完全一致 (区分大小写)
-   - 参数类型必须匹配 (string, int, bool, array, object 等)
-
-2. **必填参数检查**
-   - 确保所有 `required` 参数都已提供
-   - 不要遗漏必填字段,也不要添加不存在的字段
-
-3. **可选参数理解**
-   - 可选参数有默认值时,了解默认行为
-   - 不确定的参数不要随意传值
-
-### 示例
+### 注释规范
 
 ```go
-// ❌ 错误: 参数名称错误
-ant_cc_bash(cmd="ls", timeout=5000)  // 应该是 command 而非 cmd
+// ✅ 推荐: 接口和公开类型的文档注释(中文)
+// Logger 提供结构化日志记录功能。
+// 所有日志消息和字段名必须使用中文。
+type Logger interface {
+	// Info 记录信息级别日志
+	Info(msg string, fields ...Field)
+	
+	// Error 记录错误级别日志
+	Error(msg string, fields ...Field)
+}
 
-// ✅ 正确: 严格按照文档
-ant_cc_bash(command="ls", description="List files", timeout=5000)
+// ✅ 推荐: 复杂业务逻辑的解释
+func (s *FallbackStrategy) GetBackoffDelay(attempt int) time.Duration {
+	// 计算指数退避延迟: initialDelay * multiplier^(attempt-1)
+	delay := s.initialDelay
+	for i := 1; i < attempt; i++ {
+		delay = time.Duration(float64(delay) * s.multiplier)
+		if delay > s.maxDelay {
+			delay = s.maxDelay
+			break
+		}
+	}
+	
+	// 添加随机抖动,避免雷鸣群效应
+	jitter := time.Duration(float64(delay) * s.jitter * (rand.Float64()*2 - 1))
+	return delay + jitter
+}
 
-// ❌ 错误: 参数类型错误
-ant_cc_read(filePath="test.go", line=10)  // line 不是该工具的参数
+// ✅ 推荐: 非显而易见的实现细节
+// 注意: 这里使用深拷贝,避免并发修改原始路由列表
+routes := make([]*port.Route, len(original))
+copy(routes, original)
 
-// ✅ 正确: 只使用定义的参数
-ant_cc_read(filePath="test.go", offset=10, limit=50)
+// ❌ 避免: 明显多余的注释
+i++  // 自增
+if err != nil {  // 如果有错误
+	return err  // 返回错误
+}
 ```
-
-### 违规后果
-
-- 工具调用失败,浪费 API 调用次数
-- 延长任务完成时间
-- 可能产生不可预测的行为
-
-**牢记**: 工具文档是权威来源,永远以文档为准!
 
 ---
 
-## 📝 提交指南
+## 🏗️ Clean Architecture 架构
 
-### 提交消息格式
+### 核心原则
+- **依赖方向**: 外层依赖内层,内层对外部无感知
+- **依赖倒置**: 内层定义接口(port),外层实现接口
+- **业务逻辑隔离**: 核心业务逻辑在 domain 和 application 层,与框架解耦
+
+### 分层结构
+
 ```
-类型(范围): 简短描述
-
-详细说明(可选)
-
-关联问题: #123
+┌─────────────────────────────────────────────────────────┐
+│  Infrastructure Layer (基础设施层)                       │
+│  - HTTP 服务器、配置文件加载、Zap 日志实现              │
+│  - 依赖: adapter/, application/, domain/                │
+└─────────────────────────────────────────────────────────┘
+                        ⬇️ 依赖
+┌─────────────────────────────────────────────────────────┐
+│  Adapter Layer (适配器层)                                │
+│  - HTTP 处理器、中间件、配置适配器、后端客户端           │
+│  - 依赖: application/, domain/                          │
+└─────────────────────────────────────────────────────────┘
+                        ⬇️ 依赖
+┌─────────────────────────────────────────────────────────┐
+│  Application Layer (应用层)                              │
+│  - 用例编排(ProxyRequestUseCase, RouteResolveUseCase)  │
+│  - 应用服务(协议转换、请求验证、响应转换)                │
+│  - 依赖: domain/                                        │
+└─────────────────────────────────────────────────────────┘
+                        ⬇️ 依赖
+┌─────────────────────────────────────────────────────────┐
+│  Domain Layer (领域层) - 核心业务规则                     │
+│  - 实体(Backend, Request, Response)                     │
+│  - 端口接口(Logger, ConfigProvider, BackendClient)     │
+│  - 领域服务(LoadBalancer, FallbackStrategy)            │
+│  - 无外部依赖                                           │
+└─────────────────────────────────────────────────────────┘
 ```
 
-**类型**: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`  
-**范围**: `proxy`, `router`, `config`, `middleware`, `logging`
+### 目录对照
 
-### 示例
-```
-fix(proxy): 修复 HTTP 客户端超时配置未生效
+| 目录 | 职责 | 示例 |
+|------|------|------|
+| `domain/entity/` | 领域实体(业务对象) | Backend, Request, Response |
+| `domain/port/` | 端口接口(依赖倒置) | Logger, ConfigProvider, BackendClient |
+| `domain/service/` | 领域服务(核心业务逻辑) | LoadBalancer, FallbackStrategy, CooldownManager |
+| `domain/error/` | 错误类型定义 | LLMProxyError, ErrorCode |
+| `application/usecase/` | 用例编排 | ProxyRequestUseCase, RouteResolveUseCase |
+| `application/service/` | 应用服务 | ProtocolConverter, RequestValidator |
+| `adapter/http/` | HTTP 适配器 | ProxyHandler, HealthHandler, Middleware |
+| `adapter/config/` | 配置适配器 | ConfigAdapter, BackendRepository |
+| `adapter/backend/` | 后端客户端适配器 | HTTPClient, BackendClientAdapter |
+| `adapter/logging/` | 日志适配器 | ZapLoggerAdapter |
+| `infrastructure/` | 基础设施实现 | HTTP Server, Config Loader, Zap Logger |
 
-- 应用 TimeoutConfig 到 http.Transport
-- 添加连接池配置 (MaxIdleConns=100)
-- 设置 IdleConnTimeout 为 90 秒
+### 依赖注入示例
 
-关联问题: #42
+```go
+// main.go - 组装所有依赖
+func main() {
+	// 1. 基础设施层
+	configMgr, _ := infra_config.NewManager("config.yaml")
+	infra_logging.InitLogger(configMgr.Get())
+	
+	// 2. 适配器层
+	configAdapter := config_adapter.NewConfigAdapter(configMgr)
+	proxyLogger := logging_adapter.NewZapLoggerAdapter(infra_logging.ProxySugar)
+	httpClient := infra_http.NewClient(clientConfig)
+	backendClient := backend_adapter.NewBackendClientAdapter(httpClient, proxyLogger)
+	
+	// 3. 领域服务
+	cooldownMgr := domain_service.NewCooldownManager(5 * time.Minute)
+	loadBalancer := domain_service.NewLoadBalancer()
+	fallbackStrategy := domain_service.NewFallbackStrategy(configAdapter, cooldownMgr)
+	
+	// 4. 应用层
+	protocolConverter := service.NewProtocolConverter()
+	routeResolver := usecase.NewRouteResolveUseCase(configAdapter, loadBalancer)
+	retryStrategy := usecase.NewRetryStrategy(fallbackStrategy, configAdapter)
+	
+	proxyUseCase := usecase.NewProxyRequestUseCase(
+		backendClient,
+		routeResolver,
+		retryStrategy,
+		protocolConverter,
+		configAdapter,
+		proxyLogger,
+		&MockMetricsProvider{},
+	)
+	
+	// 5. HTTP 层
+	proxyHandler := http_adapter.NewProxyHandler(proxyUseCase, proxyLogger, configAdapter)
+	mux := http.NewServeMux()
+	mux.Handle("/v1/chat/completions", proxyHandler)
+	
+	// 6. 启动服务器
+	server := infra_http.NewServer(cfg.Server.Port, mux)
+	server.Start()
+}
 ```
 
 ---
 
 ## 🧪 测试编写指南
 
+### 测试文件命名
+- 测试文件: `<原文件名>_test.go` (如 `backend.go` → `backend_test.go`)
+- 放置位置: 与被测文件同目录
+- 包名: 与被测包相同 (白盒测试)
+
+### 测试函数命名
+
+**规范**: `Test<功能>_<场景>` 或 `Test<类型>_<方法>_<场景>`
+
 ```go
-// 测试命名: Test<功能>_<场景>
-func TestDetector_MatchStatusCode_Wildcard(t *testing.T) {
-	// 1. 准备测试数据
-	d := newDetectorWithConfig([]string{"4xx", "5xx"}, nil)
-	
-	// 2. 定义测试用例 (表格驱动测试)
+// ✅ 推荐: 清晰的测试名称
+func TestBackend_New(t *testing.T)                          // 测试 Backend 构造函数
+func TestBackendURL_NewBackendURL_InvalidURL(t *testing.T)  // 测试 URL 验证失败场景
+func TestRateLimiter_Allow_BurstFactor(t *testing.T)        // 测试限流器的突发因子
+func TestProxyRequestUseCase_ValidateRequest_EmptyModel(t *testing.T)  // 测试用例验证逻辑
+```
+
+### 表格驱动测试(推荐)
+
+```go
+func TestBackendURL_NewBackendURL(t *testing.T) {
 	tests := []struct {
-		name     string
-		code     int
-		expected bool
+		name        string    // 测试用例名称
+		input       string    // 输入参数
+		expectError bool      // 是否期望错误
+		expected    string    // 期望输出
 	}{
-		{"400 Bad Request", 400, true},
-		{"500 Internal Error", 500, true},
-		{"200 OK", 200, false},
+		{
+			name:        "完整的 HTTPS URL",
+			input:       "https://api.example.com/v1",
+			expectError: false,
+			expected:    "https://api.example.com/v1",
+		},
+		{
+			name:        "自动添加 HTTPS",
+			input:       "api.example.com",
+			expectError: false,
+			expected:    "https://api.example.com",
+		},
+		{
+			name:        "无效的 URL",
+			input:       "://invalid",
+			expectError: true,
+			expected:    "",
+		},
 	}
 	
-	// 3. 遍历执行
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := d.ShouldFallback(tt.code, "")
-			if got != tt.expected {
-				t.Errorf("期望 %v, 实际 %v", tt.expected, got)
+			url, err := NewBackendURL(tt.input)
+			
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("期望错误,但成功返回: %v", url)
+				}
+				return
+			}
+			
+			if err != nil {
+				t.Fatalf("意外错误: %v", err)
+			}
+			
+			if url.String() != tt.expected {
+				t.Errorf("期望 %q, 实际 %q", tt.expected, url.String())
 			}
 		})
 	}
+}
+```
+
+### Mock 对象规范
+
+```go
+// Mock 对象命名: Mock<接口名>
+type MockBackendClient struct {
+	sendFunc func(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*entity.Response, error)
+}
+
+func (m *MockBackendClient) Send(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*entity.Response, error) {
+	if m.sendFunc != nil {
+		return m.sendFunc(ctx, req, backend, backendModel)
+	}
+	return nil, nil
+}
+
+// 使用示例
+func TestProxyRequestUseCase_Execute(t *testing.T) {
+	mockClient := &MockBackendClient{
+		sendFunc: func(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*entity.Response, error) {
+			// 模拟成功响应
+			return entity.NewResponseBuilder().
+				WithModel(req.Model()).
+				Build(), nil
+		},
+	}
+	
+	uc := usecase.NewProxyRequestUseCase(mockClient, ...)
+	resp, err := uc.Execute(context.Background(), testRequest)
+	
+	if err != nil {
+		t.Fatalf("意外错误: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("响应不应为 nil")
+	}
+}
+```
+
+---
+
+## 🔍 关键设计模式
+
+### 1. Builder 模式(构建复杂对象)
+
+```go
+// 用于构建 Request, Response, Backend 等复杂对象
+req := entity.NewRequestBuilder().
+	WithRequestID(reqID).
+	WithModel(model).
+	WithMessages(messages).
+	WithStream(true).
+	Build()
+
+resp := entity.NewResponseBuilder().
+	WithModel(model).
+	WithChoices(choices).
+	WithUsage(usage).
+	Build()
+```
+
+### 2. Strategy 模式(可替换算法)
+
+```go
+// FallbackStrategy 封装故障转移逻辑
+type FallbackStrategy interface {
+	ShouldRetry(statusCode int, body string) bool
+	GetBackoffDelay(attempt int) time.Duration
+	GetMaxRetries() int
+}
+
+// 在用例中注入策略
+type ProxyRequestUseCase struct {
+	retryStrategy RetryStrategy  // 可替换的重试策略
+}
+```
+
+### 3. Repository 模式(数据访问抽象)
+
+```go
+// domain/port/backend_repository.go
+type BackendRepository interface {
+	GetAll() []*entity.Backend
+	GetByName(name string) (*entity.Backend, error)
+	GetEnabled() []*entity.Backend
+}
+
+// adapter/config/adapter.go 实现
+type BackendRepositoryImpl struct {
+	configProvider port.ConfigProvider
+}
+
+func (r *BackendRepositoryImpl) GetByName(name string) (*entity.Backend, error) {
+	// 从配置中查找后端
+	return r.configProvider.GetBackend(name)
+}
+```
+
+---
+
+## ⚙️ 配置热重载
+
+配置文件(`config.yaml`)支持热重载,无需重启服务:
+
+```go
+// infrastructure/config/config.go
+type Manager struct {
+	// 每次 Get() 检查文件修改时间
+	// 检测到变化时自动重新加载
+}
+
+// main.go 注册日志配置变更回调
+infra_config.LoggingConfigChangedFunc = func(c *infra_config.Config) error {
+	infra_logging.ShutdownLogger()
+	return infra_logging.InitLogger(c)
 }
 ```
 
@@ -414,8 +634,45 @@ func TestDetector_MatchStatusCode_Wildcard(t *testing.T) {
 - [Go 代码审查建议](https://github.com/golang/go/wiki/CodeReviewComments)
 - [Effective Go](https://go.dev/doc/effective_go)
 - [Uber Go 风格指南](https://github.com/uber-go/guide/blob/master/style.md)
+- [Clean Architecture - Uncle Bob](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
+- 项目设计文档: `docs/plans/2026-01-22-clean-arch-design.md`
 
 ---
 
-**最后更新**: 2026-01-18  
-**项目版本**: 根据 git tag 自动生成
+## 📝 Git 提交规范
+
+### 提交消息格式
+```
+<类型>(<范围>): <简短描述>
+
+<详细说明(可选)>
+
+关联问题: #123
+```
+
+**类型**:
+- `feat`: 新功能
+- `fix`: 错误修复
+- `refactor`: 重构(不改变功能)
+- `test`: 测试相关
+- `docs`: 文档更新
+- `chore`: 构建/工具配置
+
+**范围**: `domain`, `application`, `adapter`, `infrastructure`, `http`, `config`
+
+### 示例
+```
+feat(adapter/http): 添加并发限流中间件
+
+- 实现基于 channel 的信号量机制
+- 支持队列超时配置
+- 添加单元测试覆盖
+
+关联问题: #42
+```
+
+---
+
+**最后更新**: 2026-01-23  
+**项目版本**: 根据 git tag 自动生成  
+**架构版本**: Clean Architecture v1.0
