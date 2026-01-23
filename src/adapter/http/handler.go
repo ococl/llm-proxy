@@ -141,7 +141,7 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 	defer cancel()
 
 	if err := h.proxyUseCase.ExecuteStreaming(ctx, req, streamHandler); err != nil {
-		h.logger.Error("流式请求失败",
+		h.logger.Error("请求失败",
 			port.String("req_id", req.ID().String()),
 			port.String("model", req.Model().String()),
 			port.Error(err),
@@ -204,7 +204,8 @@ func (h *ProxyHandler) buildDomainRequest(
 		Model(entity.NewModelAlias(modelAlias)).
 		Messages(messages).
 		Context(ctx).
-		Headers(extractForwardHeaders(clientHeaders))
+		Headers(extractForwardHeaders(clientHeaders)).
+		ClientProtocol(string(clientProtocol))
 
 	if maxTokens, ok := reqBody["max_tokens"].(float64); ok {
 		builder.MaxTokens(int(maxTokens))

@@ -86,7 +86,7 @@ func (lb *LoadBalancer) Select(routes []*port.Route) *entity.Backend {
 	}
 
 	if backend != nil {
-		lb.logger.Debug("后端选择完成",
+		lb.logger.Debug("后端选择",
 			port.String("backend", backend.Name()),
 			port.String(FieldSelectionMethod, string(lb.strategy)))
 	} else {

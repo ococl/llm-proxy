@@ -83,20 +83,21 @@ type ToolFunction struct {
 
 // Request represents a chat completion request.
 type Request struct {
-	id            RequestID
-	model         ModelAlias
-	messages      []Message
-	maxTokens     int
-	temperature   float64
-	topP          float64
-	stream        bool
-	stop          []string
-	tools         []Tool
-	toolChoice    any
-	user          string
-	ctx           context.Context
-	streamHandler func(chunk []byte) error
-	headers       map[string][]string // Client headers to forward to backend
+	id             RequestID
+	model          ModelAlias
+	messages       []Message
+	maxTokens      int
+	temperature    float64
+	topP           float64
+	stream         bool
+	stop           []string
+	tools          []Tool
+	toolChoice     any
+	user           string
+	ctx            context.Context
+	streamHandler  func(chunk []byte) error
+	headers        map[string][]string // Client headers to forward to backend
+	clientProtocol string              // Client protocol (openai/anthropic)
 }
 
 // NewRequest creates a new request.
@@ -184,6 +185,11 @@ func (r *Request) Headers() map[string][]string {
 	return r.headers
 }
 
+// ClientProtocol returns the client protocol.
+func (r *Request) ClientProtocol() string {
+	return r.clientProtocol
+}
+
 // WithModel creates a new request with a different model.
 func (r *Request) WithModel(model ModelAlias) *Request {
 	newReq := *r
@@ -213,20 +219,21 @@ func (r *Request) String() string {
 
 // RequestBuilder is a builder for creating Request entities.
 type RequestBuilder struct {
-	id            RequestID
-	model         ModelAlias
-	messages      []Message
-	maxTokens     int
-	temperature   float64
-	topP          float64
-	stream        bool
-	stop          []string
-	tools         []Tool
-	toolChoice    any
-	user          string
-	ctx           context.Context
-	streamHandler func(chunk []byte) error
-	headers       map[string][]string
+	id             RequestID
+	model          ModelAlias
+	messages       []Message
+	maxTokens      int
+	temperature    float64
+	topP           float64
+	stream         bool
+	stop           []string
+	tools          []Tool
+	toolChoice     any
+	user           string
+	ctx            context.Context
+	streamHandler  func(chunk []byte) error
+	headers        map[string][]string
+	clientProtocol string
 }
 
 // NewRequestBuilder creates a new request builder.
@@ -322,6 +329,11 @@ func (rb *RequestBuilder) Headers(headers map[string][]string) *RequestBuilder {
 	return rb
 }
 
+func (rb *RequestBuilder) ClientProtocol(protocol string) *RequestBuilder {
+	rb.clientProtocol = protocol
+	return rb
+}
+
 // Build creates the request entity.
 func (rb *RequestBuilder) Build() (*Request, error) {
 	if rb.id.IsEmpty() {
@@ -334,20 +346,21 @@ func (rb *RequestBuilder) Build() (*Request, error) {
 		return nil, fmt.Errorf("messages are required")
 	}
 	return &Request{
-		id:            rb.id,
-		model:         rb.model,
-		messages:      rb.messages,
-		maxTokens:     rb.maxTokens,
-		temperature:   rb.temperature,
-		topP:          rb.topP,
-		stream:        rb.stream,
-		stop:          rb.stop,
-		tools:         rb.tools,
-		toolChoice:    rb.toolChoice,
-		user:          rb.user,
-		ctx:           rb.ctx,
-		streamHandler: rb.streamHandler,
-		headers:       rb.headers,
+		id:             rb.id,
+		model:          rb.model,
+		messages:       rb.messages,
+		maxTokens:      rb.maxTokens,
+		temperature:    rb.temperature,
+		topP:           rb.topP,
+		stream:         rb.stream,
+		stop:           rb.stop,
+		tools:          rb.tools,
+		toolChoice:     rb.toolChoice,
+		user:           rb.user,
+		ctx:            rb.ctx,
+		streamHandler:  rb.streamHandler,
+		headers:        rb.headers,
+		clientProtocol: rb.clientProtocol,
 	}, nil
 }
 
