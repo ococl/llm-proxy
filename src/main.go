@@ -23,9 +23,9 @@ import (
 	"llm-proxy/config"
 	"llm-proxy/domain/entity"
 	domain_service "llm-proxy/domain/service"
+	infra_http "llm-proxy/infrastructure/http"
 	"llm-proxy/logging"
 	"llm-proxy/middleware"
-	"llm-proxy/proxy"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
@@ -90,8 +90,20 @@ func main() {
 		}
 	}()
 
-	proxy.InitHTTPClient(cfg)
-	httpClient := backend_adapter.NewHTTPClient(proxy.GetHTTPClient())
+	clientConfig := infra_http.ClientConfig{
+		ConnectTimeout:        cfg.Timeout.GetConnectTimeout(),
+		ResponseHeaderTimeout: 3 * time.Minute,
+		TotalTimeout:          cfg.Timeout.GetTotalTimeout(),
+		MaxConnsPerHost:       calculateMaxConns(len(cfg.Backends)),
+		MaxIdleConns:          20,
+		KeepAlive:             5 * time.Minute,
+		IdleConnTimeout:       10 * time.Minute,
+	}
+	if clientConfig.TotalTimeout < 15*time.Minute {
+		clientConfig.TotalTimeout = 15 * time.Minute
+	}
+
+	httpClient := backend_adapter.NewHTTPClient(infra_http.NewHTTPClient(clientConfig))
 	backendClient := backend_adapter.NewBackendClientAdapter(httpClient)
 
 	loadBalancer := domain_service.NewLoadBalancer(domain_service.StrategyRandom)
@@ -264,6 +276,17 @@ func shouldUseColor() bool {
 		return false
 	}
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
+}
+
+func calculateMaxConns(backendCount int) int {
+	maxConns := backendCount * 5
+	if maxConns < 10 {
+		return 10
+	}
+	if maxConns > 50 {
+		return 50
+	}
+	return maxConns
 }
 
 type NopMetricsProvider struct{}
