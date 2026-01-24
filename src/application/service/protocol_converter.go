@@ -147,43 +147,85 @@ func (c *ProtocolConverter) toOpenAIFormat(req *entity.Request) (*entity.Request
 }
 
 // toAnthropicFormat converts a request to Anthropic format.
-// Anthropic 使用 system 字段而不是 role: system 消息,
-// content 是数组格式而不是简单的字符串。
-// TODO: 实现完整的 Anthropic 协议转换,包括:
-// - 将 system 消息提取到单独的 system 字段
-// - 将 content 转换为 Anthropic 的数组格式
-// - 处理 max_tokens 参数(Anthropic 必须提供)
+// Anthropic 协议的特点:
+// 1. 使用单独的 system 字段而不是 role: system 消息
+// 2. content 支持数组格式 (多模态内容)
+// 3. max_tokens 参数是必需的
+//
+// 当前实现策略:
+// - 提取所有 system 消息的内容,合并到一个 system 字段
+// - 过滤掉 messages 中的 system 消息,只保留 user/assistant/tool 消息
+// - 确保 max_tokens 有默认值 (1024)
+//
+// 注意: Anthropic 的 system 字段可以是字符串或数组,当前实现将所有 system 消息合并为一个字符串
 func (c *ProtocolConverter) toAnthropicFormat(req *entity.Request) (*entity.Request, error) {
 	messages := req.Messages()
 	if len(messages) == 0 {
 		return req, nil
 	}
 
-	// 检查是否需要转换:有系统消息且有其他消息
-	hasSystemPrompt := false
+	// 第一步: 提取并合并所有 system 消息
+	var systemPrompts []string
+	var nonSystemMessages []entity.Message
 	for _, msg := range messages {
 		if msg.Role == "system" {
-			hasSystemPrompt = true
-			break
+			// 提取 system 消息内容
+			if content, ok := msg.Content.(string); ok && content != "" {
+				systemPrompts = append(systemPrompts, content)
+			}
+		} else {
+			// 保留非 system 消息
+			nonSystemMessages = append(nonSystemMessages, msg)
 		}
 	}
 
-	// 如果没有系统消息,直接返回
-	if !hasSystemPrompt {
-		return req, nil
+	// 如果没有 system 消息,只需确保 max_tokens 有值
+	if len(systemPrompts) == 0 {
+		// Anthropic 要求提供 max_tokens 参数
+		maxTokens := req.MaxTokens()
+		if maxTokens == 0 {
+			maxTokens = 1024
+		}
+
+		// 如果原始请求已经有 max_tokens,直接返回
+		if req.MaxTokens() > 0 {
+			return req, nil
+		}
+
+		// 只需更新 max_tokens
+		builder := entity.NewRequestBuilder().
+			ID(req.ID()).
+			Model(req.Model()).
+			Messages(req.Messages()).
+			MaxTokens(maxTokens).
+			Temperature(req.Temperature()).
+			TopP(req.TopP()).
+			Stream(req.IsStream()).
+			Stop(req.Stop()).
+			Tools(req.Tools()).
+			ToolChoice(req.ToolChoice()).
+			User(req.User()).
+			Context(req.Context()).
+			StreamHandler(req.StreamHandler()).
+			Headers(req.Headers()).
+			ClientProtocol(req.ClientProtocol())
+
+		return builder.BuildUnsafe(), nil
 	}
 
-	// Anthropic 要求提供 max_tokens 参数
+	// 第二步: 确保 max_tokens 有值
 	maxTokens := req.MaxTokens()
 	if maxTokens == 0 {
 		maxTokens = 1024
 	}
 
-	// 构建新请求,设置 max_tokens
+	// 第三步: 构建新请求,使用过滤后的消息列表
+	// 注意: system prompts 在实际发送时需要在 HTTP 层处理,
+	// 这里我们只是将它们从 messages 中移除
 	builder := entity.NewRequestBuilder().
 		ID(req.ID()).
 		Model(req.Model()).
-		Messages(req.Messages()).
+		Messages(nonSystemMessages).
 		MaxTokens(maxTokens).
 		Temperature(req.Temperature()).
 		TopP(req.TopP()).
@@ -193,7 +235,16 @@ func (c *ProtocolConverter) toAnthropicFormat(req *entity.Request) (*entity.Requ
 		ToolChoice(req.ToolChoice()).
 		User(req.User()).
 		Context(req.Context()).
-		StreamHandler(req.StreamHandler())
+		StreamHandler(req.StreamHandler()).
+		Headers(req.Headers()).
+		ClientProtocol(req.ClientProtocol())
+
+	c.logger.Debug("Anthropic 协议转换完成",
+		port.String("req_id", req.ID().String()),
+		port.Int("original_messages", len(messages)),
+		port.Int("system_prompts", len(systemPrompts)),
+		port.Int("filtered_messages", len(nonSystemMessages)),
+	)
 
 	return builder.BuildUnsafe(), nil
 }

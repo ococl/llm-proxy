@@ -64,21 +64,94 @@ func TestProtocolConverter_ToBackend_WithSystemPrompt(t *testing.T) {
 func TestProtocolConverter_ToBackend_Anthropic(t *testing.T) {
 	converter := NewProtocolConverter(nil, &port.NopLogger{})
 
-	req := entity.NewRequest(
-		entity.NewRequestID("test-456"),
-		entity.NewModelAlias("claude-3"),
-		[]entity.Message{
-			entity.NewMessage("user", "Test message"),
-		},
-	)
+	t.Run("filters out system messages", func(t *testing.T) {
+		req := entity.NewRequest(
+			entity.NewRequestID("test-456"),
+			entity.NewModelAlias("claude-3"),
+			[]entity.Message{
+				entity.NewMessage("system", "You are a helpful assistant."),
+				entity.NewMessage("user", "Test message"),
+			},
+		)
 
-	result, err := converter.ToBackend(req, types.ProtocolAnthropic)
-	if err != nil {
-		t.Errorf("ToBackend returned unexpected error: %v", err)
-	}
-	if result != req {
-		t.Error("ToBackend should pass through for Anthropic protocol")
-	}
+		result, err := converter.ToBackend(req, types.ProtocolAnthropic)
+		if err != nil {
+			t.Errorf("ToBackend returned unexpected error: %v", err)
+		}
+
+		messages := result.Messages()
+		if len(messages) != 1 {
+			t.Errorf("Expected 1 message after filtering system, got %d", len(messages))
+		}
+
+		if messages[0].Role != "user" {
+			t.Errorf("Expected first message to be user, got %s", messages[0].Role)
+		}
+	})
+
+	t.Run("ensures max_tokens is set", func(t *testing.T) {
+		req := entity.NewRequest(
+			entity.NewRequestID("test-457"),
+			entity.NewModelAlias("claude-3"),
+			[]entity.Message{
+				entity.NewMessage("system", "System prompt"),
+				entity.NewMessage("user", "Hello"),
+			},
+		)
+
+		result, err := converter.ToBackend(req, types.ProtocolAnthropic)
+		if err != nil {
+			t.Errorf("ToBackend returned unexpected error: %v", err)
+		}
+
+		if result.MaxTokens() == 0 {
+			t.Error("Expected max_tokens to be set for Anthropic protocol")
+		}
+
+		if result.MaxTokens() != 1024 {
+			t.Errorf("Expected default max_tokens=1024, got %d", result.MaxTokens())
+		}
+	})
+
+	t.Run("preserves existing max_tokens if set", func(t *testing.T) {
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-458")).
+			Model(entity.NewModelAlias("claude-3")).
+			Messages([]entity.Message{
+				entity.NewMessage("user", "Test"),
+			}).
+			MaxTokens(2048).
+			BuildUnsafe()
+
+		result, err := converter.ToBackend(req, types.ProtocolAnthropic)
+		if err != nil {
+			t.Errorf("ToBackend returned unexpected error: %v", err)
+		}
+
+		if result.MaxTokens() != 2048 {
+			t.Errorf("Expected max_tokens=2048, got %d", result.MaxTokens())
+		}
+	})
+
+	t.Run("passes through when no system messages", func(t *testing.T) {
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-459")).
+			Model(entity.NewModelAlias("claude-3")).
+			Messages([]entity.Message{
+				entity.NewMessage("user", "Test"),
+			}).
+			MaxTokens(1000).
+			BuildUnsafe()
+
+		result, err := converter.ToBackend(req, types.ProtocolAnthropic)
+		if err != nil {
+			t.Errorf("ToBackend returned unexpected error: %v", err)
+		}
+
+		if result != req {
+			t.Error("Expected pass-through when no system messages and max_tokens is set")
+		}
+	})
 }
 
 func TestProtocolConverter_FromBackend_PassThrough(t *testing.T) {
