@@ -101,10 +101,10 @@ func (c *ResponseConverter) Convert(respBody []byte, model string) (*entity.Resp
 		return nil, nil
 	}
 
-	// 提取文本内容
+	// 提取文本内容（只取第一个候选）
 	var textContent strings.Builder
-	for _, candidate := range googleResp.Candidates {
-		for _, part := range candidate.Content.Parts {
+	if len(googleResp.Candidates) > 0 {
+		for _, part := range googleResp.Candidates[0].Content.Parts {
 			textContent.WriteString(part.Text)
 		}
 	}
@@ -128,16 +128,22 @@ func (c *ResponseConverter) Convert(respBody []byte, model string) (*entity.Resp
 		)
 	}
 
+	// 确定使用的模型名称
+	finalModel := model
+	if finalModel == "" {
+		finalModel = googleResp.Model
+	}
+
 	// 构建响应
 	response := entity.NewResponse(
 		googleResp.ID,
-		model,
+		finalModel,
 		[]entity.Choice{choice},
 		usage,
 	)
 
 	c.logger.Debug("Google Vertex AI 响应转换完成",
-		port.String("model", model),
+		port.String("model", finalModel),
 		port.Int("candidates", len(googleResp.Candidates)),
 		port.String("stop_reason", stopReason),
 	)

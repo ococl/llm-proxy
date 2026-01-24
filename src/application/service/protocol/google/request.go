@@ -99,6 +99,9 @@ func (c *RequestConverter) hasNonTextContent(messages []entity.Message) bool {
 		case string:
 			// 文本内容，不需要转换
 			continue
+		case nil:
+			// nil 内容，不需要转换
+			continue
 		default:
 			// 非字符串内容（如数组），需要转换
 			return true

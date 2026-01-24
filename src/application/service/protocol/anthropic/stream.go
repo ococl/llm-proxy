@@ -32,7 +32,7 @@ const (
 type AnthropicStreamChunk struct {
 	Type       string                 `json:"type"`
 	Index      int                    `json:"index,omitempty"`
-	Content    []interface{}          `json:"content,omitempty"`
+	Content    interface{}            `json:"content,omitempty"` // content_block_start 使用对象
 	Delta      map[string]interface{} `json:"delta,omitempty"`
 	StopReason string                 `json:"stop_reason,omitempty"`
 	Usage      map[string]int         `json:"usage,omitempty"`
