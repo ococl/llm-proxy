@@ -77,6 +77,11 @@ func (m Message) IsToolResult() bool {
 	return m.ToolCallID != ""
 }
 
+// IsZero returns true if the message is a zero value.
+func (m Message) IsZero() bool {
+	return m.Role == "" && m.Content == nil && len(m.ToolCalls) == 0 && m.ToolCallID == ""
+}
+
 // ToolCall represents a tool call from the model.
 type ToolCall struct {
 	ID       string

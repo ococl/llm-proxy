@@ -187,7 +187,7 @@
 | 403 | `permission` | 权限不足 |
 | 404 | `not_found` | 资源不存在 |
 | 429 | `rate_limit` | 速率限制 |
-| 500 | `internal_server_error` | 服务器内部错误 |
+| 500 | `overloaded_error` | 服务器过载（Anthropic 特有） |
 
 ### 详细错误示例
 

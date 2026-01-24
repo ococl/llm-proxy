@@ -79,9 +79,26 @@ type GoogleSafetyRating struct {
 
 // GoogleUsageMetadata 使用元数据。
 type GoogleUsageMetadata struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
+	PromptTokenCount            int                      `json:"promptTokenCount"`
+	CandidatesTokenCount        int                      `json:"candidatesTokenCount"`
+	TotalTokenCount             int                      `json:"totalTokenCount"`
+	PromptTokenCountDetails     *GoogleTokenCountDetails `json:"promptTokenCountDetails,omitempty"`
+	CandidatesTokenCountDetails *GoogleTokenCountDetails `json:"candidatesTokenCountDetails,omitempty"`
+}
+
+// GoogleTokenCountDetails Token 计数详细信息。
+type GoogleTokenCountDetails struct {
+	CachedContentTokenCount int `json:"cachedContentTokenCount,omitempty"`
+}
+
+// GoogleResponseMetadata 响应元数据。
+type GoogleResponseMetadata struct {
+	ModelVersion string `json:"modelVersion,omitempty"`
+}
+
+// GoogleTurnMetrics 轮次指标。
+type GoogleTurnMetrics struct {
+	TurnTokenCount int `json:"turnTokenCount,omitempty"`
 }
 
 // Convert 将 Google Vertex AI 响应转换为标准格式。
@@ -169,6 +186,15 @@ func (c *ResponseConverter) Convert(respBody []byte, model string) (*entity.Resp
 		port.String("stop_reason", stopReason),
 		port.Bool("has_safety_ratings", hasSafetyRatings),
 	)
+
+	// 记录缓存使用信息
+	if googleResp.UsageMetadata != nil && googleResp.UsageMetadata.PromptTokenCountDetails != nil {
+		if cachedTokens := googleResp.UsageMetadata.PromptTokenCountDetails.CachedContentTokenCount; cachedTokens > 0 {
+			c.logger.Debug("Google Vertex AI 响应包含缓存使用信息",
+				port.Int("cached_content_tokens", cachedTokens),
+			)
+		}
+	}
 
 	return response, nil
 }

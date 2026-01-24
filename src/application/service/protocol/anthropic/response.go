@@ -97,10 +97,21 @@ type AnthropicSearchResult struct {
 
 // AnthropicUsage Anthropic 使用统计。
 type AnthropicUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	InputTokens              int                    `json:"input_tokens"`
+	OutputTokens             int                    `json:"output_tokens"`
+	CacheCreationInputTokens int                    `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int                    `json:"cache_read_input_tokens,omitempty"`
+	InputTokensDetails       *AnthropicUsageDetails `json:"input_tokens_details,omitempty"`
+}
+
+// AnthropicUsageDetails 使用统计详细信息。
+type AnthropicUsageDetails struct {
+	CacheTokens int `json:"cache_creation_input_tokens,omitempty"`
+}
+
+// AnthropicResponseMetadata 响应元数据。
+type AnthropicResponseMetadata struct {
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // NewResponseConverter 创建 Anthropic 响应转换策略实例.
@@ -193,6 +204,14 @@ func (c *ResponseConverter) Convert(respBody []byte, model string) (*entity.Resp
 			port.Bool("has_search_result", hasSearchResult),
 			port.Bool("has_image", hasImage),
 			port.Bool("has_document", hasDocument),
+		)
+	}
+
+	// 记录缓存使用信息
+	if anthropicResp.Usage.CacheCreationInputTokens > 0 || anthropicResp.Usage.CacheReadInputTokens > 0 {
+		c.logger.Debug("Anthropic 响应包含缓存使用信息",
+			port.Int("cache_creation_tokens", anthropicResp.Usage.CacheCreationInputTokens),
+			port.Int("cache_read_tokens", anthropicResp.Usage.CacheReadInputTokens),
 		)
 	}
 

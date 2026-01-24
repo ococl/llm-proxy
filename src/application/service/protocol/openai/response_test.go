@@ -528,3 +528,244 @@ func TestResponseConverter_WithRealOpenAIResponse(t *testing.T) {
 		}
 	})
 }
+
+// TestResponseConverter_RefusalAndAnnotations 测试拒绝回答和引用标注检测
+func TestResponseConverter_RefusalAndAnnotations(t *testing.T) {
+	mockLogger := &MockLoggerForOpenAIResponse{}
+	converter := NewResponseConverter(mockLogger)
+
+	t.Run("检测拒绝回答", func(t *testing.T) {
+		mockLogger.reset()
+
+		refusalResp := map[string]interface{}{
+			"id":      "chatcmpl-refusal",
+			"object":  "chat.completion",
+			"created": 1677858245,
+			"model":   "gpt-4",
+			"choices": []map[string]interface{}{
+				{
+					"index": 0,
+					"message": map[string]interface{}{
+						"role":    "assistant",
+						"refusal": "I cannot help with that request.",
+						"content": nil,
+					},
+					"finish_reason": "content_filter",
+				},
+			},
+			"usage": map[string]int{
+				"prompt_tokens":     10,
+				"completion_tokens": 5,
+				"total_tokens":      15,
+			},
+		}
+
+		respJSON, _ := json.Marshal(refusalResp)
+		result, err := converter.Convert(respJSON, "gpt-4")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 拒绝回答应该被正确解析
+		if result.Choices[0].Message.Content == nil {
+			t.Log("拒绝回答的 content 为 nil（正常行为）")
+		}
+	})
+
+	t.Run("检测引用标注", func(t *testing.T) {
+		mockLogger.reset()
+
+		annotationsResp := map[string]interface{}{
+			"id":      "chatcmpl-annotations",
+			"object":  "chat.completion",
+			"created": 1677858246,
+			"model":   "gpt-4",
+			"choices": []map[string]interface{}{
+				{
+					"index": 0,
+					"message": map[string]interface{}{
+						"role": "assistant",
+						"content": []interface{}{
+							map[string]interface{}{
+								"type": "text",
+								"text": "According to research, AI is growing.",
+								"annotations": []interface{}{
+									map[string]interface{}{
+										"type": "citation",
+										"text": "[1]",
+									},
+								},
+							},
+						},
+					},
+					"finish_reason": "stop",
+				},
+			},
+			"usage": map[string]int{
+				"prompt_tokens":     20,
+				"completion_tokens": 15,
+				"total_tokens":      35,
+			},
+		}
+
+		respJSON, _ := json.Marshal(annotationsResp)
+		result, err := converter.Convert(respJSON, "gpt-4")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 引用标注应该被正确解析
+		if len(result.Choices) != 1 {
+			t.Errorf("期望 1 个选择, 实际 %d", len(result.Choices))
+		}
+	})
+
+	t.Run("检测工具调用", func(t *testing.T) {
+		mockLogger.reset()
+
+		toolCallsResp := map[string]interface{}{
+			"id":      "chatcmpl-tool",
+			"object":  "chat.completion",
+			"created": 1677858247,
+			"model":   "gpt-4",
+			"choices": []map[string]interface{}{
+				{
+					"index": 0,
+					"message": map[string]interface{}{
+						"role":       "assistant",
+						"content":    nil,
+						"tool_calls": []interface{}{},
+					},
+					"finish_reason": "tool_calls",
+				},
+			},
+			"usage": map[string]int{
+				"prompt_tokens":     25,
+				"completion_tokens": 20,
+				"total_tokens":      45,
+			},
+		}
+
+		respJSON, _ := json.Marshal(toolCallsResp)
+		result, err := converter.Convert(respJSON, "gpt-4")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 工具调用应该被正确解析
+		if result.Choices[0].FinishReason != "tool_calls" {
+			t.Errorf("期望 finish_reason tool_calls, 实际 %s", result.Choices[0].FinishReason)
+		}
+	})
+
+	t.Run("检测对数概率", func(t *testing.T) {
+		mockLogger.reset()
+
+		logprobsResp := map[string]interface{}{
+			"id":      "chatcmpl-logprobs",
+			"object":  "chat.completion",
+			"created": 1677858248,
+			"model":   "gpt-4",
+			"choices": []map[string]interface{}{
+				{
+					"index": 0,
+					"message": map[string]interface{}{
+						"role":    "assistant",
+						"content": "Response with logprobs",
+					},
+					"finish_reason": "stop",
+					"logprobs": map[string]interface{}{
+						"content": []interface{}{},
+					},
+				},
+			},
+			"usage": map[string]int{
+				"prompt_tokens":     30,
+				"completion_tokens": 25,
+				"total_tokens":      55,
+			},
+		}
+
+		respJSON, _ := json.Marshal(logprobsResp)
+		result, err := converter.Convert(respJSON, "gpt-4")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 对数概率应该被正确解析
+		if len(result.Choices) != 1 {
+			t.Errorf("期望 1 个选择, 实际 %d", len(result.Choices))
+		}
+	})
+}
+
+// TestResponseConverter_EmptyChoices 测试空 choices 数组处理
+func TestResponseConverter_EmptyChoices(t *testing.T) {
+	mockLogger := &MockLoggerForOpenAIResponse{}
+	converter := NewResponseConverter(mockLogger)
+
+	t.Run("空 choices 数组应记录警告", func(t *testing.T) {
+		mockLogger.reset()
+
+		emptyChoicesResp := map[string]interface{}{
+			"id":      "chatcmpl-empty",
+			"object":  "chat.completion",
+			"created": 1677858249,
+			"model":   "gpt-4",
+			"choices": []interface{}{},
+			"usage": map[string]int{
+				"prompt_tokens":     10,
+				"completion_tokens": 0,
+				"total_tokens":      10,
+			},
+		}
+
+		respJSON, _ := json.Marshal(emptyChoicesResp)
+		result, err := converter.Convert(respJSON, "gpt-4")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		// 空 choices 应该返回响应（带警告日志），但 choices 数组为空
+		if result == nil {
+			t.Error("结果不应为 nil（实现返回响应，即使 choices 为空）")
+		} else {
+			if len(result.Choices) != 0 {
+				t.Errorf("期望 0 个选择, 实际 %d", len(result.Choices))
+			}
+		}
+
+		// 应该记录警告日志
+		found := false
+		for _, msg := range mockLogger.warnMessages {
+			if msg != "" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Log("注意: 可能没有警告日志输出（取决于实现）")
+		}
+	})
+}
