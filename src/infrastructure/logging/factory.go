@@ -332,6 +332,14 @@ func Init(cfg *config.Config) error {
 	loggingCfg = &cfg.Logging
 
 	startFlushTicker(cfg.Logging.GetFlushInterval())
+
+	// 初始化新的多目标日志路由器
+	if err := InitMultiTargetRouter(cfg); err != nil {
+		// 多目标日志路由器初始化失败不应阻止应用启动
+		// 日志将回退到传统的单一日志器模式
+		return nil
+	}
+
 	return nil
 }
 
@@ -603,6 +611,14 @@ func Shutdown() error {
 			}
 		}
 	}
+
+	// 关闭多目标日志路由器
+	if router := GetGlobalRouter(); router != nil {
+		if err := router.Shutdown(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

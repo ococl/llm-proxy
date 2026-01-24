@@ -162,6 +162,49 @@ type Logging struct {
 	TimeRotation      string `yaml:"time_rotation,omitempty"`
 	DetailedMasking   *bool  `yaml:"detailed_masking,omitempty"`
 	MaxLogContentSize int    `yaml:"max_log_content_size,omitempty"` // 最大日志内容大小(字节),0表示不限制
+
+	// 新增：多目标日志配置
+	EnableMultiTarget bool                      `yaml:"enable_multi_target"` // 启用多目标日志
+	Console           ConsoleConfig             `yaml:"console"`             // 控制台配置
+	File              FileConfig                `yaml:"file"`                // 文件配置
+	Categories        map[string]CategoryConfig `yaml:"categories"`          // 分类配置
+}
+
+// ConsoleConfig 控制台输出配置
+type ConsoleConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Level    string `yaml:"level"`
+	Style    string `yaml:"style"`  // compact/verbose
+	Format   string `yaml:"format"` // markdown/plain
+	Colorize bool   `yaml:"colorize"`
+}
+
+// FileConfig 文件输出配置
+type FileConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	Level      string `yaml:"level"`
+	BaseDir    string `yaml:"base_dir"`
+	MaxSizeMB  int    `yaml:"max_size_mb"`
+	MaxAgeDays int    `yaml:"max_age_days"`
+	MaxBackups int    `yaml:"max_backups"`
+	Compress   bool   `yaml:"compress"`
+	Format     string `yaml:"format"` // json/text
+}
+
+// CategoryConfig 分类日志配置
+type CategoryConfig struct {
+	Target   string       `yaml:"target"`   // 输出目标: console/file/both/none
+	Levels   LogLevelInfo `yaml:"levels"`   // 日志级别配置
+	Path     string       `yaml:"path"`     // 文件路径
+	MaxSize  int          `yaml:"max_size"` // 最大文件大小(MB)
+	MaxAge   int          `yaml:"max_age"`  // 最大保留天数
+	Compress bool         `yaml:"compress"` // 是否压缩
+}
+
+// LogLevelInfo 日志级别信息
+type LogLevelInfo struct {
+	Console string `yaml:"console"` // 控制台日志级别
+	File    string `yaml:"file"`    // 文件日志级别
 }
 
 func (l *Logging) ShouldMaskSensitive() bool {
