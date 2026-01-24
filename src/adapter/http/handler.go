@@ -14,6 +14,7 @@ import (
 	domainerror "llm-proxy/domain/error"
 	"llm-proxy/domain/port"
 	"llm-proxy/domain/types"
+	"llm-proxy/infrastructure/logging"
 )
 
 type ProxyHandler struct {
@@ -94,13 +95,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		port.String("req_id", reqID),
 	)
 
-	// 记录完整的客户端请求体（用于调试追踪）
-	if reqBodyJSON, err := json.Marshal(reqBody); err == nil {
-		h.logger.Debug("客户端请求体",
-			port.String("req_id", reqID),
-			port.String("request_body", string(reqBodyJSON)),
-		)
-	}
+	logging.LogRequestBody(reqID, logging.BodyLogTypeClientRequest, r.Method, r.URL.Path, r.Proto, map[string][]string(r.Header), reqBody)
 
 	if cfg.Proxy.EnableSystemPrompt {
 		reqBody = h.injectSystemPrompt(reqBody)
@@ -154,12 +149,7 @@ func (h *ProxyHandler) handleNonStreamingRequest(w http.ResponseWriter, r *http.
 		port.String("response_id", resp.ID),
 	)
 
-	if respJSON, err := json.Marshal(resp); err == nil {
-		h.logger.Debug("客户端响应体",
-			port.String("req_id", req.ID().String()),
-			port.String("response_body", string(respJSON)),
-		)
-	}
+	logging.LogResponseBody(req.ID().String(), logging.BodyLogTypeClientResponse, http.StatusOK, resp.Headers, resp)
 
 	h.writeResponse(w, resp)
 }

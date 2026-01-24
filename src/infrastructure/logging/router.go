@@ -57,6 +57,11 @@ func InitMultiTargetRouter(cfg *config.Config) error {
 		}
 	}
 
+	// 初始化请求体日志器
+	if err := InitRequestBodyLogger(cfg); err != nil {
+		return fmt.Errorf("初始化请求体日志器失败: %w", err)
+	}
+
 	// 初始化全局日志器
 	if err := router.initGlobalLoggers(cfg); err != nil {
 		return fmt.Errorf("初始化全局日志器失败: %w", err)
@@ -68,6 +73,10 @@ func InitMultiTargetRouter(cfg *config.Config) error {
 
 // createLoggerForCategory 为指定分类创建日志器
 func (r *MultiTargetRouter) createLoggerForCategory(category LogCategory, cfg *TargetConfig) error {
+	if category == LogCategoryRequestBody {
+		return nil
+	}
+
 	// 继承全局配置中的设置
 	consoleEnabled := r.config.Console.Enabled
 	fileEnabled := r.config.File.Enabled

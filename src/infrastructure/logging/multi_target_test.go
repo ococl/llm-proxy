@@ -30,12 +30,12 @@ func TestDefaultMultiTargetConfig(t *testing.T) {
 	}
 
 	// 验证分类配置
-	if len(cfg.Categories) != 5 {
-		t.Errorf("期望 5 个分类, 实际为 %d", len(cfg.Categories))
+	if len(cfg.Categories) != 6 {
+		t.Errorf("期望 6 个分类, 实际为 %d", len(cfg.Categories))
 	}
 
 	// 验证各分类配置
-	categories := []string{string(LogCategoryGeneral), string(LogCategoryRequest), string(LogCategoryError), string(LogCategoryDebug), string(LogCategoryNetwork)}
+	categories := []string{string(LogCategoryGeneral), string(LogCategoryRequest), string(LogCategoryError), string(LogCategoryDebug), string(LogCategoryNetwork), string(LogCategoryRequestBody)}
 	for _, cat := range categories {
 		if _, ok := cfg.Categories[cat]; !ok {
 			t.Errorf("缺少分类配置: %s", cat)
@@ -45,6 +45,14 @@ func TestDefaultMultiTargetConfig(t *testing.T) {
 	// 验证请求日志只在文件输出
 	if cfg.Categories[string(LogCategoryRequest)].Target != string(LogTargetFile) {
 		t.Error("请求日志应该只在文件输出")
+	}
+
+	// 验证请求体日志配置
+	if cfg.Categories[string(LogCategoryRequestBody)].Target != string(LogTargetFile) {
+		t.Error("请求体日志应该只在文件输出")
+	}
+	if cfg.Categories[string(LogCategoryRequestBody)].Levels.Console != "none" {
+		t.Error("请求体日志控制台级别应该为 none")
 	}
 }
 
@@ -170,6 +178,9 @@ func TestLogCategory_Constants(t *testing.T) {
 	}
 	if LogCategoryNetwork != "network" {
 		t.Error("LogCategoryNetwork 应该为 'network'")
+	}
+	if LogCategoryRequestBody != "request_body" {
+		t.Error("LogCategoryRequestBody 应该为 'request_body'")
 	}
 }
 

@@ -67,6 +67,11 @@ func main() {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
 
+	// 初始化请求体日志器
+	if err := infra_logging.InitRequestBodyLogger(cfg); err != nil {
+		log.Fatalf("初始化请求体日志失败: %v", err)
+	}
+
 	infra_config.LoggingConfigChangedFunc = func(c *infra_config.Config) error {
 		infra_logging.ShutdownLogger()
 		return infra_logging.InitLogger(c)
@@ -77,6 +82,7 @@ func main() {
 
 	cooldownMgr := domain_service.NewCooldownManager(time.Duration(cfg.Fallback.CooldownSeconds) * time.Second)
 	shutdownCooldown := make(chan struct{})
+	shutdownBodyLogCleanup := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -85,6 +91,22 @@ func main() {
 			case <-ticker.C:
 				cooldownMgr.Cleanup()
 			case <-shutdownCooldown:
+				return
+			}
+		}
+	}()
+
+	// 启动请求体日志清理任务（每小时执行一次）
+	go func() {
+		cleanupTicker := time.NewTicker(time.Hour)
+		defer cleanupTicker.Stop()
+		for {
+			select {
+			case <-cleanupTicker.C:
+				if err := infra_logging.CleanupOldLogs(); err != nil {
+					infra_logging.GeneralSugar.Errorw("清理请求体日志失败", "error", err)
+				}
+			case <-shutdownBodyLogCleanup:
 				return
 			}
 		}
@@ -194,6 +216,13 @@ func main() {
 	infra_logging.GeneralSugar.Info("正在关闭服务器...")
 
 	close(shutdownCooldown)
+	close(shutdownBodyLogCleanup)
+
+	// 关闭请求体日志器
+	if err := infra_logging.ShutdownRequestBodyLogger(); err != nil {
+		infra_logging.GeneralSugar.Errorw("关闭请求体日志失败", "error", err)
+	}
+
 	infra_logging.ShutdownLogger()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

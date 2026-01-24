@@ -177,3 +177,25 @@ logging:
         console: "debug"
         file: "debug"
       path: "debug/debug.log"
+      
+    # 请求体日志：完整的 HTTP 请求/响应体（仅文件输出）
+    request_body:
+      target: "file"
+      levels:
+        console: "none"              # 请求体日志不输出到控制台
+        file: "debug"
+      path: "request_body/{date}/{time}_{req_id}_{type}.httpdump"
+      max_size: 200                  # 单文件最大200MB
+      max_age: 14                    # 保留14天
+      max_backups: 10                # 最多10个备份
+      compress: true                 # 压缩旧文件
+      
+  # 请求体日志专用配置（独立于多目标日志系统）
+  request_body:
+    enabled: true                    # 启用请求体日志
+    base_dir: "./logs/request_body"  # 请求体日志基础目录
+    max_size_mb: 200                 # 单文件最大200MB
+    max_age_days: 14                 # 保留14天
+    max_backups: 10                  # 最多10个备份
+    compress: true                   # 压缩旧文件
+    include_body: true               # 包含请求/响应体内容

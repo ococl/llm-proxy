@@ -168,6 +168,7 @@ type Logging struct {
 	Console           ConsoleConfig             `yaml:"console"`             // 控制台配置
 	File              FileConfig                `yaml:"file"`                // 文件配置
 	Categories        map[string]CategoryConfig `yaml:"categories"`          // 分类配置
+	RequestBody       RequestBodyConfig         `yaml:"request_body"`        // 请求体日志配置
 }
 
 // ConsoleConfig 控制台输出配置
@@ -199,6 +200,17 @@ type CategoryConfig struct {
 	MaxSize  int          `yaml:"max_size"` // 最大文件大小(MB)
 	MaxAge   int          `yaml:"max_age"`  // 最大保留天数
 	Compress bool         `yaml:"compress"` // 是否压缩
+}
+
+// RequestBodyConfig 请求体日志专用配置
+type RequestBodyConfig struct {
+	Enabled     bool   `yaml:"enabled"`      // 是否启用请求体日志
+	BaseDir     string `yaml:"base_dir"`     // 基础目录
+	MaxSizeMB   int    `yaml:"max_size_mb"`  // 单文件最大大小(MB)
+	MaxAgeDays  int    `yaml:"max_age_days"` // 保留天数
+	MaxBackups  int    `yaml:"max_backups"`  // 备份数量
+	Compress    bool   `yaml:"compress"`     // 是否压缩
+	IncludeBody bool   `yaml:"include_body"` // 是否包含请求体内容
 }
 
 // LogLevelInfo 日志级别信息
@@ -305,6 +317,47 @@ func (l *Logging) GetMaxLogContentSize() int {
 		return 0
 	}
 	return l.MaxLogContentSize
+}
+
+// RequestBodyConfig Getter 方法
+func (r *RequestBodyConfig) IsEnabled() bool {
+	return r.Enabled
+}
+
+func (r *RequestBodyConfig) GetBaseDir() string {
+	if r.BaseDir == "" {
+		return "./logs/request_body"
+	}
+	return r.BaseDir
+}
+
+func (r *RequestBodyConfig) GetMaxSizeMB() int {
+	if r.MaxSizeMB <= 0 {
+		return 200
+	}
+	return r.MaxSizeMB
+}
+
+func (r *RequestBodyConfig) GetMaxAgeDays() int {
+	if r.MaxAgeDays <= 0 {
+		return 14
+	}
+	return r.MaxAgeDays
+}
+
+func (r *RequestBodyConfig) GetMaxBackups() int {
+	if r.MaxBackups <= 0 {
+		return 10
+	}
+	return r.MaxBackups
+}
+
+func (r *RequestBodyConfig) ShouldCompress() bool {
+	return r.Compress
+}
+
+func (r *RequestBodyConfig) ShouldIncludeBody() bool {
+	return r.IncludeBody
 }
 
 type Config struct {

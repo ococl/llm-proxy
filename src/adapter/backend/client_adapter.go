@@ -2,6 +2,7 @@ package backend
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	"llm-proxy/domain/entity"
 	"llm-proxy/domain/port"
+	"llm-proxy/infrastructure/logging"
 )
 
 type BackendClientAdapter struct {
@@ -88,13 +90,7 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	}
 	body["stream"] = false
 
-	if upstreamBodyJSON, err := json.Marshal(body); err == nil {
-		a.logger.Debug("上游请求体",
-			port.String("req_id", reqID),
-			port.String("backend", backend.Name()),
-			port.String("request_body", string(upstreamBodyJSON)),
-		)
-	}
+	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", "/chat/completions", "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
@@ -143,11 +139,11 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 		port.Int("body_size", len(respBody)),
 	)
 
-	a.logger.Debug("上游响应体",
-		port.String("req_id", reqID),
-		port.String("backend", backend.Name()),
-		port.String("response_body", string(respBody)),
-	)
+	// 记录上游响应体（需要先读取 Body）
+	logging.LogResponseBody(reqID, logging.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
+
+	// 放回 Body 以便后续处理
+	httpResp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 	if httpResp.StatusCode >= 400 {
 		a.logger.Warn("上游返回错误状态码",
@@ -284,13 +280,7 @@ func (a *BackendClientAdapter) SendStreaming(
 	}
 	body["stream"] = true
 
-	if upstreamBodyJSON, err := json.Marshal(body); err == nil {
-		a.logger.Debug("上游流式请求体",
-			port.String("req_id", reqID),
-			port.String("backend", backend.Name()),
-			port.String("request_body", string(upstreamBodyJSON)),
-		)
-	}
+	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", "/chat/completions", "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
@@ -325,6 +315,9 @@ func (a *BackendClientAdapter) SendStreaming(
 	if httpResp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
+
+		logging.LogResponseBody(reqID, logging.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
+
 		a.logger.Warn("上游流式请求返回错误状态码",
 			port.String("req_id", reqID),
 			port.String("backend", backend.Name()),
@@ -455,13 +448,7 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 	}
 	body["stream"] = true
 
-	if upstreamBodyJSON, err := json.Marshal(body); err == nil {
-		a.logger.Debug("上游流式请求体",
-			port.String("req_id", reqID),
-			port.String("backend", backend.Name()),
-			port.String("request_body", string(upstreamBodyJSON)),
-		)
-	}
+	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", "/chat/completions", "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
@@ -496,6 +483,9 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 	if httpResp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
+
+		logging.LogResponseBody(reqID, logging.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
+
 		a.logger.Warn("上游流式请求返回错误状态码(透传模式)",
 			port.String("req_id", reqID),
 			port.String("backend", backend.Name()),

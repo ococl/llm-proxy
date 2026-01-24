@@ -18,6 +18,8 @@ const (
 	LogCategoryDebug LogCategory = "debug"
 	// LogCategoryNetwork 网络日志（网络请求/响应）
 	LogCategoryNetwork LogCategory = "network"
+	// LogCategoryRequestBody 请求体日志（完整的HTTP请求/响应体）
+	LogCategoryRequestBody LogCategory = "request_body"
 )
 
 // LogTarget 定义日志输出目标
@@ -148,6 +150,17 @@ func DefaultMultiTargetConfig() *MultiTargetConfig {
 					File:    "debug",
 				},
 				Path: "network/network.log",
+			},
+			string(LogCategoryRequestBody): {
+				Target: string(LogTargetFile),
+				Levels: LogLevelConfig{
+					Console: "none", // 请求体日志不输出到控制台
+					File:    "debug",
+				},
+				Path:     "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+				MaxSize:  200,
+				MaxAge:   14,
+				Compress: true,
 			},
 		},
 	}
