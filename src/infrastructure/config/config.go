@@ -210,7 +210,7 @@ type RequestBodyConfig struct {
 	MaxAgeDays  int    `yaml:"max_age_days"` // 保留天数
 	MaxBackups  int    `yaml:"max_backups"`  // 备份数量
 	Compress    bool   `yaml:"compress"`     // 是否压缩
-	IncludeBody bool   `yaml:"include_body"` // 是否包含请求体内容
+	IncludeBody *bool  `yaml:"include_body"`
 }
 
 // LogLevelInfo 日志级别信息
@@ -357,7 +357,10 @@ func (r *RequestBodyConfig) ShouldCompress() bool {
 }
 
 func (r *RequestBodyConfig) ShouldIncludeBody() bool {
-	return r.IncludeBody
+	if !r.Enabled {
+		return false
+	}
+	return r.IncludeBody == nil || *r.IncludeBody
 }
 
 type Config struct {

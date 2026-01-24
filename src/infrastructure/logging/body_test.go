@@ -12,6 +12,11 @@ import (
 	"llm-proxy/infrastructure/config"
 )
 
+var (
+	trueValue  = true
+	falseValue = false
+)
+
 // TestInitRequestBodyLogger_Disabled 测试禁用请求体日志的情况
 func TestInitRequestBodyLogger_Disabled(t *testing.T) {
 	cfg := &config.Config{
@@ -121,7 +126,7 @@ func TestWriteFromMap_FileCreation(t *testing.T) {
 				MaxAgeDays:  14,
 				MaxBackups:  5,
 				Compress:    true,
-				IncludeBody: true,
+				IncludeBody: &trueValue,
 			},
 		},
 	}
@@ -180,7 +185,7 @@ func TestWriteResponseFromMap_FileCreation(t *testing.T) {
 				MaxAgeDays:  14,
 				MaxBackups:  5,
 				Compress:    true,
-				IncludeBody: true,
+				IncludeBody: &trueValue,
 			},
 		},
 	}
@@ -266,7 +271,7 @@ func TestWriteFromMap_WithoutBody(t *testing.T) {
 				MaxAgeDays:  14,
 				MaxBackups:  5,
 				Compress:    true,
-				IncludeBody: true,
+				IncludeBody: &trueValue,
 			},
 		},
 	}
@@ -308,7 +313,7 @@ func TestWriteFromMap_IncludeBodyDisabled(t *testing.T) {
 				MaxAgeDays:  14,
 				MaxBackups:  5,
 				Compress:    true,
-				IncludeBody: false, // 禁用请求体记录
+				IncludeBody: &falseValue, // 禁用请求体记录
 			},
 		},
 	}
@@ -371,7 +376,7 @@ func TestWrite_Integration(t *testing.T) {
 				MaxAgeDays:  14,
 				MaxBackups:  5,
 				Compress:    true,
-				IncludeBody: true,
+				IncludeBody: &trueValue,
 			},
 		},
 	}
@@ -444,7 +449,7 @@ func TestWriteResponse_Integration(t *testing.T) {
 				MaxAgeDays:  14,
 				MaxBackups:  5,
 				Compress:    true,
-				IncludeBody: true,
+				IncludeBody: &trueValue,
 			},
 		},
 	}
@@ -545,7 +550,7 @@ func TestCleanupOldLogs(t *testing.T) {
 				Enabled:     true,
 				BaseDir:     tempDir,
 				MaxAgeDays:  1, // 保留 1 天内
-				IncludeBody: true,
+				IncludeBody: &trueValue,
 			},
 		},
 	}
@@ -586,7 +591,7 @@ func TestCleanupOldLogs_NoOldDirs(t *testing.T) {
 				Enabled:     true,
 				BaseDir:     tempDir,
 				MaxAgeDays:  14,
-				IncludeBody: true,
+				IncludeBody: &trueValue,
 			},
 		},
 	}
@@ -621,7 +626,7 @@ func TestGetRequestBodyLoggerInfo(t *testing.T) {
 				Enabled:     true,
 				BaseDir:     t.TempDir(),
 				MaxAgeDays:  14,
-				IncludeBody: true,
+				IncludeBody: &trueValue,
 			},
 		},
 	}
@@ -651,7 +656,7 @@ func TestWriteUpstreamResponse(t *testing.T) {
 				MaxAgeDays:  14,
 				MaxBackups:  5,
 				Compress:    true,
-				IncludeBody: true,
+				IncludeBody: &trueValue,
 			},
 		},
 	}
@@ -712,7 +717,7 @@ func TestWriteUpstreamResponse_ReadError(t *testing.T) {
 				MaxAgeDays:  14,
 				MaxBackups:  5,
 				Compress:    true,
-				IncludeBody: true,
+				IncludeBody: &trueValue,
 			},
 		},
 	}
