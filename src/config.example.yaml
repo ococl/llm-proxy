@@ -22,6 +22,37 @@ backends:
   api_key: "sk-ant-xxx"
   protocol: "anthropic"  # 指定使用 Anthropic 协议
 
+# Azure OpenAI 协议示例
+- name: "azure-openai"
+  url: "https://your-resource.openai.azure.com/openai/deployments/your-deployment"
+  api_key: "your-azure-api-key"
+  protocol: "azure"  # Azure 专用错误转换器
+  timeout: 60s  # Azure 可能需要更长超时
+
+# DeepSeek 协议示例
+- name: "deepseek"
+  url: "https://api.deepseek.com/chat/completions"
+  api_key: "sk-deepseek-xxx"
+  protocol: "deepseek"  # 支持 thinking mode
+
+# Groq 协议示例
+- name: "groq"
+  url: "https://api.groq.com/openai/v1/chat/completions"
+  api_key: "gsk-xxx"
+  protocol: "groq"  # 高性能推理加速
+
+# Mistral AI 协议示例
+- name: "mistral"
+  url: "https://api.mistral.ai/v1/chat/completions"
+  api_key: "xxx"
+  protocol: "mistral"  # 支持并行工具调用
+
+# Cohere 协议示例
+- name: "cohere"
+  url: "https://api.cohere.com/v1/chat"
+  api_key: "xxx"
+  protocol: "cohere"  # RAG 和 citations 支持
+
 models:
   "anthropic/claude-sonnet-4":
     routes:
@@ -38,6 +69,34 @@ models:
     routes:
     - backend: "primary"
       model: "gpt-4o"
+      priority: 1
+
+  # DeepSeek 模型示例
+  "deepseek/deepseek-chat":
+    routes:
+    - backend: "deepseek"
+      model: "deepseek-chat"
+      priority: 1
+
+  # Groq 模型示例（Llama 系列）
+  "groq/llama-3.3-70b-versatile":
+    routes:
+    - backend: "groq"
+      model: "llama-3.3-70b-versatile"
+      priority: 1
+
+  # Mistral 模型示例
+  "mistral/mistral-large-latest":
+    routes:
+    - backend: "mistral"
+      model: "mistral-large-latest"
+      priority: 1
+
+  # Cohere 模型示例
+  "cohere/command-r-plus":
+    routes:
+    - backend: "cohere"
+      model: "command-r-plus"
       priority: 1
 
 fallback:

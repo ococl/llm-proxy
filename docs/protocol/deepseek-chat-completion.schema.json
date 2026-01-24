@@ -1,0 +1,470 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://platform.deepseek.com/docs/api-reference/chat",
+  "title": "DeepSeek Chat Completion API Schema",
+  "description": "DeepSeek Chat Completion API 的请求和响应 JSON Schema 定义",
+  "type": "object",
+  
+  "definitions": {
+    "message_role": {
+      "type": "string",
+      "enum": ["system", "user", "assistant", "tool"],
+      "description": "消息的角色类型"
+    },
+    
+    "message_content": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "简单的文本内容"
+        },
+        {
+          "type": "array",
+          "description": "多模态内容块",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["text", "image_url"],
+                "description": "内容块类型"
+              },
+              "text": {
+                "type": "string",
+                "description": "文本内容（type=text 时）"
+              },
+              "image_url": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "图片 URL"
+                  }
+                },
+                "required": ["url"]
+              }
+            },
+            "required": ["type"]
+          }
+        }
+      ]
+    },
+    
+    "message": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "$ref": "#/definitions/message_role"
+        },
+        "content": {
+          "$ref": "#/definitions/message_content"
+        },
+        "tool_calls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "工具调用 ID"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["function"],
+                "description": "工具类型"
+              },
+              "function": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "要调用的函数名称"
+                  },
+                  "arguments": {
+                    "type": "string",
+                    "description": "函数的参数（JSON 字符串）"
+                  }
+                },
+                "required": ["name"]
+              }
+            },
+            "required": ["id", "type", "function"]
+          }
+        },
+        "tool_call_id": {
+          "type": "string",
+          "description": "工具调用 ID（tool 角色消息使用）"
+        }
+      },
+      "required": ["role", "content"]
+    },
+    
+    "response_message": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "$ref": "#/definitions/message_role"
+        },
+        "content": {
+          "type": ["string", "null"],
+          "description": "助手回复的内容"
+        },
+        "tool_calls": {
+          "type": "array"
+        }
+      },
+      "required": ["role"]
+    },
+    
+    "choice": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "description": "选择的索引"
+        },
+        "message": {
+          "$ref": "#/definitions/response_message"
+        },
+        "finish_reason": {
+          "type": "string",
+          "enum": ["stop", "length", "tool_calls", "content_filter", "function_call"],
+          "description": "完成原因"
+        },
+        "logprobs": {
+          "type": ["object", "null"]
+        }
+      },
+      "required": ["index", "message", "finish_reason"]
+    },
+    
+    "usage": {
+      "type": "object",
+      "properties": {
+        "prompt_tokens": {
+          "type": "integer",
+          "description": "提示词消耗的 token 数量"
+        },
+        "completion_tokens": {
+          "type": "integer",
+          "description": "完成消耗的 token 数量"
+        },
+        "total_tokens": {
+          "type": "integer",
+          "description": "总消耗的 token 数量"
+        },
+        "prompt_tokens_details": {
+          "type": "object",
+          "description": "提示词 token 详情",
+          "properties": {
+            "cached_tokens": {
+              "type": "integer",
+              "description": "缓存的提示词 token"
+            }
+          }
+        },
+        "completion_tokens_details": {
+          "type": "object",
+          "description": "完成 token 详情",
+          "properties": {
+            "reasoning_tokens": {
+              "type": "integer",
+              "description": "推理 token 数量"
+            }
+          }
+        }
+      },
+      "required": ["prompt_tokens", "completion_tokens", "total_tokens"]
+    },
+    
+    "stream_choice": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "delta": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "$ref": "#/definitions/message_role"
+            },
+            "content": {
+              "type": ["string", "null"]
+            },
+            "tool_calls": {
+              "type": "array"
+            }
+          }
+        },
+        "logprobs": {
+          "type": ["object", "null"]
+        },
+        "finish_reason": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["index"]
+    },
+    
+    "reasoning_content": {
+      "type": "object",
+      "description": "推理内容块（DeepSeek 特有）",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["reasoning"]
+        },
+        "reasoning_content": {
+          "type": "string",
+          "description": "推理过程内容"
+        }
+      },
+      "required": ["type"]
+    }
+  },
+  
+  "properties": {
+    "request": {
+      "type": "object",
+      "description": "DeepSeek Chat Completion API 请求",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "要使用的模型 ID，如 deepseek-chat、deepseek-reasoner 等"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/message"
+          },
+          "description": "对话消息列表"
+        },
+        "frequency_penalty": {
+          "type": "number",
+          "minimum": -2.0,
+          "maximum": 2.0,
+          "default": 0,
+          "description": "频率惩罚"
+        },
+        "logit_bias": {
+          "type": "object",
+          "description": "Token 概率偏置"
+        },
+        "logprobs": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否返回 log probabilities"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "description": "最大生成 token 数"
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128,
+          "default": 1,
+          "description": "生成的选择数量"
+        },
+        "presence_penalty": {
+          "type": "number",
+          "minimum": -2.0,
+          "maximum": 2.0,
+          "default": 0,
+          "description": "存在惩罚"
+        },
+        "response_format": {
+          "type": "object",
+          "description": "响应格式控制",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["text", "json_object"]
+            }
+          }
+        },
+        "stop": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "停止序列"
+        },
+        "stream": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否启用流式响应"
+        },
+        "stream_options": {
+          "type": "object",
+          "description": "流式响应选项",
+          "properties": {
+            "include_usage": {
+              "type": "boolean",
+              "description": "是否在最后包含 usage 信息"
+            },
+            "reasoning_content_format": {
+              "type": "string",
+              "enum": ["text", "plain_text"],
+              "description": "推理内容格式"
+            }
+          }
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 1,
+          "description": "采样温度"
+        },
+        "tool_choice": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": ["none", "auto", "required"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["function"]
+                },
+                "function": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "description": "工具选择控制"
+        },
+        "tools": {
+          "type": "array",
+          "description": "可用工具列表",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["function"]
+              },
+              "function": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "parameters": {
+                    "type": "object"
+                  }
+                },
+                "required": ["name"]
+              }
+            },
+            "required": ["type", "function"]
+          }
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1,
+          "description": "核采样参数"
+        }
+      },
+      "required": ["model", "messages"]
+    },
+    
+    "response": {
+      "type": "object",
+      "description": "DeepSeek Chat Completion API 非流式响应",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "完成 ID"
+        },
+        "object": {
+          "type": "string",
+          "enum": ["chat.completion"],
+          "description": "对象类型"
+        },
+        "created": {
+          "type": "integer",
+          "description": "创建时间戳（Unix 秒）"
+        },
+        "model": {
+          "type": "string",
+          "description": "使用的模型"
+        },
+        "system_fingerprint": {
+          "type": "string",
+          "description": "后端配置指纹"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/choice"
+          }
+        },
+        "usage": {
+          "$ref": "#/definitions/usage"
+        }
+      },
+      "required": ["id", "object", "created", "model", "choices"]
+    },
+    
+    "stream_response": {
+      "type": "object",
+      "description": "DeepSeek Chat Completion API 流式响应（单个 chunk）",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "完成 ID"
+        },
+        "object": {
+          "type": "string",
+          "enum": ["chat.completion.chunk"],
+          "description": "对象类型"
+        },
+        "created": {
+          "type": "integer",
+          "description": "创建时间戳（Unix 秒）"
+        },
+        "model": {
+          "type": "string",
+          "description": "使用的模型"
+        },
+        "system_fingerprint": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/stream_choice"
+          }
+        },
+        "usage": {
+          "$ref": "#/definitions/usage",
+          "description": "仅在最后 chunk 包含"
+        }
+      }
+    }
+  }
+}

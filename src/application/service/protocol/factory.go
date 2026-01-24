@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"llm-proxy/application/service/protocol/anthropic"
+	"llm-proxy/application/service/protocol/azure"
 	"llm-proxy/application/service/protocol/google"
 	"llm-proxy/application/service/protocol/openai"
 	"llm-proxy/domain/port"
@@ -37,17 +38,22 @@ func NewStrategyFactory(logger port.Logger) *StrategyFactory {
 func (f *StrategyFactory) CreateDefaultRegistry() *StrategyRegistry {
 	registry := NewStrategyRegistry(f.logger)
 
-	// 注册 OpenAI 兼容协议策略（OpenAI, Azure, DeepSeek, Groq, Mistral, Cohere）
+	// 注册 OpenAI 兼容协议策略（OpenAI, DeepSeek, Groq, Mistral, Cohere）
 	openAIRequest := openai.NewRequestConverter(nil, f.logger)
 	openAIResponse := openai.NewResponseConverter(f.logger)
 	openAIStream := openai.NewStreamChunkConverter(f.logger)
 	openAIError := openai.NewErrorConverter(f.logger)
 
-	// OpenAI 及其兼容协议
+	// OpenAI 及其兼容协议（请求、响应、流式共享，错误转换器独立）
 	registry.RegisterRequestStrategy(openAIRequest)
 	registry.RegisterResponseStrategy(openAIResponse)
 	registry.RegisterChunkStrategy(openAIStream)
 	registry.RegisterErrorStrategy(openAIError)
+
+	// 注册 Azure OpenAI 专用错误转换器
+	// Azure 使用 OpenAI 兼容的请求/响应/流式格式，但错误格式不同
+	azureError := azure.NewErrorConverter(f.logger)
+	registry.RegisterErrorStrategy(azureError)
 
 	// 注册 Anthropic 协议策略
 	anthropicRequest := anthropic.NewRequestConverter(nil, f.logger)

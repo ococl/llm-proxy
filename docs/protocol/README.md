@@ -7,15 +7,24 @@
 ```
 docs/protocol/
 ├── 协议规范文档 (.md)
-│   ├── sse-specification.md           # SSE 协议规范
-│   ├── json-schema-specification.md   # JSON Schema 规范
-│   ├── error-response-specification.md # 错误响应格式
-│   ├── openapi-specification.md       # OpenAPI 规范
-│   └── streaming-response-format.md   # 流式响应格式
+│   ├── sse-specification.md              # SSE 协议规范
+│   ├── json-schema-specification.md      # JSON Schema 规范
+│   ├── error-response-specification.md   # 错误响应格式
+│   ├── openapi-specification.md          # OpenAPI 规范
+│   ├── streaming-response-format.md      # 流式响应格式
+│   ├── azure-openai-protocol.md          # Azure OpenAI 协议
+│   ├── deepseek-protocol.md              # DeepSeek 协议
+│   ├── groq-protocol.md                  # Groq 协议
+│   ├── mistral-protocol.md               # Mistral AI 协议
+│   └── cohere-protocol.md                # Cohere 协议
 │
 └── JSON Schema 文件 (.schema.json)
-    ├── openai-chat-completion.schema.json   # OpenAI Chat Completion API
-    └── anthropic-messages.schema.json       # Anthropic Messages API
+    ├── openai-chat-completion.schema.json    # OpenAI Chat Completion API
+    ├── anthropic-messages.schema.json        # Anthropic Messages API
+    ├── deepseek-chat-completion.schema.json  # DeepSeek Chat Completion API
+    ├── groq-chat-completion.schema.json      # Groq Chat Completion API
+    ├── mistral-chat-completion.schema.json   # Mistral AI Chat Completion API
+    └── cohere-chat-completion.schema.json    # Cohere Chat Completion API
 ```
 
 ## 📄 协议规范文档说明
@@ -101,6 +110,47 @@ docs/protocol/
 
 **使用场景**: Anthropic Claude API 集成、验证
 
+### DeepSeek Chat Completion Schema (`deepseek-chat-completion.schema.json`)
+
+**包含内容**:
+- OpenAI 兼容的请求/响应格式
+- 特有的 thinking mode 和 reasoning_content 扩展
+- 提示词缓存统计 (prompt_tokens_details)
+- 流式响应选项配置
+
+**使用场景**: DeepSeek API 集成、验证
+
+### Groq Chat Completion Schema (`groq-chat-completion.schema.json`)
+
+**包含内容**:
+- OpenAI 兼容的请求/响应格式
+- 扩展的 usage 字段 (prompt_time, completion_time, queue_time)
+- x_groq 专有响应扩展
+- Flex Tier 状态码支持
+
+**使用场景**: Groq API 集成、性能优化
+
+### Mistral Chat Completion Schema (`mistral-chat-completion.schema.json`)
+
+**包含内容**:
+- OpenAI 兼容的请求/响应格式
+- parallel_tool_calls 并行工具调用模式
+- prediction 预测输出配置
+- json_schema 响应格式
+- prompt_mode 提示词模式
+
+**使用场景**: Mistral AI API 集成、功能验证
+
+### Cohere Chat Completion Schema (`cohere-chat-completion.schema.json`)
+
+**包含内容**:
+- 独特的 chat_history 消息格式
+- RAG 文档检索支持 (documents, citations)
+- preamble 系统提示配置
+- 特有的 finish_reason 类型
+
+**使用场景**: Cohere API 集成、RAG 应用
+
 ## 🚀 快速开始
 
 ### 1. 实现流式代理
@@ -177,6 +227,11 @@ func HandleAPIError(err error) LLMProxyError {
 
 - **OpenAI API**: https://platform.openai.com/docs/api-reference
 - **Anthropic API**: https://docs.anthropic.com/en/api/messages
+- **Azure OpenAI**: https://learn.microsoft.com/en-us/azure/ai-services/openai/reference
+- **DeepSeek API**: https://platform.deepseek.com/docs/api-reference/chat
+- **Groq API**: https://console.groq.com/docs/api-reference
+- **Mistral AI**: https://docs.mistral.ai/api-reference/chat-completion
+- **Cohere API**: https://docs.cohere.com/reference/chat
 - **JSON Schema**: https://json-schema.org/
 - **W3C SSE**: https://www.w3.org/TR/2015/REC-eventsource-20150203/
 - **OpenAPI**: https://spec.openapis.org/oas/v3.1.0

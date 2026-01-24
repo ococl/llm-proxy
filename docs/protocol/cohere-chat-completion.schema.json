@@ -1,0 +1,425 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://docs.cohere.com/reference/chat",
+  "title": "Cohere Chat Completion API Schema",
+  "description": "Cohere Chat Completion API 的请求和响应 JSON Schema 定义",
+  "type": "object",
+  
+  "definitions": {
+    "message_role": {
+      "type": "string",
+      "enum": ["USER", "CHATBOT", "SYSTEM", "TOOL"],
+      "description": "消息的角色类型（Cohere 特有）"
+    },
+    
+    "message_content": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "简单的文本内容"
+        },
+        {
+          "type": "array",
+          "description": "多模态内容块",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["text", "image"],
+                "description": "内容块类型"
+              },
+              "text": {
+                "type": "string"
+              },
+              "image": {
+                "type": "object",
+                "properties": {
+                  "format": {
+                    "type": "string",
+                    "enum": ["png", "jpeg"]
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id"]
+              }
+            },
+            "required": ["type"]
+          }
+        }
+      ]
+    },
+    
+    "message": {
+      "type": "object",
+      "description": "Cohere 消息格式",
+      "properties": {
+        "role": {
+          "$ref": "#/definitions/message_role"
+        },
+        "content": {
+          "$ref": "#/definitions/message_content"
+        },
+        "tool_calls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "工具调用"
+          }
+        }
+      },
+      "required": ["role", "content"]
+    },
+    
+    "chat_history": {
+      "type": "array",
+      "description": "聊天历史（Cohere 特有）",
+      "items": {
+        "$ref": "#/definitions/message"
+      }
+    },
+    
+    "documents": {
+      "type": "array",
+      "description": "RAG 检索文档（Cohere 特有）",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    
+    "citations": {
+      "type": "array",
+      "description": "引用（Cohere 特有）",
+      "items": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "integer"
+          },
+          "end": {
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          },
+          "document_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["start", "end", "text", "document_ids"]
+      }
+    },
+    
+    "response_message": {
+      "type": "object",
+      "description": "Cohere 响应消息",
+      "properties": {
+        "role": {
+          "$ref": "#/definitions/message_role"
+        },
+        "content": {
+          "type": ["string", "null"]
+        },
+        "tool_calls": {
+          "type": "array"
+        }
+      },
+      "required": ["role"]
+    },
+    
+    "choice": {
+      "type": "object",
+      "description": "完成选择",
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "message": {
+          "$ref": "#/definitions/response_message"
+        },
+        "finish_reason": {
+          "type": "string",
+          "enum": ["COMPLETE", "MAX_TOKENS", "ERROR", "ERROR_TOXIC", "ERROR_LIMIT", "USER_CANCEL"],
+          "description": "完成原因（Cohere 特有）"
+        }
+      },
+      "required": ["index", "message"]
+    },
+    
+    "usage": {
+      "type": "object",
+      "description": "Cohere usage 字段",
+      "properties": {
+        "prompt_tokens": {
+          "type": "integer"
+        },
+        "completion_tokens": {
+          "type": "integer"
+        },
+        "total_tokens": {
+          "type": "integer"
+        },
+        "tokens": {
+          "type": "integer",
+          "description": "总 token 数（Cohere 特有字段名）"
+        }
+      }
+    },
+    
+    "search_queries": {
+      "type": "array",
+      "description": "搜索查询（Cohere RAG 特有）",
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    
+    "stream_choice": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "delta": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "$ref": "#/definitions/message_role"
+            },
+            "content": {
+              "type": ["string", "null"]
+            }
+          }
+        },
+        "finish_reason": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["index"]
+    }
+  },
+  
+  "properties": {
+    "request": {
+      "type": "object",
+      "description": "Cohere Chat Completion API 请求",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "要使用的模型 ID，如 command、command-light、command-r 等"
+        },
+        "message": {
+          "type": "string",
+          "description": "用户消息（Cohere 特有，使用 message 而非 messages）"
+        },
+        "chat_history": {
+          "$ref": "#/definitions/chat_history",
+          "description": "聊天历史"
+        },
+        "preamble": {
+          "type": "string",
+          "description": "系统提示（Cohere 特有）"
+        },
+        "chat_model": {
+          "type": "string",
+          "description": "聊天模型"
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 0
+        },
+        "max_tokens": {
+          "type": "integer"
+        },
+        "k": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "返回的文档数量"
+        },
+        "search_queries_only": {
+          "type": "boolean",
+          "description": "仅返回搜索查询"
+        },
+        "include_citations": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否包含引用"
+        },
+        "documents": {
+          "$ref": "#/definitions/documents",
+          "description": "RAG 检索文档"
+        },
+        "citation_threshold": {
+          "type": "number",
+          "description": "引用阈值"
+        },
+        "stream": {
+          "type": "boolean",
+          "default": false
+        },
+        "stream_options": {
+          "type": "object",
+          "description": "流式响应选项"
+        },
+        "prompt_truncation": {
+          "type": "string",
+          "enum": ["AUTO", "NONE"],
+          "description": "提示截断策略"
+        },
+        "frequency_penalty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "频率惩罚"
+        },
+        "presence_penalty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "存在惩罚"
+        },
+        "tools": {
+          "type": "array",
+          "description": "可用工具"
+        },
+        "tool_choice": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": ["auto", "any", "none"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "anyOf": [
+        { "required": ["message"] },
+        { "required": ["chat_history"] }
+      ]
+    },
+    
+    "response": {
+      "type": "object",
+      "description": "Cohere Chat Completion API 非流式响应",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "object": {
+          "type": "string",
+          "enum": ["chat.completion"]
+        },
+        "created": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/choice"
+          }
+        },
+        "usage": {
+          "$ref": "#/definitions/usage"
+        },
+        "chat_history": {
+          "$ref": "#/definitions/chat_history"
+        },
+        "citations": {
+          "$ref": "#/definitions/citations"
+        },
+        "documents": {
+          "$ref": "#/definitions/documents"
+        },
+        "search_queries": {
+          "$ref": "#/definitions/search_queries"
+        }
+      },
+      "required": ["id", "object", "created", "model", "choices"]
+    },
+    
+    "stream_response": {
+      "type": "object",
+      "description": "Cohere Chat Completion API 流式响应（单个 chunk）",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "object": {
+          "type": "string",
+          "enum": ["chat.completion.chunk"]
+        },
+        "created": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/stream_choice"
+          }
+        },
+        "usage": {
+          "$ref": "#/definitions/usage"
+        }
+      }
+    }
+  }
+}
