@@ -115,9 +115,10 @@ func GetRequestBodyLogger() *RequestBodyLogger {
 	bodyLoggerMu.RLock()
 	defer bodyLoggerMu.RUnlock()
 
-	if !bodyLoggerInit {
+	if !bodyLoggerInit || bodyLogger == nil {
 		return nil
 	}
+
 	return bodyLogger
 }
 
