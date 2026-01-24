@@ -74,7 +74,11 @@ func main() {
 
 	infra_config.LoggingConfigChangedFunc = func(c *infra_config.Config) error {
 		infra_logging.ShutdownLogger()
-		return infra_logging.InitLogger(c)
+		infra_logging.ShutdownRequestBodyLogger()
+		if err := infra_logging.InitLogger(c); err != nil {
+			return err
+		}
+		return infra_logging.InitRequestBodyLogger(c)
 	}
 
 	configAdapter := config_adapter.NewConfigAdapter(configMgr)

@@ -334,6 +334,9 @@ func (a *BackendClientAdapter) SendStreaming(
 		port.String("backend", backend.Name()),
 	)
 
+	// 记录成功的流式响应头
+	logging.LogResponseBody(reqID, logging.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, nil)
+
 	reader := bufio.NewReader(httpResp.Body)
 	chunkCount := 0
 	for {
@@ -479,6 +482,9 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 		port.String("backend", backend.Name()),
 		port.Int("status_code", httpResp.StatusCode),
 	)
+
+	// 记录成功的流式响应头（透传模式）
+	logging.LogResponseBody(reqID, logging.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, nil)
 
 	if httpResp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(httpResp.Body)

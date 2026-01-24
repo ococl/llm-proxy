@@ -1,10 +1,13 @@
 package logging
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"llm-proxy/infrastructure/config"
 )
@@ -508,4 +511,245 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestCleanupOldLogs 测试清理过期日志目录
+func TestCleanupOldLogs(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 创建测试目录结构
+	// 创建一个非常旧的目录（2024年）和一个很新的目录（今天）
+	oldDateDir := filepath.Join(tempDir, "2024-01-01")
+	newDateDir := filepath.Join(tempDir, time.Now().Format("2006-01-02"))
+
+	if err := os.MkdirAll(oldDateDir, 0755); err != nil {
+		t.Fatalf("创建旧日期目录失败: %v", err)
+	}
+	if err := os.MkdirAll(newDateDir, 0755); err != nil {
+		t.Fatalf("创建新日期目录失败: %v", err)
+	}
+
+	// 创建测试文件
+	if err := os.WriteFile(filepath.Join(oldDateDir, "test.httpdump"), []byte("old"), 0644); err != nil {
+		t.Fatalf("创建旧测试文件失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(newDateDir, "test.httpdump"), []byte("new"), 0644); err != nil {
+		t.Fatalf("创建新测试文件失败: %v", err)
+	}
+
+	// MaxAgeDays=1 只保留今天创建的目录
+	// 2024-01-01 应该被删除，2025-01-24 应该保留
+	cfg := &config.Config{
+		Logging: config.Logging{
+			RequestBody: config.RequestBodyConfig{
+				Enabled:     true,
+				BaseDir:     tempDir,
+				MaxAgeDays:  1, // 保留 1 天内
+				IncludeBody: true,
+			},
+		},
+	}
+
+	InitRequestBodyLogger(cfg)
+	defer ShutdownRequestBodyLogger()
+
+	// 执行清理
+	err := CleanupOldLogs()
+	if err != nil {
+		t.Fatalf("清理日志失败: %v", err)
+	}
+
+	// 验证旧目录被删除
+	if _, err := os.Stat(oldDateDir); !os.IsNotExist(err) {
+		t.Error("过期目录应该被删除")
+	}
+
+	// 验证新目录存在
+	if _, err := os.Stat(newDateDir); os.IsNotExist(err) {
+		t.Error("新目录应该存在")
+	}
+}
+
+// TestCleanupOldLogs_NoOldDirs 测试没有过期目录时的清理
+func TestCleanupOldLogs_NoOldDirs(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 只创建今天的目录
+	todayDir := filepath.Join(tempDir, time.Now().Format("2006-01-02"))
+	if err := os.MkdirAll(todayDir, 0755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+
+	cfg := &config.Config{
+		Logging: config.Logging{
+			RequestBody: config.RequestBodyConfig{
+				Enabled:     true,
+				BaseDir:     tempDir,
+				MaxAgeDays:  14,
+				IncludeBody: true,
+			},
+		},
+	}
+
+	InitRequestBodyLogger(cfg)
+	defer ShutdownRequestBodyLogger()
+
+	// 应该不报错
+	err := CleanupOldLogs()
+	if err != nil {
+		t.Fatalf("清理日志失败: %v", err)
+	}
+
+	// 验证目录仍然存在
+	if _, err := os.Stat(todayDir); os.IsNotExist(err) {
+		t.Error("今天目录应该存在")
+	}
+}
+
+// TestGetRequestBodyLoggerInfo 测试获取日志器状态信息
+func TestGetRequestBodyLoggerInfo(t *testing.T) {
+	// 未初始化时
+	info := GetRequestBodyLoggerInfo()
+	if info["initialized"] != false {
+		t.Error("未初始化时应返回 initialized=false")
+	}
+
+	// 初始化后
+	cfg := &config.Config{
+		Logging: config.Logging{
+			RequestBody: config.RequestBodyConfig{
+				Enabled:     true,
+				BaseDir:     t.TempDir(),
+				MaxAgeDays:  14,
+				IncludeBody: true,
+			},
+		},
+	}
+
+	InitRequestBodyLogger(cfg)
+	defer ShutdownRequestBodyLogger()
+
+	info = GetRequestBodyLoggerInfo()
+	if info["initialized"] != true {
+		t.Error("初始化后应返回 initialized=true")
+	}
+	if info["testMode"] != false {
+		t.Error("非测试模式")
+	}
+}
+
+// TestWriteUpstreamResponse 测试上游响应日志写入（带 io.Reader）
+func TestWriteUpstreamResponse(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cfg := &config.Config{
+		Logging: config.Logging{
+			RequestBody: config.RequestBodyConfig{
+				Enabled:     true,
+				BaseDir:     tempDir,
+				MaxSizeMB:   100,
+				MaxAgeDays:  14,
+				MaxBackups:  5,
+				Compress:    true,
+				IncludeBody: true,
+			},
+		},
+	}
+
+	InitRequestBodyLogger(cfg)
+	defer ShutdownRequestBodyLogger()
+
+	headers := http.Header{
+		"Content-Type": {"application/json"},
+	}
+	body := `{"id":"chatcmpl-123"}`
+
+	logger := GetRequestBodyLogger()
+	if logger == nil {
+		t.Fatal("日志器不应为 nil")
+	}
+
+	err := logger.WriteUpstreamResponse("test-upstream-resp", 200, headers, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("写入上游响应日志失败: %v", err)
+	}
+
+	// 验证文件创建
+	files, err := filepath.Glob(filepath.Join(tempDir, "*", "*.httpdump"))
+	if err != nil {
+		t.Fatalf("查找日志文件失败: %v", err)
+	}
+
+	if len(files) == 0 {
+		t.Error("应该创建至少一个上游响应日志文件")
+	}
+
+	// 验证文件内容
+	content, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatalf("读取日志文件失败: %v", err)
+	}
+
+	contentStr := string(content)
+	if !containsStr(contentStr, "HTTP/1.1 200 OK") {
+		t.Error("日志应包含状态行")
+	}
+	if !containsStr(contentStr, "chatcmpl-123") {
+		t.Error("日志应包含响应体内容")
+	}
+}
+
+// TestWriteUpstreamResponse_ReadError 测试读取响应体失败的情况
+func TestWriteUpstreamResponse_ReadError(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cfg := &config.Config{
+		Logging: config.Logging{
+			RequestBody: config.RequestBodyConfig{
+				Enabled:     true,
+				BaseDir:     tempDir,
+				MaxSizeMB:   100,
+				MaxAgeDays:  14,
+				MaxBackups:  5,
+				Compress:    true,
+				IncludeBody: true,
+			},
+		},
+	}
+
+	InitRequestBodyLogger(cfg)
+	defer ShutdownRequestBodyLogger()
+
+	headers := http.Header{
+		"Content-Type": {"application/json"},
+	}
+
+	// 创建一个会失败的 reader
+	failingReader := &failingReader{}
+
+	logger := GetRequestBodyLogger()
+	if logger == nil {
+		t.Fatal("日志器不应为 nil")
+	}
+
+	err := logger.WriteUpstreamResponse("test-upstream-error", 200, headers, failingReader)
+	if err != nil {
+		t.Fatalf("写入日志不应该失败: %v", err)
+	}
+
+	// 验证文件仍然创建（包含错误信息）
+	files, err := filepath.Glob(filepath.Join(tempDir, "*", "*.httpdump"))
+	if err != nil {
+		t.Fatalf("查找日志文件失败: %v", err)
+	}
+
+	if len(files) == 0 {
+		t.Error("应该创建日志文件")
+	}
+}
+
+type failingReader struct{}
+
+func (r *failingReader) Read(p []byte) (n int, err error) {
+	return 0, fmt.Errorf("模拟读取失败")
 }
