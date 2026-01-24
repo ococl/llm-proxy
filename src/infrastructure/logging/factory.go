@@ -24,6 +24,36 @@ var (
 	loggingCfg     *config.Logging
 )
 
+// newLumberjackSyncWriter 创建一个带 Sync 的 WriteSyncer，用于解决 Windows 文件锁定问题。
+// lumberjack 在进行日志轮转时会尝试重命名文件，如果文件句柄仍被持有会导致错误。
+// 通过包装 WriteSyncer 并在每次写入后调用 Sync()，可以确保文件缓冲被及时刷新。
+func newLumberjackSyncWriter(lb *lumberjack.Logger) zapcore.WriteSyncer {
+	return &syncWriteSyncer{w: zapcore.AddSync(lb)}
+}
+
+// syncWriteSyncer 包装 WriteSyncer，在每次写入后调用 Sync。
+// 用于解决 Windows 上文件被锁定无法重命名的问题。
+type syncWriteSyncer struct {
+	w zapcore.WriteSyncer
+}
+
+func (s *syncWriteSyncer) Write(p []byte) (n int, err error) {
+	n, err = s.w.Write(p)
+	if err != nil {
+		return n, err
+	}
+	// 写入后立即同步，释放文件句柄
+	if err := s.w.Sync(); err != nil {
+		// 忽略同步错误，因为文件可能已被关闭或正在轮转
+		return n, nil
+	}
+	return n, nil
+}
+
+func (s *syncWriteSyncer) Sync() error {
+	return s.w.Sync()
+}
+
 type markdownConsoleEncoder struct {
 	zapcore.Encoder
 	colored      bool
@@ -461,7 +491,8 @@ func createLogger(cfg *config.Config, name, filePath string) (*zap.Logger, *zap.
 	fileLevel := parseLevel(cfg.Logging.GetLevel())
 	consoleLevel := parseLevel(cfg.Logging.GetConsoleLevel())
 
-	fileCore := zapcore.NewCore(fileEncoder, zapcore.AddSync(fw), fileLevel)
+	// 使用带 Sync 的 WriteSyncer，解决 Windows 文件锁定问题
+	fileCore := zapcore.NewCore(fileEncoder, newLumberjackSyncWriter(fw), fileLevel)
 
 	var consoleCore zapcore.Core
 	if cfg.Logging.GetColorize() {
