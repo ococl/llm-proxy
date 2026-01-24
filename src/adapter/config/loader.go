@@ -66,8 +66,9 @@ func (a *ConfigAdapter) GetModelAlias(alias string) *port.ModelAlias {
 }
 
 // Watch returns a channel that signals configuration changes.
+// The returned channel is closed when the adapter is no longer needed.
 func (a *ConfigAdapter) Watch() <-chan struct{} {
-	return nil
+	return a.manager.Watch()
 }
 
 // GetRateLimitConfig returns the rate limit configuration.

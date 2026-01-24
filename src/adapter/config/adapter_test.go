@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"llm-proxy/infrastructure/config"
 )
@@ -152,8 +153,17 @@ func TestConfigAdapter_Watch(t *testing.T) {
 	adapter := NewConfigAdapter(manager)
 	ch := adapter.Watch()
 
-	if ch != nil {
-		t.Error("Watch should return nil since hot-reload is not implemented")
+	// Watch 现在应该返回非 nil 通道
+	if ch == nil {
+		t.Error("Watch should return a non-nil channel")
+	}
+
+	// 测试配置变更通知
+	select {
+	case <-ch:
+		// 收到配置变更信号
+	case <-time.After(3 * time.Second):
+		t.Error("Did not receive config change signal within timeout")
 	}
 }
 

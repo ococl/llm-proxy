@@ -38,9 +38,79 @@ func NewFallbackStrategy(
 	}
 }
 
-// ShouldRetry determines if a retry should be attempted.
+// ShouldRetry 根据错误类型和重试次数决定是否应该重试。
+// 对于认证错误(401)、权限错误(403)、客户端错误(400)等不应重试。
+// 对于服务器错误(500)、服务不可用(503)、超时等可以重试。
 func (fs *FallbackStrategy) ShouldRetry(attempt int, lastErr error) bool {
-	return attempt < fs.maxRetries
+	// 首先检查重试次数是否超过最大值
+	if attempt >= fs.maxRetries {
+		return false
+	}
+
+	// 如果没有错误信息,允许重试
+	if lastErr == nil {
+		return true
+	}
+
+	// 根据错误消息判断错误类型,决定是否重试
+	errMsg := lastErr.Error()
+
+	// 客户端错误(4xx)通常不应重试,除非是速率限制(429)可能需要等待后重试
+	if isClientError(errMsg) && !isRateLimitError(errMsg) {
+		return false
+	}
+
+	// 其他情况允许重试
+	return true
+}
+
+// isClientError 判断是否为客户端错误(4xx)
+func isClientError(errMsg string) bool {
+	// 检查常见的客户端错误状态码
+	clientErrorPatterns := []string{
+		"401", "Unauthorized",
+		"403", "Forbidden",
+		"400", "Bad Request",
+		"404", "Not Found",
+		"422", "Unprocessable Entity",
+	}
+
+	for _, pattern := range clientErrorPatterns {
+		if contains(errMsg, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// isRateLimitError 判断是否为速率限制错误(429)
+func isRateLimitError(errMsg string) bool {
+	rateLimitPatterns := []string{
+		"429", "Too Many Requests",
+		"rate limit",
+	}
+
+	for _, pattern := range rateLimitPatterns {
+		if contains(errMsg, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// contains 检查字符串是否包含子串
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+// containsHelper 辅助函数,检查子串是否存在于主字符串中
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 // GetBackoffDelay returns the delay before the next retry.

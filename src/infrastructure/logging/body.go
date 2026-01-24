@@ -419,7 +419,10 @@ func LogRequestBody(reqID string, logType BodyLogType, method, path, protocol st
 	if logger == nil {
 		return
 	}
-	_ = logger.WriteFromMap(reqID, logType, method, path, protocol, headers, body)
+	if err := logger.WriteFromMap(reqID, logType, method, path, protocol, headers, body); err != nil {
+		// 记录日志写入失败但不中断请求处理
+		GeneralSugar.Errorw("写入请求体日志失败", "req_id", reqID, "error", err)
+	}
 }
 
 // LogResponseBody 便捷函数：记录响应体
@@ -428,7 +431,10 @@ func LogResponseBody(reqID string, logType BodyLogType, statusCode int, headers 
 	if logger == nil {
 		return
 	}
-	_ = logger.WriteResponseFromMap(reqID, logType, statusCode, headers, body)
+	if err := logger.WriteResponseFromMap(reqID, logType, statusCode, headers, body); err != nil {
+		// 记录日志写入失败但不中断请求处理
+		GeneralSugar.Errorw("写入响应体日志失败", "req_id", reqID, "error", err)
+	}
 }
 
 // CleanupOldLogs 清理超过保留天数的日志目录
@@ -472,8 +478,7 @@ func CleanupOldLogs() error {
 		if dirDate.Before(cutoffTime) {
 			if err := os.RemoveAll(path); err != nil {
 				// 记录错误但不停止遍历
-				loggerWriteError := fmt.Errorf("删除过期日志目录失败: %w", err)
-				_ = loggerWriteError
+				GeneralSugar.Errorw("删除过期日志目录失败", "path", path, "error", err)
 			}
 		}
 

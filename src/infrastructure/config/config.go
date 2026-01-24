@@ -502,6 +502,8 @@ type Manager struct {
 	configPath string
 	lastMod    time.Time
 	mu         sync.RWMutex
+	notifyChan chan struct{}
+	stopChan   chan struct{}
 }
 
 func (cm *Manager) SetConfigForTest(cfg *Config) {
@@ -579,8 +581,48 @@ func (cm *Manager) tryReload() {
 	cm.config = &cfg
 	cm.lastMod = stat.ModTime()
 
+	// 通知配置已变更
+	if cm.notifyChan != nil {
+		select {
+		case cm.notifyChan <- struct{}{}:
+		default:
+			// 通道已满，跳过
+		}
+	}
+
 	if loggingChanged && LoggingConfigChangedFunc != nil {
 		LoggingConfigChangedFunc(&cfg)
+	}
+}
+
+// Watch 启动配置文件的监控 goroutine。
+// 返回一个通道,当配置文件发生变更时会发送信号。
+// 调用 StopWatch() 来停止监控。
+func (cm *Manager) Watch() <-chan struct{} {
+	cm.notifyChan = make(chan struct{}, 1)
+	cm.stopChan = make(chan struct{}, 1)
+
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-cm.stopChan:
+				return
+			case <-ticker.C:
+				cm.tryReload()
+			}
+		}
+	}()
+
+	return cm.notifyChan
+}
+
+// StopWatch 停止配置文件的监控。
+func (cm *Manager) StopWatch() {
+	if cm.stopChan != nil {
+		cm.stopChan <- struct{}{}
 	}
 }
 

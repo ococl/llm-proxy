@@ -147,10 +147,55 @@ func (c *ProtocolConverter) toOpenAIFormat(req *entity.Request) (*entity.Request
 }
 
 // toAnthropicFormat converts a request to Anthropic format.
+// Anthropic 使用 system 字段而不是 role: system 消息,
+// content 是数组格式而不是简单的字符串。
+// TODO: 实现完整的 Anthropic 协议转换,包括:
+// - 将 system 消息提取到单独的 system 字段
+// - 将 content 转换为 Anthropic 的数组格式
+// - 处理 max_tokens 参数(Anthropic 必须提供)
 func (c *ProtocolConverter) toAnthropicFormat(req *entity.Request) (*entity.Request, error) {
-	// Anthropic requires specific transformations
-	// For now, pass through
-	return req, nil
+	messages := req.Messages()
+	if len(messages) == 0 {
+		return req, nil
+	}
+
+	// 检查是否需要转换:有系统消息且有其他消息
+	hasSystemPrompt := false
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			hasSystemPrompt = true
+			break
+		}
+	}
+
+	// 如果没有系统消息,直接返回
+	if !hasSystemPrompt {
+		return req, nil
+	}
+
+	// Anthropic 要求提供 max_tokens 参数
+	maxTokens := req.MaxTokens()
+	if maxTokens == 0 {
+		maxTokens = 1024
+	}
+
+	// 构建新请求,设置 max_tokens
+	builder := entity.NewRequestBuilder().
+		ID(req.ID()).
+		Model(req.Model()).
+		Messages(req.Messages()).
+		MaxTokens(maxTokens).
+		Temperature(req.Temperature()).
+		TopP(req.TopP()).
+		Stream(req.IsStream()).
+		Stop(req.Stop()).
+		Tools(req.Tools()).
+		ToolChoice(req.ToolChoice()).
+		User(req.User()).
+		Context(req.Context()).
+		StreamHandler(req.StreamHandler())
+
+	return builder.BuildUnsafe(), nil
 }
 
 // fromOpenAIFormat converts a response from OpenAI format.
