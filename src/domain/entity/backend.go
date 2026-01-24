@@ -81,6 +81,7 @@ type Backend struct {
 	apiKey   APIKey
 	enabled  bool
 	protocol types.Protocol
+	locale   string // 区域语言设置，用于设置 Accept-Language header（如 zh-CN, en-US）
 }
 
 // NewBackend creates a new backend entity.
@@ -133,6 +134,11 @@ func (b *Backend) Protocol() types.Protocol {
 	return b.protocol
 }
 
+// Locale returns the locale setting for Accept-Language header.
+func (b *Backend) Locale() string {
+	return b.locale
+}
+
 // IsHealthy returns true if the backend appears healthy.
 func (b *Backend) IsHealthy() bool {
 	return b.enabled && b.url != ""
@@ -167,6 +173,7 @@ type BackendBuilder struct {
 	apiKey   string
 	enabled  bool
 	protocol types.Protocol
+	locale   string
 }
 
 // NewBackendBuilder creates a new backend builder.
@@ -207,15 +214,39 @@ func (b *BackendBuilder) Protocol(protocol types.Protocol) *BackendBuilder {
 	return b
 }
 
+// Locale sets the locale for Accept-Language header.
+func (b *BackendBuilder) Locale(locale string) *BackendBuilder {
+	b.locale = locale
+	return b
+}
+
 // Build creates the backend entity.
 func (b *BackendBuilder) Build() (*Backend, error) {
-	return NewBackend(b.name, b.url, b.apiKey, b.enabled, b.protocol)
+	return NewBackendWithLocale(b.name, b.url, b.apiKey, b.enabled, b.protocol, b.locale)
 }
 
 // BuildUnsafe creates the backend entity without validation.
 func (b *BackendBuilder) BuildUnsafe() *Backend {
-	backend, _ := NewBackend(b.name, b.url, b.apiKey, b.enabled, b.protocol)
+	backend, _ := NewBackendWithLocale(b.name, b.url, b.apiKey, b.enabled, b.protocol, b.locale)
 	return backend
+}
+
+// NewBackendWithLocale creates a new backend entity with the specified locale setting.
+func NewBackendWithLocale(name, urlStr, apiKey string, enabled bool, protocol types.Protocol, locale string) (*Backend, error) {
+	id := NewBackendID(name)
+	validURL, err := NewBackendURL(urlStr)
+	if err != nil {
+		return nil, err
+	}
+	return &Backend{
+		id:       id,
+		name:     name,
+		url:      validURL,
+		apiKey:   APIKey(apiKey),
+		enabled:  enabled,
+		protocol: protocol,
+		locale:   locale,
+	}, nil
 }
 
 // CooldownDuration is a value object for cooldown duration.
@@ -347,7 +378,7 @@ type RetryConfig struct {
 // DefaultRetryConfig returns the default retry configuration.
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
-		MaxRetries:          3,
+		MaxRetries:          0, // 默认不重试，立即切换到其他后端
 		EnableBackoff:       true,
 		BackoffInitialDelay: 100 * time.Millisecond,
 		BackoffMaxDelay:     5 * time.Second,
@@ -358,10 +389,7 @@ func DefaultRetryConfig() RetryConfig {
 
 // GetMaxRetries returns the maximum number of retries.
 func (r RetryConfig) GetMaxRetries() int {
-	if r.MaxRetries <= 0 {
-		return 3
-	}
-	return r.MaxRetries
+	return r.MaxRetries // 返回配置值，0 表示不重试
 }
 
 // GetBackoffInitialDelay returns the initial backoff delay.

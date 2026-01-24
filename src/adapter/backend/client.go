@@ -86,6 +86,10 @@ func (h *HTTPClient) buildHTTPRequest(ctx context.Context, backendReq *BackendRe
 
 	httpReq.Header.Set("Content-Type", "application/json")
 
+	if locale := backendReq.Backend.Locale(); locale != "" {
+		httpReq.Header.Set("Accept-Language", locale)
+	}
+
 	apiKey := backendReq.Backend.APIKey()
 	if !apiKey.IsEmpty() {
 		keyStr := string(apiKey)

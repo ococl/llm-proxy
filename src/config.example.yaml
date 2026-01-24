@@ -10,6 +10,7 @@ backends:
 - name: "primary"
   url: "https://api.primary-provider.com/v1"
   api_key: "sk-primary-xxx"
+  locale: "zh-CN"  # 简体中文响应（默认区域）
 
 - name: "secondary"
   url: "https://api.secondary-provider.com/v1"
@@ -21,6 +22,7 @@ backends:
   url: "https://api.anthropic.com"
   api_key: "sk-ant-xxx"
   protocol: "anthropic"  # 指定使用 Anthropic 协议
+  locale: "en-US"  # 英文响应
 
 # Azure OpenAI 协议示例
 - name: "azure-openai"
@@ -28,6 +30,7 @@ backends:
   api_key: "your-azure-api-key"
   protocol: "azure"  # Azure 专用错误转换器
   timeout: 60s  # Azure 可能需要更长超时
+  locale: "zh-CN"
 
 # DeepSeek 协议示例
 - name: "deepseek"
@@ -101,7 +104,7 @@ models:
 
 fallback:
   cooldown_seconds: 300
-  max_retries: 3
+  max_retries: 0  # 默认不重试，立即切换到其他后端
   alias_fallback:
     "anthropic/claude-sonnet-4":
     - "openai/gpt-4o"

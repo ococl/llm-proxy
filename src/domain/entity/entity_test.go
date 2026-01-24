@@ -204,10 +204,20 @@ func TestRetryConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("GetMaxRetries with zero returns default", func(t *testing.T) {
+	t.Run("GetMaxRetries with zero returns zero", func(t *testing.T) {
 		config := RetryConfig{MaxRetries: 0}
-		if config.GetMaxRetries() != 3 {
-			t.Errorf("Expected default 3, got %d", config.GetMaxRetries())
+		if config.GetMaxRetries() != 0 {
+			t.Errorf("Expected 0, got %d", config.GetMaxRetries())
+		}
+	})
+
+	t.Run("DefaultRetryConfig returns zero retries", func(t *testing.T) {
+		config := DefaultRetryConfig()
+		if config.GetMaxRetries() != 0 {
+			t.Errorf("Expected 0 (no retries by default), got %d", config.GetMaxRetries())
+		}
+		if config.MaxRetries != 0 {
+			t.Errorf("Expected MaxRetries field to be 0, got %d", config.MaxRetries)
 		}
 	})
 
