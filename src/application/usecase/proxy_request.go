@@ -480,6 +480,12 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 		}
 
 		streamHandler := func(chunk []byte) error {
+			uc.logger.Debug("处理流式数据块",
+				port.String("req_id", reqID),
+				port.String("model", modelName),
+				port.String("chunk_data", string(chunk)),
+			)
+
 			var chunkData map[string]interface{}
 			if err := json.Unmarshal(chunk, &chunkData); err != nil {
 				return err

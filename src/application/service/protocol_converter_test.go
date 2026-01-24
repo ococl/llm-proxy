@@ -4,11 +4,12 @@ import (
 	"testing"
 
 	"llm-proxy/domain/entity"
+	"llm-proxy/domain/port"
 	"llm-proxy/domain/types"
 )
 
 func TestProtocolConverter_ToBackend_PassThrough(t *testing.T) {
-	converter := NewProtocolConverter(nil)
+	converter := NewProtocolConverter(nil, &port.NopLogger{})
 
 	req := entity.NewRequest(
 		entity.NewRequestID("test-123"),
@@ -31,7 +32,7 @@ func TestProtocolConverter_ToBackend_WithSystemPrompt(t *testing.T) {
 	systemPrompts := map[string]string{
 		"gpt-4": "You are a helpful assistant.",
 	}
-	converter := NewProtocolConverter(systemPrompts)
+	converter := NewProtocolConverter(systemPrompts, &port.NopLogger{})
 
 	req := entity.NewRequest(
 		entity.NewRequestID("test-123"),
@@ -61,7 +62,7 @@ func TestProtocolConverter_ToBackend_WithSystemPrompt(t *testing.T) {
 }
 
 func TestProtocolConverter_ToBackend_Anthropic(t *testing.T) {
-	converter := NewProtocolConverter(nil)
+	converter := NewProtocolConverter(nil, &port.NopLogger{})
 
 	req := entity.NewRequest(
 		entity.NewRequestID("test-456"),
@@ -81,7 +82,7 @@ func TestProtocolConverter_ToBackend_Anthropic(t *testing.T) {
 }
 
 func TestProtocolConverter_FromBackend_PassThrough(t *testing.T) {
-	converter := NewProtocolConverter(nil)
+	converter := NewProtocolConverter(nil, &port.NopLogger{})
 
 	resp := entity.NewResponse(
 		"resp-123",
@@ -102,7 +103,7 @@ func TestProtocolConverter_FromBackend_PassThrough(t *testing.T) {
 }
 
 func TestProtocolConverter_FromBackend_Anthropic(t *testing.T) {
-	converter := NewProtocolConverter(nil)
+	converter := NewProtocolConverter(nil, &port.NopLogger{})
 
 	resp := entity.NewResponse(
 		"resp-456",
@@ -123,7 +124,7 @@ func TestProtocolConverter_FromBackend_Anthropic(t *testing.T) {
 }
 
 func TestProtocolConverter_ToBackend_NilRequest(t *testing.T) {
-	converter := NewProtocolConverter(nil)
+	converter := NewProtocolConverter(nil, &port.NopLogger{})
 
 	_, err := converter.ToBackend(nil, types.ProtocolOpenAI)
 	if err == nil {
@@ -132,7 +133,7 @@ func TestProtocolConverter_ToBackend_NilRequest(t *testing.T) {
 }
 
 func TestProtocolConverter_FromBackend_NilResponse(t *testing.T) {
-	converter := NewProtocolConverter(nil)
+	converter := NewProtocolConverter(nil, &port.NopLogger{})
 
 	_, err := converter.FromBackend(nil, types.ProtocolOpenAI)
 	if err == nil {

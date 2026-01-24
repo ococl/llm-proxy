@@ -3,21 +3,27 @@ package service
 import (
 	"llm-proxy/domain/entity"
 	domainerror "llm-proxy/domain/error"
+	"llm-proxy/domain/port"
 	"llm-proxy/domain/types"
 )
 
 // ProtocolConverter converts requests and responses between protocols.
 type ProtocolConverter struct {
 	systemPrompts map[string]string
+	logger        port.Logger
 }
 
 // NewProtocolConverter creates a new protocol converter.
-func NewProtocolConverter(systemPrompts map[string]string) *ProtocolConverter {
+func NewProtocolConverter(systemPrompts map[string]string, logger port.Logger) *ProtocolConverter {
 	if systemPrompts == nil {
 		systemPrompts = make(map[string]string)
 	}
+	if logger == nil {
+		logger = &port.NopLogger{}
+	}
 	return &ProtocolConverter{
 		systemPrompts: systemPrompts,
+		logger:        logger,
 	}
 }
 
@@ -27,16 +33,42 @@ func (c *ProtocolConverter) ToBackend(req *entity.Request, protocol types.Protoc
 		return nil, domainerror.NewInvalidRequest("request is nil")
 	}
 
-	// For now, we just pass through the request
-	// In a full implementation, we would transform the request based on protocol
+	c.logger.Debug("开始协议转换（请求）",
+		port.String("req_id", req.ID().String()),
+		port.String("target_protocol", string(protocol)),
+		port.String("model", req.Model().String()),
+		port.Int("message_count", len(req.Messages())),
+	)
+
+	var result *entity.Request
+	var err error
+
 	switch protocol {
 	case types.ProtocolOpenAI:
-		return c.toOpenAIFormat(req)
+		result, err = c.toOpenAIFormat(req)
 	case types.ProtocolAnthropic:
-		return c.toAnthropicFormat(req)
+		result, err = c.toAnthropicFormat(req)
 	default:
-		return req, nil
+		result, err = req, nil
 	}
+
+	if err != nil {
+		c.logger.Error("协议转换失败（请求）",
+			port.String("req_id", req.ID().String()),
+			port.String("target_protocol", string(protocol)),
+			port.Error(err),
+		)
+		return nil, err
+	}
+
+	c.logger.Debug("协议转换完成（请求）",
+		port.String("req_id", req.ID().String()),
+		port.String("target_protocol", string(protocol)),
+		port.Int("result_message_count", len(result.Messages())),
+		port.Bool("system_prompt_injected", len(result.Messages()) > len(req.Messages())),
+	)
+
+	return result, nil
 }
 
 // FromBackend converts a response from the backend protocol format.
@@ -45,14 +77,41 @@ func (c *ProtocolConverter) FromBackend(resp *entity.Response, protocol types.Pr
 		return nil, domainerror.NewInvalidRequest("response is nil")
 	}
 
+	c.logger.Debug("开始协议转换（响应）",
+		port.String("response_id", resp.ID),
+		port.String("source_protocol", string(protocol)),
+		port.Int("choice_count", len(resp.Choices)),
+		port.Int("prompt_tokens", resp.Usage.PromptTokens),
+		port.Int("completion_tokens", resp.Usage.CompletionTokens),
+	)
+
+	var result *entity.Response
+	var err error
+
 	switch protocol {
 	case types.ProtocolOpenAI:
-		return c.fromOpenAIFormat(resp)
+		result, err = c.fromOpenAIFormat(resp)
 	case types.ProtocolAnthropic:
-		return c.fromAnthropicFormat(resp)
+		result, err = c.fromAnthropicFormat(resp)
 	default:
-		return resp, nil
+		result, err = resp, nil
 	}
+
+	if err != nil {
+		c.logger.Error("协议转换失败（响应）",
+			port.String("response_id", resp.ID),
+			port.String("source_protocol", string(protocol)),
+			port.Error(err),
+		)
+		return nil, err
+	}
+
+	c.logger.Debug("协议转换完成（响应）",
+		port.String("response_id", resp.ID),
+		port.String("source_protocol", string(protocol)),
+	)
+
+	return result, nil
 }
 
 // toOpenAIFormat converts a request to OpenAI format.
@@ -108,5 +167,5 @@ func (c *ProtocolConverter) fromAnthropicFormat(resp *entity.Response) (*entity.
 
 // DefaultProtocolConverter returns a converter with no system prompts.
 func DefaultProtocolConverter() *ProtocolConverter {
-	return NewProtocolConverter(nil)
+	return NewProtocolConverter(nil, &port.NopLogger{})
 }

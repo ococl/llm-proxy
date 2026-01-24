@@ -104,7 +104,7 @@ func main() {
 	}
 
 	httpClient := backend_adapter.NewHTTPClient(infra_http.NewHTTPClient(clientConfig))
-	backendClient := backend_adapter.NewBackendClientAdapter(httpClient)
+	backendClient := backend_adapter.NewBackendClientAdapter(httpClient, proxyLogger)
 
 	loadBalancer := domain_service.NewLoadBalancer(domain_service.StrategyWeighted)
 
@@ -134,7 +134,7 @@ func main() {
 		cfg.Fallback.GetBackoffJitter(),
 	)
 
-	protocolConverter := service.NewProtocolConverter(loadSystemPrompts())
+	protocolConverter := service.NewProtocolConverter(loadSystemPrompts(), proxyLogger)
 
 	backendRepo := config_adapter.NewBackendRepository(configAdapter)
 	routeResolver := usecase.NewRouteResolveUseCase(configAdapter, backendRepo, cfg.Fallback.AliasFallback)
