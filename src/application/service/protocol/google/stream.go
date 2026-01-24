@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"llm-proxy/domain/entity"
@@ -39,6 +40,15 @@ type GoogleStreamChunk struct {
 	UsageMetadata  *GoogleUsageMetadata  `json:"usageMetadata,omitempty"`
 }
 
+// GoogleStreamSafetyRating Google Vertex AI 流式响应中的安全评级。
+type GoogleStreamSafetyRating struct {
+	Category         string  `json:"category"`
+	Probability      string  `json:"probability"`
+	ProbabilityScore float64 `json:"probabilityScore,omitempty"`
+	Severity         string  `json:"severity,omitempty"`
+	SeverityScore    float64 `json:"severityScore,omitempty"`
+}
+
 // ParseChunk 解析 Google Vertex AI 流式响应块。
 // Google Vertex AI 使用 JSON Lines 格式（每行一个 JSON 对象）。
 func (c *StreamChunkConverter) ParseChunk(data []byte) (*entity.StreamChunk, error) {
@@ -46,11 +56,16 @@ func (c *StreamChunkConverter) ParseChunk(data []byte) (*entity.StreamChunk, err
 		return nil, nil
 	}
 
+	// 解析为 map 以检测安全评级
+	var rawChunk map[string]interface{}
+	if err := json.Unmarshal(data, &rawChunk); err == nil {
+		c.detectSafetyRatings(rawChunk)
+	}
+
 	// Google Vertex AI 使用 JSON Lines 格式，每行一个 JSON 对象
 	// 尝试解析整行数据
 	var chunk GoogleStreamChunk
 	if err := json.Unmarshal(data, &chunk); err != nil {
-		// 如果解析失败，尝试查找 JSON 对象
 		c.logger.Debug("解析 Google Vertex AI 流式块失败",
 			port.String("error", err.Error()),
 			port.String("data", string(data[:min(100, len(data))])),
@@ -60,7 +75,10 @@ func (c *StreamChunkConverter) ParseChunk(data []byte) (*entity.StreamChunk, err
 
 	// 检查是否是最后一个块
 	if chunk.UsageMetadata != nil {
-		// 流结束，返回 usage 信息
+		c.logger.Debug("Google Vertex AI 流式结束",
+			port.Int("prompt_tokens", chunk.UsageMetadata.PromptTokenCount),
+			port.Int("candidates_tokens", chunk.UsageMetadata.CandidatesTokenCount),
+		)
 		return &entity.StreamChunk{
 			Finished:   true,
 			Content:    "",
@@ -79,6 +97,10 @@ func (c *StreamChunkConverter) ParseChunk(data []byte) (*entity.StreamChunk, err
 		for _, candidate := range chunk.Candidates {
 			for _, part := range candidate.Content.Parts {
 				content.WriteString(part.Text)
+			}
+			// 记录候选的安全评级
+			if len(candidate.SafetyRatings) > 0 {
+				c.logSafetyRatings(candidate.SafetyRatings)
 			}
 		}
 	}
@@ -207,4 +229,55 @@ func (c *StreamChunkConverter) Protocol() types.Protocol {
 // Name 返回策略名称。
 func (c *StreamChunkConverter) Name() string {
 	return "GoogleVertexAIStreamChunkConverter"
+}
+
+// detectSafetyRatings 检测并记录 Google Vertex AI 流式块中的安全评级。
+func (c *StreamChunkConverter) detectSafetyRatings(chunk map[string]interface{}) {
+	// 检测 candidates 中的 safetyRatings
+	if candidates, ok := chunk["candidates"].([]interface{}); ok {
+		for i, cand := range candidates {
+			if candMap, ok := cand.(map[string]interface{}); ok {
+				if ratings, ok := candMap["safetyRatings"].([]interface{}); ok {
+					for _, rating := range ratings {
+						if ratingMap, ok := rating.(map[string]interface{}); ok {
+							c.logger.Debug("Google Vertex AI 流式安全评级",
+								port.Int("candidate_index", i),
+								port.String("category", getStringFromMap(ratingMap, "category")),
+								port.String("probability", getStringFromMap(ratingMap, "probability")),
+							)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 检测 promptFeedback 中的安全信息
+	if feedback, ok := chunk["promptFeedback"].(map[string]interface{}); ok {
+		if blockReason, ok := feedback["blockReason"].(string); ok && blockReason != "" {
+			c.logger.Debug("Google Vertex AI 内容被阻止",
+				port.String("block_reason", blockReason),
+				port.String("message", getStringFromMap(feedback, "blockReasonMessage")),
+			)
+		}
+	}
+}
+
+// logSafetyRatings 记录候选的安全评级详细信息。
+func (c *StreamChunkConverter) logSafetyRatings(ratings []GoogleSafetyRating) {
+	for _, rating := range ratings {
+		c.logger.Debug("Google Vertex AI 安全评级",
+			port.String("category", rating.Category),
+			port.String("probability", rating.Probability),
+			port.String("probability_score", fmt.Sprintf("%.4f", rating.ProbabilityScore)),
+		)
+	}
+}
+
+// getStringFromMap 从 map 中安全获取字符串值。
+func getStringFromMap(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
 }

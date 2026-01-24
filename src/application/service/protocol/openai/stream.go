@@ -94,7 +94,20 @@ func (c *StreamChunkConverter) ParseChunk(data []byte) (*entity.StreamChunk, err
 		data = []byte(strings.TrimPrefix(trimmed, "data: "))
 	}
 
-	// 解析 JSON
+	// 解析 JSON - 使用 map 以检测额外字段
+	var rawChunk map[string]interface{}
+	if err := json.Unmarshal(data, &rawChunk); err != nil {
+		c.logger.Debug("解析 OpenAI 流式块失败",
+			port.String("error", err.Error()),
+			port.String("data", string(data)),
+		)
+		return nil, err
+	}
+
+	// 检测并记录特殊字段
+	c.detectSpecialFields(rawChunk)
+
+	// 解析为结构化数据
 	var chunk OpenAIStreamChunk
 	if err := json.Unmarshal(data, &chunk); err != nil {
 		c.logger.Debug("解析 OpenAI 流式块失败",
@@ -114,13 +127,30 @@ func (c *StreamChunkConverter) ParseChunk(data []byte) (*entity.StreamChunk, err
 		if choice.FinishReason != "" {
 			stopReason = choice.FinishReason
 		}
+
+		// 检测 tool_calls
+		if len(choice.Delta.ToolCalls) > 0 {
+			c.logger.Debug("检测到工具调用",
+				port.Int("tool_count", len(choice.Delta.ToolCalls)),
+				port.String("first_tool_id", choice.Delta.ToolCalls[0].ID),
+			)
+		}
 	}
 
-	return &entity.StreamChunk{
+	chunkResult := &entity.StreamChunk{
 		Finished:   stopReason != "",
 		Content:    content.String(),
 		StopReason: stopReason,
-	}, nil
+	}
+
+	// 如果有 system_fingerprint，记录到上下文
+	if chunk.SystemFingerprint != "" {
+		c.logger.Debug("OpenAI 流式块包含 system_fingerprint",
+			port.String("system_fingerprint", chunk.SystemFingerprint),
+		)
+	}
+
+	return chunkResult, nil
 }
 
 // BuildChunk 将标准流式块转换为 OpenAI 格式。
@@ -207,4 +237,30 @@ func (c *StreamChunkConverter) Protocol() types.Protocol {
 // Name 返回策略名称。
 func (c *StreamChunkConverter) Name() string {
 	return "OpenAIStreamChunkConverter"
+}
+
+// detectSpecialFields 检测并记录 OpenAI 流式块中的特殊字段。
+// 用于调试和监控工具调用、logprobs、system_fingerprint 等。
+func (c *StreamChunkConverter) detectSpecialFields(chunk map[string]interface{}) {
+	// 检测 choices 中的 logprobs
+	if choices, ok := chunk["choices"].([]interface{}); ok {
+		for i, choice := range choices {
+			if choiceMap, ok := choice.(map[string]interface{}); ok {
+				if _, hasLogProbs := choiceMap["logprobs"]; hasLogProbs {
+					c.logger.Debug("检测到 logprobs 字段",
+						port.Int("choice_index", i),
+					)
+				}
+			}
+		}
+	}
+
+	// 检测 system_fingerprint
+	if _, hasFingerprint := chunk["system_fingerprint"]; hasFingerprint {
+		if fingerprint, ok := chunk["system_fingerprint"].(string); ok && fingerprint != "" {
+			c.logger.Debug("检测到 system_fingerprint",
+				port.String("system_fingerprint", fingerprint),
+			)
+		}
+	}
 }

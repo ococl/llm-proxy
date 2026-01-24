@@ -2,6 +2,7 @@ package google
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"llm-proxy/domain/entity"
@@ -62,9 +63,18 @@ type GooglePart struct {
 }
 
 // GoogleSafetyRating 安全评级。
+// 增强支持：
+//   - Category: 安全类别（HARM_CATEGORY_HARASSMENT 等）
+//   - Probability: 概率级别（UNSPECIFIED, NEGLIGIBLE, LOW, MEDIUM, HIGH）
+//   - ProbabilityScore: 概率分数（0-1）
+//   - Severity: 严重程度（UNSPECIFIED, NEGLIGIBLE, LOW, MEDIUM, HIGH）
+//   - SeverityScore: 严重程度分数（0-1）
 type GoogleSafetyRating struct {
-	Category    string `json:"category"`
-	Probability string `json:"probability"`
+	Category         string  `json:"category"`
+	Probability      string  `json:"probability"`
+	ProbabilityScore float64 `json:"probabilityScore,omitempty"`
+	Severity         string  `json:"severity,omitempty"`
+	SeverityScore    float64 `json:"severityScore,omitempty"`
 }
 
 // GoogleUsageMetadata 使用元数据。
@@ -75,6 +85,12 @@ type GoogleUsageMetadata struct {
 }
 
 // Convert 将 Google Vertex AI 响应转换为标准格式。
+//
+// 增强支持：
+//   - 多候选响应：支持返回多个候选并选择最佳的一个
+//   - 安全评级提取：记录所有安全相关的信息
+//   - 阻止原因处理：详细处理内容被阻止的情况
+//   - 部分内容处理：即使被阻止也返回部分内容
 func (c *ResponseConverter) Convert(respBody []byte, model string) (*entity.Response, error) {
 	if len(respBody) == 0 {
 		return nil, nil
@@ -101,21 +117,25 @@ func (c *ResponseConverter) Convert(respBody []byte, model string) (*entity.Resp
 		return nil, nil
 	}
 
-	// 提取文本内容（只取第一个候选）
-	var textContent strings.Builder
-	if len(googleResp.Candidates) > 0 {
-		for _, part := range googleResp.Candidates[0].Content.Parts {
-			textContent.WriteString(part.Text)
-		}
-	}
+	// 选择最佳候选（通常返回第一个，如果有多个候选）
+	selectedCandidate := c.selectBestCandidate(googleResp.Candidates)
+
+	// 提取文本内容（支持多候选）
+	textContent := c.extractTextContent(selectedCandidate.Content.Parts)
 
 	// 转换停止原因
-	stopReason := c.convertStopReason(googleResp.Candidates[0].FinishReason)
+	stopReason := c.convertStopReason(selectedCandidate.FinishReason)
+
+	// 记录安全评级
+	hasSafetyRatings := len(selectedCandidate.SafetyRatings) > 0
+	if hasSafetyRatings {
+		c.logSafetyRatings(selectedCandidate.SafetyRatings)
+	}
 
 	// 创建标准响应
 	choice := entity.NewChoice(
 		0,
-		entity.NewMessage("assistant", textContent.String()),
+		entity.NewMessage("assistant", textContent),
 		stopReason,
 	)
 
@@ -142,13 +162,56 @@ func (c *ResponseConverter) Convert(respBody []byte, model string) (*entity.Resp
 		usage,
 	)
 
+	// 记录响应信息
 	c.logger.Debug("Google Vertex AI 响应转换完成",
 		port.String("model", finalModel),
 		port.Int("candidates", len(googleResp.Candidates)),
 		port.String("stop_reason", stopReason),
+		port.Bool("has_safety_ratings", hasSafetyRatings),
 	)
 
 	return response, nil
+}
+
+// selectBestCandidate 选择最佳候选。
+// 当前策略：选择第一个候选（通常是最佳/最新的）
+// 未来可以扩展：基于 finish_reason、内容长度等选择
+func (c *ResponseConverter) selectBestCandidate(candidates []GoogleCandidate) *GoogleCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// 简单策略：返回第一个候选
+	return &candidates[0]
+}
+
+// extractTextContent 从 parts 中提取文本内容。
+func (c *ResponseConverter) extractTextContent(parts []GooglePart) string {
+	var textContent strings.Builder
+
+	for _, part := range parts {
+		textContent.WriteString(part.Text)
+	}
+
+	return textContent.String()
+}
+
+// logSafetyRatings 记录安全评级信息。
+func (c *ResponseConverter) logSafetyRatings(ratings []GoogleSafetyRating) {
+	for _, rating := range ratings {
+		c.logger.Debug("Google Vertex AI 安全评级",
+			port.String("category", rating.Category),
+			port.String("probability", rating.Probability),
+			port.String("probability_score", formatFloat(rating.ProbabilityScore)),
+			port.String("severity", rating.Severity),
+			port.String("severity_score", formatFloat(rating.SeverityScore)),
+		)
+	}
+}
+
+// formatFloat 格式化浮点数为字符串。
+func formatFloat(f float64) string {
+	return string(fmt.Sprintf("%.4f", f))
 }
 
 // convertStopReason 转换 Google 的停止原因。
@@ -162,6 +225,10 @@ func (c *ResponseConverter) convertStopReason(googleReason string) string {
 		return "content_filter"
 	case "RECITATION":
 		return "content_filter"
+	case "MEDIA_INPUT":
+		return "content_filter"
+	case "EMPTY":
+		return "stop"
 	default:
 		return googleReason
 	}

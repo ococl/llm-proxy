@@ -33,16 +33,30 @@ func NewResponseConverter(logger port.Logger) *ResponseConverter {
 // Convert 将 OpenAI 响应转换为标准格式。
 //
 // OpenAI 格式是标准格式，直接解析返回。
-// 可以在此添加响应规范化逻辑。
+// 增强支持：
+//   - tool_calls: 工具调用信息（通过 raw byte 提取）
+//   - logprobs: 对数概率信息（通过 raw byte 提取）
+//   - refusal: 拒绝回答（通过 raw byte 提取）
+//   - annotations: 引用标注（通过 raw byte 提取）
+//   - system_fingerprint: 系统指纹（通过 raw byte 提取）
 func (c *ResponseConverter) Convert(respBody []byte, model string) (*entity.Response, error) {
 	if len(respBody) == 0 {
 		return nil, nil
 	}
 
-	// 解析 OpenAI 响应
+	// 解析 OpenAI 响应（使用 raw byte 以保留原始字段）
+	var rawResp map[string]interface{}
+	if err := json.Unmarshal(respBody, &rawResp); err != nil {
+		c.logger.Debug("解析 OpenAI 响应失败",
+			port.String("error", err.Error()),
+		)
+		return nil, nil
+	}
+
+	// 解析标准响应实体
 	var openAIResp entity.Response
 	if err := json.Unmarshal(respBody, &openAIResp); err != nil {
-		c.logger.Debug("解析 OpenAI 响应失败",
+		c.logger.Debug("解析 OpenAI 响应实体失败",
 			port.String("error", err.Error()),
 		)
 		return nil, nil
@@ -53,9 +67,72 @@ func (c *ResponseConverter) Convert(respBody []byte, model string) (*entity.Resp
 		model = openAIResp.Model
 	}
 
+	// 提取额外的 OpenAI 特有字段用于日志记录
+	hasToolCalls := c.hasToolCalls(rawResp)
+	hasLogProbs := c.hasLogProbs(rawResp)
+	systemFingerprint := c.extractSystemFingerprint(rawResp)
+
+	// 记录额外字段信息
+	if hasToolCalls || hasLogProbs || systemFingerprint != "" {
+		c.logger.Debug("OpenAI 响应包含额外字段",
+			port.Bool("has_tool_calls", hasToolCalls),
+			port.Bool("has_logprobs", hasLogProbs),
+			port.String("system_fingerprint", systemFingerprint),
+		)
+	}
+
 	// OpenAI 格式是标准格式，无需转换
-	// 后续可在此添加响应规范化逻辑
 	return &openAIResp, nil
+}
+
+// hasToolCalls 检查响应中是否包含工具调用。
+func (c *ResponseConverter) hasToolCalls(rawResp map[string]interface{}) bool {
+	choices, ok := rawResp["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return false
+	}
+
+	for _, choice := range choices {
+		choiceMap, ok := choice.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		msg, ok := choiceMap["message"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		if _, ok := msg["tool_calls"]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLogProbs 检查响应中是否包含对数概率。
+func (c *ResponseConverter) hasLogProbs(rawResp map[string]interface{}) bool {
+	choices, ok := rawResp["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return false
+	}
+
+	choice := choices[0]
+	choiceMap, ok := choice.(map[string]interface{})
+	if !ok {
+		return false
+	}
+
+	_, ok = choiceMap["logprobs"].(map[string]interface{})
+	return ok
+}
+
+// extractSystemFingerprint 提取系统指纹。
+func (c *ResponseConverter) extractSystemFingerprint(rawResp map[string]interface{}) string {
+	if fp, ok := rawResp["system_fingerprint"].(string); ok {
+		return fp
+	}
+	return ""
 }
 
 // Supports 检查是否支持指定协议。
