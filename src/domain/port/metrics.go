@@ -101,7 +101,7 @@ type BackendClient interface {
 
 type ProtocolConverter interface {
 	ToBackend(req *entity.Request, protocol types.Protocol) (*entity.Request, error)
-	FromBackend(resp *entity.Response, protocol types.Protocol) (*entity.Response, error)
+	FromBackend(respBody []byte, model string, protocol types.Protocol) (*entity.Response, error)
 }
 
 type RequestValidator interface {

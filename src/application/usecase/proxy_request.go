@@ -167,7 +167,9 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 		return nil, err
 	}
 
-	clientResp, err := uc.protocolConv.FromBackend(resp, backend.Protocol())
+	// 将响应序列化为字节，然后进行协议转换
+	respBody, _ := json.Marshal(resp)
+	clientResp, err := uc.protocolConv.FromBackend(respBody, modelName, backend.Protocol())
 	if err != nil {
 		uc.logger.Error("非流式响应转换失败",
 			port.String("req_id", reqID),

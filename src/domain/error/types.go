@@ -82,6 +82,8 @@ type LLMProxyError struct {
 	ReqID       string
 	BackendName string
 	HTTPStatus  int
+	Provider    string // LLM 提供商标识
+	Retryable   bool   // 是否可重试
 }
 
 // Error implements the error interface.

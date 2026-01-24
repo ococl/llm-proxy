@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 
 	"llm-proxy/domain/entity"
@@ -166,12 +167,14 @@ func TestProtocolConverter_FromBackend_PassThrough(t *testing.T) {
 		entity.NewUsage(10, 5),
 	)
 
-	result, err := converter.FromBackend(resp, types.ProtocolOpenAI)
+	// 序列化响应为字节
+	respBody, _ := json.Marshal(resp)
+	result, err := converter.FromBackend(respBody, "gpt-4", types.ProtocolOpenAI)
 	if err != nil {
 		t.Errorf("FromBackend returned unexpected error: %v", err)
 	}
-	if result != resp {
-		t.Error("FromBackend should return the same response when no transformation is needed")
+	if result == nil || result.ID != resp.ID {
+		t.Error("FromBackend should return a valid response")
 	}
 }
 
@@ -187,12 +190,13 @@ func TestProtocolConverter_FromBackend_Anthropic(t *testing.T) {
 		entity.NewUsage(8, 4),
 	)
 
-	result, err := converter.FromBackend(resp, types.ProtocolAnthropic)
+	respBody, _ := json.Marshal(resp)
+	result, err := converter.FromBackend(respBody, "claude-3", types.ProtocolAnthropic)
 	if err != nil {
 		t.Errorf("FromBackend returned unexpected error: %v", err)
 	}
-	if result != resp {
-		t.Error("FromBackend should pass through for Anthropic protocol")
+	if result == nil {
+		t.Error("FromBackend should return a valid response for Anthropic")
 	}
 }
 
@@ -208,7 +212,7 @@ func TestProtocolConverter_ToBackend_NilRequest(t *testing.T) {
 func TestProtocolConverter_FromBackend_NilResponse(t *testing.T) {
 	converter := NewProtocolConverter(nil, &port.NopLogger{})
 
-	_, err := converter.FromBackend(nil, types.ProtocolOpenAI)
+	_, err := converter.FromBackend(nil, "gpt-4", types.ProtocolOpenAI)
 	if err == nil {
 		t.Error("FromBackend should return error for nil response")
 	}

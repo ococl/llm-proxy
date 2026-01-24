@@ -108,6 +108,7 @@ type Request struct {
 	id             RequestID
 	model          ModelAlias
 	messages       []Message
+	systemPrompt   string // Anthropic 需要独立的 system 字段
 	maxTokens      int
 	temperature    float64
 	topP           float64
@@ -147,6 +148,11 @@ func (r *Request) Model() ModelAlias {
 // Messages returns the messages.
 func (r *Request) Messages() []Message {
 	return r.messages
+}
+
+// SystemPrompt returns the system prompt (used by Anthropic).
+func (r *Request) SystemPrompt() string {
+	return r.systemPrompt
 }
 
 // MaxTokens returns the max tokens.
@@ -244,6 +250,7 @@ type RequestBuilder struct {
 	id             RequestID
 	model          ModelAlias
 	messages       []Message
+	systemPrompt   string // Anthropic 需要独立的 system 字段
 	maxTokens      int
 	temperature    float64
 	topP           float64
@@ -282,6 +289,12 @@ func (rb *RequestBuilder) Model(model ModelAlias) *RequestBuilder {
 // Messages sets the messages.
 func (rb *RequestBuilder) Messages(messages []Message) *RequestBuilder {
 	rb.messages = messages
+	return rb
+}
+
+// System sets the system prompt (used by Anthropic).
+func (rb *RequestBuilder) System(systemPrompt string) *RequestBuilder {
+	rb.systemPrompt = systemPrompt
 	return rb
 }
 
@@ -371,6 +384,7 @@ func (rb *RequestBuilder) Build() (*Request, error) {
 		id:             rb.id,
 		model:          rb.model,
 		messages:       rb.messages,
+		systemPrompt:   rb.systemPrompt,
 		maxTokens:      rb.maxTokens,
 		temperature:    rb.temperature,
 		topP:           rb.topP,
