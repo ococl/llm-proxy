@@ -412,6 +412,104 @@ func (a *BackendClientAdapter) SendStreaming(
 	return nil
 }
 
+func (a *BackendClientAdapter) SendStreamingPassthrough(
+	ctx context.Context,
+	req *entity.Request,
+	backend *entity.Backend,
+	backendModel string,
+) (*http.Response, error) {
+	reqID := req.ID().String()
+
+	a.logger.Debug("准备发送上游流式请求(透传模式)",
+		port.String("req_id", reqID),
+		port.String("backend", backend.Name()),
+		port.String("backend_url", backend.URL().String()),
+		port.String("backend_model", backendModel),
+	)
+
+	body := map[string]interface{}{
+		"model":    backendModel,
+		"messages": req.Messages(),
+	}
+
+	if req.MaxTokens() > 0 {
+		body["max_tokens"] = req.MaxTokens()
+	}
+	if req.Temperature() != 1.0 {
+		body["temperature"] = req.Temperature()
+	}
+	if req.TopP() != 1.0 {
+		body["top_p"] = req.TopP()
+	}
+	if len(req.Stop()) > 0 {
+		body["stop"] = req.Stop()
+	}
+	if len(req.Tools()) > 0 {
+		body["tools"] = req.Tools()
+	}
+	if req.ToolChoice() != nil {
+		body["tool_choice"] = req.ToolChoice()
+	}
+	if req.User() != "" {
+		body["user"] = req.User()
+	}
+	body["stream"] = true
+
+	if upstreamBodyJSON, err := json.Marshal(body); err == nil {
+		a.logger.Debug("上游流式请求体",
+			port.String("req_id", reqID),
+			port.String("backend", backend.Name()),
+			port.String("request_body", string(upstreamBodyJSON)),
+		)
+	}
+
+	backendReq := &BackendRequest{
+		Backend: backend,
+		Body:    body,
+		Headers: mergeHeadersWithDefaults(req.Headers()),
+		Path:    "/chat/completions",
+		Stream:  true,
+	}
+
+	a.logger.Info("发送上游流式请求(透传模式)",
+		port.String("req_id", reqID),
+		port.String("backend", backend.Name()),
+		port.String("backend_model", backendModel),
+	)
+
+	httpResp, err := a.client.Send(ctx, backendReq)
+	if err != nil {
+		a.logger.Error("上游流式请求发送失败(透传模式)",
+			port.String("req_id", reqID),
+			port.String("backend", backend.Name()),
+			port.Error(err),
+		)
+		return nil, err
+	}
+
+	a.logger.Debug("收到上游流式响应(透传模式)",
+		port.String("req_id", reqID),
+		port.String("backend", backend.Name()),
+		port.Int("status_code", httpResp.StatusCode),
+	)
+
+	if httpResp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		a.logger.Warn("上游流式请求返回错误状态码(透传模式)",
+			port.String("req_id", reqID),
+			port.String("backend", backend.Name()),
+			port.Int("status_code", httpResp.StatusCode),
+		)
+		return nil, &BackendError{
+			StatusCode: httpResp.StatusCode,
+			Body:       string(respBody),
+		}
+	}
+
+	return httpResp, nil
+}
+
 // GetHTTPClient returns the underlying HTTP client.
 func (a *BackendClientAdapter) GetHTTPClient() *http.Client {
 	return a.client.GetHTTPClient()

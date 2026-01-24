@@ -183,42 +183,24 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
 
-	var headersWritten bool
-	streamHandler := func(resp *entity.Response) error {
-		if !headersWritten {
-			for k, v := range resp.Headers {
-				for _, val := range v {
-					w.Header().Add(k, val)
-				}
-			}
-			w.WriteHeader(http.StatusOK)
-			headersWritten = true
-		}
-
-		respJSON, err := json.Marshal(resp)
-		if err != nil {
+	passthroughHandler := func(chunk []byte) error {
+		if _, err := w.Write(chunk); err != nil {
+			h.logger.Error("写入流式数据块失败",
+				port.String("req_id", req.ID().String()),
+				port.Error(err),
+			)
 			return err
 		}
-		if len(respJSON) > 0 {
-			if _, err := w.Write([]byte("data: ")); err != nil {
-				return err
-			}
-			if _, err := w.Write(respJSON); err != nil {
-				return err
-			}
-			if _, err := w.Write([]byte("\n\n")); err != nil {
-				return err
-			}
-			flusher.Flush()
-		}
+		flusher.Flush()
 		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
 	defer cancel()
 
-	if err := h.proxyUseCase.ExecuteStreaming(ctx, req, streamHandler); err != nil {
+	if err := h.proxyUseCase.ExecuteStreamingPassthrough(ctx, req, passthroughHandler); err != nil {
 		h.logger.Error("流式请求处理失败",
 			port.String("req_id", req.ID().String()),
 			port.String("model", req.Model().String()),
@@ -231,9 +213,6 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 		port.String("req_id", req.ID().String()),
 		port.String("model", req.Model().String()),
 	)
-
-	w.Write([]byte("data: [DONE]\n\n"))
-	flusher.Flush()
 }
 
 func (h *ProxyHandler) writeResponse(w http.ResponseWriter, resp *entity.Response) {
@@ -337,17 +316,26 @@ func (h *ProxyHandler) extractMessages(reqBody map[string]interface{}) ([]entity
 		return nil, domainerror.NewBadRequest("缺少 messages 字段")
 	}
 
+	if len(messagesRaw) == 0 {
+		return nil, domainerror.NewBadRequest("messages 数组不能为空")
+	}
+
 	messages := make([]entity.Message, 0, len(messagesRaw))
-	for _, msgRaw := range messagesRaw {
+	for i, msgRaw := range messagesRaw {
 		msgMap, ok := msgRaw.(map[string]interface{})
 		if !ok {
-			continue
+			return nil, domainerror.NewBadRequest(fmt.Sprintf("messages[%d] 必须是一个对象", i))
 		}
 
-		role, _ := msgMap["role"].(string)
-		content, _ := msgMap["content"].(string)
+		role, ok := msgMap["role"].(string)
+		if !ok || role == "" {
+			return nil, domainerror.NewBadRequest(fmt.Sprintf("messages[%d] 缺少有效的 role 字段", i))
+		}
 
-		msg := entity.NewMessage(role, content)
+		// 支持任意类型的 content（字符串、数组多模态内容、对象等）
+		content := msgMap["content"]
+
+		msg := entity.NewMessageWithContent(role, content)
 
 		if toolCalls, ok := msgMap["tool_calls"].([]interface{}); ok {
 			domainToolCalls := make([]entity.ToolCall, 0, len(toolCalls))

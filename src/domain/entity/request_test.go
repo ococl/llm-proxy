@@ -2,6 +2,7 @@ package entity
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 )
 
@@ -72,6 +73,56 @@ func TestMessage(t *testing.T) {
 		}
 		if !msg.IsToolResult() {
 			t.Error("Expected IsToolResult to return true")
+		}
+	})
+
+	t.Run("NewMessageWithContent creates message with any content type", func(t *testing.T) {
+		// 测试数组类型 content（多模态内容）
+		multimodalContent := []interface{}{
+			map[string]interface{}{"type": "text", "text": "Hello"},
+			map[string]interface{}{"type": "image_url", "image_url": "https://example.com/image.png"},
+		}
+		msg := NewMessageWithContent("user", multimodalContent)
+
+		if msg.Role != "user" {
+			t.Errorf("Expected role 'user', got '%s'", msg.Role)
+		}
+
+		contentSlice, ok := msg.Content.([]interface{})
+		if !ok {
+			t.Fatal("Expected content to be []interface{}")
+		}
+		if len(contentSlice) != 2 {
+			t.Errorf("Expected 2 content parts, got %d", len(contentSlice))
+		}
+	})
+
+	t.Run("IsEmpty returns true for message with nil content", func(t *testing.T) {
+		msg := Message{Role: "user"}
+		if !msg.IsEmpty() {
+			t.Error("Expected IsEmpty to return true for nil content")
+		}
+	})
+
+	t.Run("IsEmpty returns true for message with empty array content", func(t *testing.T) {
+		msg := Message{
+			Role:    "user",
+			Content: []interface{}{},
+		}
+		if !msg.IsEmpty() {
+			t.Error("Expected IsEmpty to return true for empty array content")
+		}
+	})
+
+	t.Run("IsEmpty returns false for message with non-empty array content", func(t *testing.T) {
+		msg := Message{
+			Role: "user",
+			Content: []interface{}{
+				map[string]interface{}{"type": "text", "text": "Hello"},
+			},
+		}
+		if msg.IsEmpty() {
+			t.Error("Expected IsEmpty to return false for non-empty array content")
 		}
 	})
 }
@@ -354,6 +405,119 @@ func TestResponseBuilder(t *testing.T) {
 		resp := builder.BuildUnsafe()
 		if resp == nil {
 			t.Error("Expected non-nil response from BuildUnsafe")
+		}
+	})
+}
+
+func TestMessage_JSONSerialization_AnyContent(t *testing.T) {
+	t.Run("Message with string content serializes correctly", func(t *testing.T) {
+		msg := NewMessage("user", "Hello, world!")
+		data, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("Failed to marshal message: %v", err)
+		}
+
+		// 验证 JSON 包含正确的字段
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("Failed to unmarshal to map: %v", err)
+		}
+
+		if result["role"] != "user" {
+			t.Errorf("Expected role 'user', got '%v'", result["role"])
+		}
+		if result["content"] != "Hello, world!" {
+			t.Errorf("Expected content 'Hello, world!', got '%v'", result["content"])
+		}
+	})
+
+	t.Run("Message with multimodal content array serializes correctly", func(t *testing.T) {
+		multimodalContent := []interface{}{
+			map[string]interface{}{"type": "text", "text": "Hello"},
+			map[string]interface{}{"type": "image_url", "image_url": map[string]string{"url": "https://example.com/image.png"}},
+		}
+		msg := NewMessageWithContent("user", multimodalContent)
+		data, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("Failed to marshal message with array content: %v", err)
+		}
+
+		// 验证 JSON 包含正确的 content 数组
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("Failed to unmarshal to map: %v", err)
+		}
+
+		content, ok := result["content"].([]interface{})
+		if !ok {
+			t.Fatal("Expected content to be an array")
+		}
+		if len(content) != 2 {
+			t.Errorf("Expected 2 content parts, got %d", len(content))
+		}
+	})
+
+	t.Run("Message with nested object content serializes correctly", func(t *testing.T) {
+		nestedContent := map[string]interface{}{
+			"type": "custom",
+			"data": map[string]interface{}{
+				"key": "value",
+				"num": 123,
+			},
+		}
+		msg := NewMessageWithContent("assistant", nestedContent)
+		data, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("Failed to marshal message with nested object content: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("Failed to unmarshal to map: %v", err)
+		}
+
+		content, ok := result["content"].(map[string]interface{})
+		if !ok {
+			t.Fatal("Expected content to be an object")
+		}
+		if content["type"] != "custom" {
+			t.Errorf("Expected type 'custom', got '%v'", content["type"])
+		}
+	})
+
+	t.Run("Message with empty string content serializes correctly", func(t *testing.T) {
+		msg := NewMessage("user", "")
+		data, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("Failed to marshal message with empty content: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("Failed to unmarshal to map: %v", err)
+		}
+
+		// 空字符串 content 应该被保留（因为没有 omitempty）
+		if result["content"] != "" {
+			t.Errorf("Expected empty string content, got '%v'", result["content"])
+		}
+	})
+
+	t.Run("Message with nil content serializes correctly", func(t *testing.T) {
+		msg := Message{Role: "user"}
+		data, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("Failed to marshal message with nil content: %v", err)
+		}
+
+		// nil content 不应该出现在 JSON 中（因为 omitempty）
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("Failed to unmarshal to map: %v", err)
+		}
+
+		if _, exists := result["content"]; exists {
+			t.Error("Expected nil content to be omitted from JSON")
 		}
 	})
 }

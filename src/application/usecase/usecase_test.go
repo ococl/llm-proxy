@@ -37,6 +37,10 @@ func (m *MockBackendClient) GetHTTPClient() *http.Client {
 	return nil
 }
 
+func (m *MockBackendClient) SendStreamingPassthrough(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*http.Response, error) {
+	return nil, nil
+}
+
 // MockRouteResolver is a mock implementation of port.RouteResolver
 type MockRouteResolver struct {
 	resolveFunc func(alias string) ([]*port.Route, error)

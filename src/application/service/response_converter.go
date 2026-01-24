@@ -1,6 +1,8 @@
 package service
 
 import (
+	"encoding/json"
+
 	"llm-proxy/domain/entity"
 )
 
@@ -65,7 +67,12 @@ func (rc *ResponseConverter) MergeStreamChunks(chunks []*entity.Response) *entit
 	for _, chunk := range chunks {
 		if firstChoice := chunk.FirstChoice(); firstChoice != nil {
 			if firstChoice.Delta != nil {
-				mergedContent += firstChoice.Delta.Content
+				// 处理 Delta.Content 为任意类型的情况
+				if contentStr, ok := firstChoice.Delta.Content.(string); ok {
+					mergedContent += contentStr
+				} else if contentAny, err := json.Marshal(firstChoice.Delta.Content); err == nil {
+					mergedContent += string(contentAny)
+				}
 			}
 			if firstChoice.FinishReason != "" {
 				lastFinishReason = firstChoice.FinishReason

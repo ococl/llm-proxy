@@ -324,3 +324,95 @@ func TestExtractReqID(t *testing.T) {
 		}
 	})
 }
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || findSubstring(s, substr)))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func TestExtractMessages(t *testing.T) {
+	handler := &ProxyHandler{
+		logger: &MockLogger{},
+	}
+
+	t.Run("拒绝空 messages 数组", func(t *testing.T) {
+		reqBody := map[string]interface{}{
+			"messages": []interface{}{},
+		}
+
+		_, err := handler.extractMessages(reqBody)
+		if err == nil {
+			t.Error("期望返回错误，但得到 nil")
+		}
+
+		if err != nil {
+			expectedSubstring := "messages 数组不能为空"
+			if !contains(err.Error(), expectedSubstring) {
+				t.Errorf("期望错误信息包含 '%s'，得到 '%s'", expectedSubstring, err.Error())
+			}
+		}
+	})
+
+	t.Run("拒绝缺少 role 的消息", func(t *testing.T) {
+		reqBody := map[string]interface{}{
+			"messages": []interface{}{
+				map[string]interface{}{
+					"content": "hello",
+				},
+			},
+		}
+
+		_, err := handler.extractMessages(reqBody)
+		if err == nil {
+			t.Error("期望返回错误，但得到 nil")
+		}
+	})
+
+	t.Run("拒绝 role 为空字符串的消息", func(t *testing.T) {
+		reqBody := map[string]interface{}{
+			"messages": []interface{}{
+				map[string]interface{}{
+					"role":    "",
+					"content": "hello",
+				},
+			},
+		}
+
+		_, err := handler.extractMessages(reqBody)
+		if err == nil {
+			t.Error("期望返回错误，但得到 nil")
+		}
+	})
+
+	t.Run("接受有效的消息数组", func(t *testing.T) {
+		reqBody := map[string]interface{}{
+			"messages": []interface{}{
+				map[string]interface{}{
+					"role":    "user",
+					"content": "hello",
+				},
+			},
+		}
+
+		messages, err := handler.extractMessages(reqBody)
+		if err != nil {
+			t.Errorf("期望成功，但得到错误: %v", err)
+		}
+
+		if len(messages) != 1 {
+			t.Errorf("期望 1 条消息，得到 %d", len(messages))
+		}
+
+		if messages[0].Role != "user" {
+			t.Errorf("期望 role='user'，得到 '%s'", messages[0].Role)
+		}
+	})
+}

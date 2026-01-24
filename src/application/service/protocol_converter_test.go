@@ -147,3 +147,110 @@ func TestDefaultProtocolConverter(t *testing.T) {
 		t.Error("DefaultProtocolConverter should not return nil")
 	}
 }
+
+func TestResponseConverter_MergeStreamChunks_AnyContent(t *testing.T) {
+	converter := NewResponseConverter()
+
+	t.Run("merges string content correctly", func(t *testing.T) {
+		// 构造带有 Delta 的流式响应块
+		chunks := []*entity.Response{
+			{
+				ID:      "resp-1",
+				Model:   "gpt-4",
+				Choices: []entity.Choice{{Index: 0, Delta: &entity.Message{Role: "assistant", Content: "Hello"}, FinishReason: ""}},
+				Usage:   entity.NewUsage(5, 0),
+			},
+			{
+				ID:      "resp-1",
+				Model:   "gpt-4",
+				Choices: []entity.Choice{{Index: 0, Delta: &entity.Message{Role: "assistant", Content: " world"}, FinishReason: ""}},
+				Usage:   entity.NewUsage(5, 5),
+			},
+		}
+
+		result := converter.MergeStreamChunks(chunks)
+
+		if result == nil {
+			t.Fatal("Expected non-nil result")
+		}
+
+		// 检查合并后的内容
+		if len(result.Choices) != 1 {
+			t.Errorf("Expected 1 choice, got %d", len(result.Choices))
+		}
+
+		choice := result.Choices[0]
+		content, ok := choice.Message.Content.(string)
+		if !ok {
+			t.Fatal("Expected content to be string")
+		}
+		if content != "Hello world" {
+			t.Errorf("Expected merged content 'Hello world', got '%s'", content)
+		}
+
+		// 检查 Usage - 应该累加
+		if result.Usage.PromptTokens != 10 {
+			t.Errorf("Expected 10 prompt tokens, got %d", result.Usage.PromptTokens)
+		}
+		if result.Usage.CompletionTokens != 5 {
+			t.Errorf("Expected 5 completion tokens, got %d", result.Usage.CompletionTokens)
+		}
+	})
+
+	t.Run("handles empty chunks", func(t *testing.T) {
+		result := converter.MergeStreamChunks([]*entity.Response{})
+		if result != nil {
+			t.Error("Expected nil for empty chunks")
+		}
+	})
+
+	t.Run("merges non-string content by converting to string", func(t *testing.T) {
+		multimodalContent := []interface{}{
+			map[string]interface{}{"type": "text", "text": "Image: "},
+		}
+		chunks := []*entity.Response{
+			{
+				ID:      "resp-1",
+				Model:   "gpt-4",
+				Choices: []entity.Choice{{Index: 0, Delta: &entity.Message{Role: "assistant", Content: multimodalContent}, FinishReason: ""}},
+				Usage:   entity.NewUsage(10, 0),
+			},
+			{
+				ID:      "resp-1",
+				Model:   "gpt-4",
+				Choices: []entity.Choice{{Index: 0, Delta: &entity.Message{Role: "assistant", Content: "an image"}, FinishReason: ""}},
+				Usage:   entity.NewUsage(10, 5),
+			},
+		}
+
+		result := converter.MergeStreamChunks(chunks)
+
+		if result == nil {
+			t.Fatal("Expected non-nil result")
+		}
+
+		// 验证非字符串内容被正确处理
+		content, ok := result.Choices[0].Message.Content.(string)
+		if !ok {
+			t.Fatalf("Expected content to be string after merging, got %T", result.Choices[0].Message.Content)
+		}
+
+		// 验证内容包含多模态标记
+		if !contains(content, "Image:") || !contains(content, "an image") {
+			t.Errorf("Expected merged content to contain image markers, got '%s'", content)
+		}
+	})
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
+}
+
+func containsAt(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

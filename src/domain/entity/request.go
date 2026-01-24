@@ -25,14 +25,15 @@ func (id RequestID) IsEmpty() bool {
 }
 
 // Message represents a chat message.
+// Content can be a string, array (multimodal content), or any valid JSON type.
 type Message struct {
 	Role       string     `json:"role,omitempty"`
-	Content    string     `json:"content"`
+	Content    any        `json:"content,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
-// NewMessage creates a new message.
+// NewMessage creates a new message with string content.
 func NewMessage(role, content string) Message {
 	return Message{
 		Role:    role,
@@ -40,9 +41,30 @@ func NewMessage(role, content string) Message {
 	}
 }
 
-// IsEmpty returns true if the message has no content.
+// NewMessageWithContent creates a new message with any type of content.
+func NewMessageWithContent(role string, content any) Message {
+	return Message{
+		Role:    role,
+		Content: content,
+	}
+}
+
+// IsEmpty returns true if the message has no content and no tool calls.
 func (m Message) IsEmpty() bool {
-	return m.Content == "" && len(m.ToolCalls) == 0
+	// Content is considered empty if:
+	// 1. It's nil
+	// 2. It's an empty string
+	// 3. It's an empty array/slice
+	contentEmpty := m.Content == nil
+	if !contentEmpty {
+		switch v := m.Content.(type) {
+		case string:
+			contentEmpty = v == ""
+		case []interface{}:
+			contentEmpty = len(v) == 0
+		}
+	}
+	return contentEmpty && len(m.ToolCalls) == 0
 }
 
 // IsToolCall returns true if the message contains tool calls.

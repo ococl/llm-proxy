@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"time"
 
 	"llm-proxy/domain/entity"
@@ -312,6 +313,119 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 	return nil, domainerror.NewNoBackend()
 }
 
+func (uc *ProxyRequestUseCase) ExecuteStreamingPassthrough(
+	ctx context.Context,
+	req *entity.Request,
+	handler func([]byte) error,
+) error {
+	startTime := time.Now()
+	reqID := req.ID().String()
+	modelName := req.Model().String()
+
+	uc.logger.Info("请求开始(透传模式)",
+		port.String("req_id", reqID),
+		port.String("model", modelName),
+		port.String("client_protocol", req.ClientProtocol()),
+	)
+
+	if err := uc.validateRequest(req); err != nil {
+		uc.logger.Warn("验证失败",
+			port.String("req_id", reqID),
+			port.String("model", modelName),
+			port.Error(err),
+		)
+		return err
+	}
+
+	routes, err := uc.routeResolver.Resolve(req.Model().String())
+	if err != nil {
+		uc.logger.Error("解析路由失败",
+			port.String("req_id", reqID),
+			port.String("model", modelName),
+			port.Error(err),
+		)
+		return err
+	}
+
+	availableRoutes := uc.fallbackStrategy.FilterAvailableRoutes(routes)
+	if len(availableRoutes) == 0 {
+		uc.logger.Warn("后端全部冷却，尝试降级",
+			port.String("req_id", reqID),
+			port.String("model", modelName),
+		)
+
+		fallbackRoutes, err := uc.fallbackStrategy.GetFallbackRoutes(req.Model().String(), uc.routeResolver)
+		if err != nil || len(fallbackRoutes) == 0 {
+			uc.logger.Error("无可用后端",
+				port.String("req_id", reqID),
+				port.String("model", modelName),
+			)
+			return domainerror.NewNoBackend()
+		}
+
+		uc.logger.Info("触发降级",
+			port.String("req_id", reqID),
+			port.String("original_model", modelName),
+			port.Int("fallback_routes", len(fallbackRoutes)),
+		)
+		availableRoutes = fallbackRoutes
+	}
+
+	backend := uc.loadBalancer.Select(availableRoutes)
+	if backend == nil {
+		uc.logger.Error("选择后端失败",
+			port.String("req_id", reqID),
+			port.String("model", modelName),
+		)
+		return domainerror.NewNoBackend()
+	}
+
+	selectedRoute := findRouteForBackend(availableRoutes, backend)
+	backendModelName := modelName
+	if selectedRoute != nil {
+		backendModelName = selectedRoute.Model
+	}
+
+	uc.logger.Debug("后端选择",
+		port.String("req_id", reqID),
+		port.String("model", modelName),
+		port.String("backend", backend.Name()),
+		port.String("backend_model", backendModelName),
+	)
+
+	backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
+	if err != nil {
+		uc.logger.Error("转换协议失败",
+			port.String("req_id", reqID),
+			port.String("model", modelName),
+			port.String("backend", backend.Name()),
+			port.String("backend_model", backendModelName),
+			port.Error(err),
+		)
+		return domainerror.NewProtocolError("failed to convert request", err)
+	}
+
+	err = uc.executeStreamingPassthroughWithRetry(ctx, backendReq, availableRoutes, backendModelName, handler)
+	if err != nil {
+		uc.logger.Error("请求失败(透传模式)",
+			port.String("req_id", reqID),
+			port.String("model", modelName),
+			port.String("backend", backend.Name()),
+			port.String("backend_model", backendModelName),
+			port.Int64("duration_ms", time.Since(startTime).Milliseconds()),
+			port.Error(err),
+		)
+		return err
+	}
+
+	uc.logger.Info("请求完成(透传模式)",
+		port.String("req_id", reqID),
+		port.Int64("duration_ms", time.Since(startTime).Milliseconds()),
+	)
+
+	return nil
+}
+
 // ExecuteStreaming processes a streaming proxy request.
 func (uc *ProxyRequestUseCase) ExecuteStreaming(
 	ctx context.Context,
@@ -616,7 +730,171 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetry(
 	return domainerror.NewNoBackend()
 }
 
-// findRouteForBackend finds the route that corresponds to the given backend.
+func (uc *ProxyRequestUseCase) executeStreamingPassthroughWithRetry(
+	ctx context.Context,
+	req *entity.Request,
+	routes []*port.Route,
+	backendModelName string,
+	handler func([]byte) error,
+) error {
+	var lastErr error
+	maxRetries := uc.retryStrategy.GetMaxRetries()
+	reqID := req.ID().String()
+	modelName := req.Model().String()
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		backend := uc.loadBalancer.Select(routes)
+		if backend == nil {
+			uc.logger.Error("重试时无可用后端",
+				port.String("req_id", reqID),
+				port.String("model", modelName),
+				port.Int("attempt", attempt),
+			)
+			return domainerror.NewNoBackend()
+		}
+
+		selectedRoute := findRouteForBackend(routes, backend)
+		currentBackendModel := backendModelName
+		if selectedRoute != nil {
+			currentBackendModel = selectedRoute.Model
+		}
+
+		if attempt > 0 {
+			uc.logger.Debug("重试请求(透传模式)",
+				port.String("req_id", reqID),
+				port.String("model", modelName),
+				port.String("backend", backend.Name()),
+				port.String("backend_model", currentBackendModel),
+				port.Int("attempt", attempt),
+				port.Int("max_retries", maxRetries),
+			)
+		}
+
+		backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
+		if err != nil {
+			uc.logger.Error("重试时转换失败",
+				port.String("req_id", reqID),
+				port.String("model", modelName),
+				port.String("backend", backend.Name()),
+				port.String("backend_model", currentBackendModel),
+				port.Int("attempt", attempt),
+				port.Error(err),
+			)
+			return domainerror.NewProtocolError("request conversion failed", err)
+		}
+
+		httpResp, err := uc.backendClient.SendStreamingPassthrough(ctx, backendReq, backend, currentBackendModel)
+		if err != nil {
+			lastErr = err
+			uc.metrics.IncBackendErrors(backend.Name())
+
+			uc.logger.Warn("后端错误，尝试重试(透传模式)",
+				port.String("req_id", reqID),
+				port.String("model", modelName),
+				port.String("backend", backend.Name()),
+				port.String("backend_model", currentBackendModel),
+				port.Int("attempt", attempt),
+				port.Error(err),
+			)
+
+			if !uc.retryStrategy.ShouldRetry(attempt, err) {
+				uc.logger.Error("重试次数耗尽",
+					port.String("req_id", reqID),
+					port.String("model", modelName),
+					port.String("backend", backend.Name()),
+					port.String("backend_model", currentBackendModel),
+					port.Int("attempts", attempt+1),
+					port.Error(lastErr),
+				)
+				return domainerror.NewBackendError(backend.Name(), err)
+			}
+
+			delay := uc.retryStrategy.GetDelay(attempt)
+			if delay > 0 {
+				uc.logger.Debug("重试等待",
+					port.String("req_id", reqID),
+					port.String("model", modelName),
+					port.Int64("delay_ms", delay.Milliseconds()),
+					port.Int("next_attempt", attempt+1),
+				)
+				select {
+				case <-time.After(delay):
+				case <-ctx.Done():
+					uc.logger.Warn("重试被取消",
+						port.String("req_id", reqID),
+						port.String("model", modelName),
+						port.Int("attempt", attempt),
+					)
+					return ctx.Err()
+				}
+			}
+			continue
+		}
+		defer httpResp.Body.Close()
+
+		uc.logger.Debug("开始读取上游流式响应(透传模式)",
+			port.String("req_id", reqID),
+			port.String("backend", backend.Name()),
+		)
+
+		buf := make([]byte, 32*1024)
+		totalBytes := 0
+		for {
+			n, readErr := httpResp.Body.Read(buf)
+			if n > 0 {
+				totalBytes += n
+				chunk := buf[:n]
+				if handlerErr := handler(chunk); handlerErr != nil {
+					uc.logger.Error("处理流式数据块失败(透传模式)",
+						port.String("req_id", reqID),
+						port.String("backend", backend.Name()),
+						port.Error(handlerErr),
+					)
+					return handlerErr
+				}
+			}
+			if readErr != nil {
+				if readErr == io.EOF {
+					uc.logger.Debug("上游流式响应结束(透传模式)",
+						port.String("req_id", reqID),
+						port.String("backend", backend.Name()),
+						port.Int("total_bytes", totalBytes),
+					)
+					break
+				}
+				uc.logger.Error("读取上游流式响应失败(透传模式)",
+					port.String("req_id", reqID),
+					port.String("backend", backend.Name()),
+					port.Error(readErr),
+				)
+				return readErr
+			}
+		}
+
+		if attempt > 0 {
+			uc.logger.Info("重试成功(透传模式)",
+				port.String("req_id", reqID),
+				port.String("model", modelName),
+				port.String("backend", backend.Name()),
+				port.String("backend_model", currentBackendModel),
+				port.Int("attempt", attempt),
+			)
+		}
+
+		uc.logger.Info("上游流式请求完成(透传模式)",
+			port.String("req_id", reqID),
+			port.String("backend", backend.Name()),
+			port.Int("total_bytes", totalBytes),
+		)
+		return nil
+	}
+
+	if lastErr != nil {
+		return domainerror.NewNoBackend().WithCause(lastErr)
+	}
+	return domainerror.NewNoBackend()
+}
+
 func findRouteForBackend(routes []*port.Route, backend *entity.Backend) *port.Route {
 	for _, route := range routes {
 		if route.Backend.Name() == backend.Name() {
