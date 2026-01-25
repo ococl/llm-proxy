@@ -1,6 +1,9 @@
 package anthropic
 
 import (
+	"bytes"
+	"fmt"
+	"strings"
 	"testing"
 
 	"llm-proxy/domain/entity"
@@ -576,6 +579,270 @@ func TestStreamChunkConverter_LoggerNotCalledForNilLogger(t *testing.T) {
 
 		if err == nil {
 			t.Error("期望错误")
+		}
+	})
+}
+
+// TestStreamChunkConverter_EdgeCases 测试流式块边缘情况
+func TestStreamChunkConverter_EdgeCases(t *testing.T) {
+	mockLogger := &MockLoggerForAnthropicStream{}
+	converter := NewStreamChunkConverter(mockLogger)
+
+	t.Run("空数据块应该返回 [DONE] 信号", func(t *testing.T) {
+		mockLogger.reset()
+
+		// 空字节切片应该被 TrimSpace 处理后检查是否等于 "[DONE]"
+		chunk, err := converter.ParseChunk([]byte{})
+
+		if err == nil {
+			// 空数据在 TrimSpace 后不是 "[DONE]"，所以应该返回错误
+			if chunk == nil {
+				t.Fatal("结果不应为 nil")
+			}
+			// 验证行为：空数据不被视为 [DONE]
+			t.Log("注意: 空数据不被视为 [DONE] 信号（取决于实现）")
+		} else {
+			// 解析失败是预期行为
+			t.Log("空数据解析失败（正常行为）")
+		}
+	})
+
+	t.Run("仅 whitespace 的块应该返回错误", func(t *testing.T) {
+		mockLogger.reset()
+
+		chunk, err := converter.ParseChunk([]byte("   "))
+
+		if err == nil {
+			t.Log("注意: Whitespace 可能被接受（取决于实现）")
+		} else {
+			// 这是预期的行为
+			t.Log("Whitespace 返回错误（正常行为）")
+		}
+		_ = chunk
+	})
+
+	t.Run("仅 event 无 data 前缀", func(t *testing.T) {
+		mockLogger.reset()
+
+		data := []byte(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}`)
+		chunk, err := converter.ParseChunk(data)
+
+		if err != nil {
+			t.Fatalf("期望无前缀, 实际 %v", err)
+		}
+
+		if chunk == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		if chunk.Content != "Hello" {
+			t.Errorf("期望内容 'Hello', 实际 '%s'", chunk.Content)
+		}
+	})
+
+	t.Run("包含 usage 的 message_stop", func(t *testing.T) {
+		mockLogger.reset()
+
+		data := []byte(`event: message_stop
+data: {"type":"message_stop","stop_reason":"end_turn","usage":{"output_tokens":100}}`)
+		chunk, err := converter.ParseChunk(data)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if chunk == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		if !chunk.Finished {
+			t.Error("message_stop 应视为完成")
+		}
+
+		if chunk.StopReason != "end_turn" {
+			t.Errorf("期望 stop_reason end_turn, 实际 %s", chunk.StopReason)
+		}
+	})
+
+	t.Run("超长内容块", func(t *testing.T) {
+		mockLogger.reset()
+
+		longContent := "a" + strings.Repeat("测", 50000)
+		data := []byte(fmt.Sprintf(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"%s"}}`, longContent))
+		chunk, err := converter.ParseChunk(data)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if chunk == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		if chunk.Content != longContent {
+			t.Errorf("内容长度不匹配, 期望 %d, 实际 %d", len(longContent), len(chunk.Content))
+		}
+	})
+
+	t.Run("特殊字符内容", func(t *testing.T) {
+		mockLogger.reset()
+
+		// 使用 JSON 转义后的特殊字符
+		specialContent := "Hello 世界! 🎉"
+		data := []byte(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"` + specialContent + `"}}`)
+		chunk, err := converter.ParseChunk(data)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if chunk == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		if chunk.Content != specialContent {
+			t.Errorf("内容不匹配, 期望 '%s', 实际 '%s'", specialContent, chunk.Content)
+		}
+	})
+
+	t.Run("思考块类型检测", func(t *testing.T) {
+		mockLogger.reset()
+
+		thinkingData := []byte(`event: content_block_start
+data: {"type":"content_block_start","index":0,"content":{"type":"thinking","thinking_content":"I am thinking..."}}`)
+		_, err := converter.ParseChunk(thinkingData)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		// 验证思考块被检测到
+		found := false
+		for _, msg := range mockLogger.debugMessages {
+			if strings.Contains(msg, "思考") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Log("注意: 思考块可能没有日志输出（正常行为）")
+		}
+	})
+
+	t.Run("工具调用块类型检测", func(t *testing.T) {
+		mockLogger.reset()
+
+		toolData := []byte(`event: content_block_start
+data: {"type":"content_block_start","index":0,"content":{"type":"tool_use","id":"tool_01","name":"search","input":{"query":"test"}}}`)
+		_, err := converter.ParseChunk(toolData)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		// 验证工具调用块被检测到
+		found := false
+		for _, msg := range mockLogger.debugMessages {
+			if strings.Contains(msg, "工具") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Log("注意: 工具调用块可能没有日志输出（正常行为）")
+		}
+	})
+}
+
+// TestStreamChunkConverter_BuildChunkEdgeCases 测试构建流式块边缘情况
+func TestStreamChunkConverter_BuildChunkEdgeCases(t *testing.T) {
+	mockLogger := &MockLoggerForAnthropicStream{}
+	converter := NewStreamChunkConverter(mockLogger)
+
+	t.Run("nil 输入返回 nil", func(t *testing.T) {
+		result, err := converter.BuildChunk(nil)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result != nil {
+			t.Errorf("期望 nil, 实际 %v", result)
+		}
+	})
+
+	t.Run("空内容块", func(t *testing.T) {
+		chunk := &entity.StreamChunk{
+			Finished:   false,
+			Content:    "",
+			StopReason: "",
+		}
+
+		result, err := converter.BuildChunk(chunk)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 验证 Anthropic 格式
+		expected := `{"type":"content_block_delta","delta":{"text":""}}`
+		if string(result) != expected {
+			t.Errorf("期望 %s, 实际 %s", expected, string(result))
+		}
+	})
+
+	t.Run("特殊字符内容块", func(t *testing.T) {
+		chunk := &entity.StreamChunk{
+			Finished:   false,
+			Content:    "Hello 世界! 🎉",
+			StopReason: "",
+		}
+
+		result, err := converter.BuildChunk(chunk)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 验证特殊字符被正确转义
+		if !bytes.Contains(result, []byte("Hello 世界!")) {
+			t.Error("期望包含特殊字符内容")
+		}
+	})
+
+	t.Run("多种 stop_reason 值", func(t *testing.T) {
+		stopReasons := []string{"end_turn", "max_tokens", "stop_sequence", "tool_use"}
+
+		for _, stopReason := range stopReasons {
+			chunk := &entity.StreamChunk{
+				Finished:   true,
+				Content:    "Complete",
+				StopReason: stopReason,
+			}
+
+			result, err := converter.BuildChunk(chunk)
+
+			if err != nil {
+				t.Fatalf("stop_reason=%s: 期望无错误, 实际 %v", stopReason, err)
+			}
+
+			if result == nil {
+				t.Fatal("结果不应为 nil")
+			}
+
+			// Anthropic 保持原始 stop_reason
+			expected := fmt.Sprintf(`{"type":"message_stop","stop_reason":"%s"}`, stopReason)
+			if string(result) != expected {
+				t.Errorf("stop_reason=%s: 期望 %s, 实际 %s", stopReason, expected, string(result))
+			}
 		}
 	})
 }

@@ -1,7 +1,9 @@
 package google
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"llm-proxy/domain/entity"
@@ -691,6 +693,318 @@ func TestStreamChunkConverter_LoggerNotCalledForNilLogger(t *testing.T) {
 
 		if err != nil {
 			t.Errorf("期望 nil 错误, 实际 %v", err)
+		}
+	})
+}
+
+// TestStreamChunkConverter_EdgeCases 测试流式块边缘情况
+func TestStreamChunkConverter_EdgeCases(t *testing.T) {
+	mockLogger := &MockLoggerForGoogleStream{}
+	converter := NewStreamChunkConverter(mockLogger)
+
+	t.Run("超长内容块", func(t *testing.T) {
+		mockLogger.reset()
+
+		longContent := strings.Repeat("a", 100000)
+		googleChunk := map[string]interface{}{
+			"id":      "google-edge-001",
+			"object":  "chat.completion.chunk",
+			"created": 1677858249,
+			"model":   "gemini-pro",
+			"chunk":   longContent,
+		}
+
+		data, _ := json.Marshal(googleChunk)
+		chunk, err := converter.ParseChunk(data)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if chunk == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		if chunk.Content != longContent {
+			t.Errorf("内容长度不匹配, 期望 %d, 实际 %d", len(longContent), len(chunk.Content))
+		}
+	})
+
+	t.Run("特殊字符内容", func(t *testing.T) {
+		mockLogger.reset()
+
+		specialContent := "Hello 世界! 🎉\n\t\r\"'\\"
+		googleChunk := map[string]interface{}{
+			"id":      "google-edge-002",
+			"object":  "chat.completion.chunk",
+			"created": 1677858250,
+			"model":   "gemini-pro",
+			"chunk":   specialContent,
+		}
+
+		data, _ := json.Marshal(googleChunk)
+		chunk, err := converter.ParseChunk(data)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if chunk == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		if chunk.Content != specialContent {
+			t.Errorf("内容不匹配, 期望 '%s', 实际 '%s'", specialContent, chunk.Content)
+		}
+	})
+
+	t.Run("多种 stop_reason 转换", func(t *testing.T) {
+		mockLogger.reset()
+
+		testCases := []struct {
+			name     string
+			reason   string
+			expected string
+		}{
+			{"stop 转换为 STOP", "stop", "STOP"},
+			{"length 转换为 MAX_TOKENS", "length", "MAX_TOKENS"},
+			{"content_filter 转换为 SAFETY", "content_filter", "SAFETY"},
+			{"recitation 转换为 RECITATION", "recitation", "RECITATION"},
+			{"未知原因保持原样", "unknown", "unknown"},
+		}
+
+		for _, tc := range testCases {
+			googleChunk := map[string]interface{}{
+				"id":      "google-edge-003-" + tc.name,
+				"object":  "chat.completion.chunk",
+				"created": 1677858251,
+				"model":   "gemini-pro",
+				"usageMetadata": map[string]int{
+					"promptTokenCount":     10,
+					"candidatesTokenCount": 20,
+					"totalTokenCount":      30,
+				},
+			}
+
+			if tc.reason != "unknown" {
+				googleChunk["candidates"] = []map[string]interface{}{
+					{
+						"index":        0,
+						"finishReason": tc.expected,
+					},
+				}
+			}
+
+			data, _ := json.Marshal(googleChunk)
+			chunk, err := converter.ParseChunk(data)
+
+			if err != nil {
+				t.Fatalf("%s: 期望无错误, 实际 %v", tc.name, err)
+			}
+
+			if chunk == nil {
+				t.Fatal("结果不应为 nil")
+			}
+
+			if !chunk.Finished {
+				t.Errorf("%s: 期望 Finished 为 true", tc.name)
+			}
+		}
+	})
+
+	t.Run("多个 candidates 合并内容", func(t *testing.T) {
+		mockLogger.reset()
+
+		googleChunk := map[string]interface{}{
+			"id":      "google-edge-004",
+			"object":  "chat.completion.chunk",
+			"created": 1677858252,
+			"model":   "gemini-pro",
+			"candidates": []map[string]interface{}{
+				{
+					"index": 0,
+					"content": map[string]interface{}{
+						"role":  "model",
+						"parts": []map[string]interface{}{{"text": "First"}},
+					},
+				},
+				{
+					"index": 1,
+					"content": map[string]interface{}{
+						"role":  "model",
+						"parts": []map[string]interface{}{{"text": "Second"}},
+					},
+				},
+			},
+		}
+
+		data, _ := json.Marshal(googleChunk)
+		chunk, err := converter.ParseChunk(data)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if chunk == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 内容应该是所有 parts 的拼接
+		expected := "FirstSecond"
+		if chunk.Content != expected {
+			t.Errorf("期望内容 '%s', 实际 '%s'", expected, chunk.Content)
+		}
+	})
+
+	t.Run("仅 whitespace 视为空", func(t *testing.T) {
+		mockLogger.reset()
+
+		googleChunk := map[string]interface{}{
+			"id":      "google-edge-005",
+			"object":  "chat.completion.chunk",
+			"created": 1677858253,
+			"model":   "gemini-pro",
+			"chunk":   "   ",
+		}
+
+		data, _ := json.Marshal(googleChunk)
+		chunk, err := converter.ParseChunk(data)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if chunk == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// Whitespace 应该保留（不是 nil）
+		if chunk.Content != "   " {
+			t.Errorf("期望 '   ', 实际 '%s'", chunk.Content)
+		}
+	})
+}
+
+// TestStreamChunkConverter_BuildChunkEdgeCases 测试构建流式块边缘情况
+func TestStreamChunkConverter_BuildChunkEdgeCases(t *testing.T) {
+	mockLogger := &MockLoggerForGoogleStream{}
+	converter := NewStreamChunkConverter(mockLogger)
+
+	t.Run("空内容块", func(t *testing.T) {
+		chunk := &entity.StreamChunk{
+			Finished:   false,
+			Content:    "",
+			StopReason: "",
+		}
+
+		result, err := converter.BuildChunk(chunk)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 验证空内容 JSON 结构
+		var resultMap map[string]interface{}
+		if err := json.Unmarshal(result, &resultMap); err != nil {
+			t.Fatalf("JSON 解析失败: %v", err)
+		}
+
+		if resultMap["chunk"] != "" {
+			t.Errorf("期望 chunk 字段为空字符串")
+		}
+	})
+
+	t.Run("特殊字符内容块", func(t *testing.T) {
+		chunk := &entity.StreamChunk{
+			Finished:   false,
+			Content:    "Hello 世界! 🎉",
+			StopReason: "",
+		}
+
+		result, err := converter.BuildChunk(chunk)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 验证特殊字符被正确转义
+		if !bytes.Contains(result, []byte("Hello 世界!")) {
+			t.Error("期望包含特殊字符内容")
+		}
+	})
+
+	t.Run("content_filter 停止块", func(t *testing.T) {
+		chunk := &entity.StreamChunk{
+			Finished:   true,
+			Content:    "",
+			StopReason: "content_filter",
+		}
+
+		result, err := converter.BuildChunk(chunk)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 验证 content_filter 格式
+		var resultMap map[string]interface{}
+		if err := json.Unmarshal(result, &resultMap); err != nil {
+			t.Fatalf("JSON 解析失败: %v", err)
+		}
+
+		candidates := resultMap["candidates"].([]interface{})
+		if len(candidates) == 0 {
+			t.Fatal("期望至少一个 candidate")
+		}
+
+		candidate := candidates[0].(map[string]interface{})
+		if candidate["finishReason"] != "SAFETY" {
+			t.Errorf("期望 finishReason SAFETY, 实际 %v", candidate["finishReason"])
+		}
+	})
+
+	t.Run("带 usage 的已完成块", func(t *testing.T) {
+		chunk := &entity.StreamChunk{
+			Finished:   true,
+			Content:    "Test response",
+			StopReason: "stop",
+		}
+
+		result, err := converter.BuildChunk(chunk)
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 验证 usageMetadata 存在
+		var resultMap map[string]interface{}
+		if err := json.Unmarshal(result, &resultMap); err != nil {
+			t.Fatalf("JSON 解析失败: %v", err)
+		}
+
+		if resultMap["usageMetadata"] == nil {
+			t.Error("期望 usageMetadata 字段")
+		}
+
+		usage := resultMap["usageMetadata"].(map[string]interface{})
+		if usage["promptTokenCount"] == nil || usage["candidatesTokenCount"] == nil {
+			t.Error("期望 usageMetadata 包含 token 计数")
 		}
 	})
 }

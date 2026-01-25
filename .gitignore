@@ -16,6 +16,9 @@ nul
 tmp
 temp_*
 coverage.out
+coverage.html
+coverage_*
+coverage-*
 logs
 *.log
 

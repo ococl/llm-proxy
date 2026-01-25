@@ -15,6 +15,11 @@ import (
 	"llm-proxy/infrastructure/logging"
 )
 
+// 协议路径常量定义
+const (
+	ChatCompletionsPath = "/chat/completions"
+)
+
 type BackendClientAdapter struct {
 	client *HTTPClient
 	logger port.Logger
@@ -90,13 +95,13 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	}
 	body["stream"] = false
 
-	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", "/chat/completions", "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
 		Headers: mergeHeadersWithDefaults(req.Headers()),
-		Path:    "/chat/completions",
+		Path:    ChatCompletionsPath,
 		Stream:  false,
 	}
 
@@ -280,13 +285,13 @@ func (a *BackendClientAdapter) SendStreaming(
 	}
 	body["stream"] = true
 
-	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", "/chat/completions", "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
 		Headers: mergeHeadersWithDefaults(req.Headers()),
-		Path:    "/chat/completions",
+		Path:    ChatCompletionsPath,
 		Stream:  true,
 	}
 
@@ -451,13 +456,13 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 	}
 	body["stream"] = true
 
-	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", "/chat/completions", "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
 		Headers: mergeHeadersWithDefaults(req.Headers()),
-		Path:    "/chat/completions",
+		Path:    ChatCompletionsPath,
 		Stream:  true,
 	}
 

@@ -5,7 +5,11 @@ import (
 
 	"llm-proxy/application/service/protocol/anthropic"
 	"llm-proxy/application/service/protocol/azure"
+	"llm-proxy/application/service/protocol/cohere"
+	"llm-proxy/application/service/protocol/deepseek"
 	"llm-proxy/application/service/protocol/google"
+	"llm-proxy/application/service/protocol/groq"
+	"llm-proxy/application/service/protocol/mistral"
 	"llm-proxy/application/service/protocol/openai"
 	"llm-proxy/domain/port"
 	"llm-proxy/domain/types"
@@ -54,6 +58,26 @@ func (f *StrategyFactory) CreateDefaultRegistry() *StrategyRegistry {
 	// Azure 使用 OpenAI 兼容的请求/响应/流式格式，但错误格式不同
 	azureError := azure.NewErrorConverter(f.logger)
 	registry.RegisterErrorStrategy(azureError)
+
+	// 注册 DeepSeek 协议专用错误转换器
+	// DeepSeek 使用 OpenAI 兼容的请求/响应/流式格式，但错误格式不同
+	deepseekError := deepseek.NewErrorConverter(f.logger)
+	registry.RegisterErrorStrategy(deepseekError)
+
+	// 注册 Groq 协议专用错误转换器
+	// Groq 使用 OpenAI 兼容的请求/响应/流式格式，但错误格式不同
+	groqError := groq.NewErrorConverter(f.logger)
+	registry.RegisterErrorStrategy(groqError)
+
+	// 注册 Mistral 协议专用错误转换器
+	// Mistral 使用 OpenAI 兼容的请求/响应/流式格式，但错误格式不同
+	mistralError := mistral.NewErrorConverter(f.logger)
+	registry.RegisterErrorStrategy(mistralError)
+
+	// 注册 Cohere 协议专用错误转换器
+	// Cohere 使用 OpenAI 兼容的请求/响应/流式格式，但错误格式不同
+	cohereError := cohere.NewErrorConverter(f.logger)
+	registry.RegisterErrorStrategy(cohereError)
 
 	// 注册 Anthropic 协议策略
 	anthropicRequest := anthropic.NewRequestConverter(nil, f.logger)

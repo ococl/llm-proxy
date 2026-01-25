@@ -9,6 +9,7 @@ import (
 	"llm-proxy/domain/entity"
 	domainerror "llm-proxy/domain/error"
 	"llm-proxy/domain/port"
+	"llm-proxy/domain/types"
 )
 
 // MockLogger for testing
@@ -413,6 +414,102 @@ func TestExtractMessages(t *testing.T) {
 
 		if messages[0].Role != "user" {
 			t.Errorf("期望 role='user'，得到 '%s'", messages[0].Role)
+		}
+	})
+}
+
+func TestIsStreamRequest(t *testing.T) {
+	handler := &ProxyHandler{}
+
+	t.Run("stream 为 true 返回 true", func(t *testing.T) {
+		reqBody := map[string]interface{}{
+			"stream": true,
+		}
+		if !handler.isStreamRequest(reqBody) {
+			t.Error("期望 stream=true 时返回 true")
+		}
+	})
+
+	t.Run("stream 为 false 返回 false", func(t *testing.T) {
+		reqBody := map[string]interface{}{
+			"stream": false,
+		}
+		if handler.isStreamRequest(reqBody) {
+			t.Error("期望 stream=false 时返回 false")
+		}
+	})
+
+	t.Run("stream 不存在返回 false", func(t *testing.T) {
+		reqBody := map[string]interface{}{}
+		if handler.isStreamRequest(reqBody) {
+			t.Error("期望 stream 不存在时返回 false")
+		}
+	})
+}
+
+func TestDetectProtocol(t *testing.T) {
+	handler := &ProxyHandler{}
+
+	t.Run("从请求头检测 Anthropic", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/v1/complete", nil)
+		req.Header.Set("x-api-key", "sk-ant-xxx")
+
+		protocol := handler.detectProtocol(req)
+		if protocol != types.ProtocolAnthropic {
+			t.Errorf("期望 'anthropic'，得到 '%s'", protocol)
+		}
+	})
+
+	t.Run("默认检测为 OpenAI", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		req.Header.Set("Authorization", "Bearer sk-xxx")
+
+		protocol := handler.detectProtocol(req)
+		if protocol != types.ProtocolOpenAI {
+			t.Errorf("期望 'openai'，得到 '%s'", protocol)
+		}
+	})
+}
+
+func TestValidateAPIKey(t *testing.T) {
+	handler := &ProxyHandler{}
+
+	t.Run("正确的 API Key 通过验证", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		req.Header.Set("Authorization", "Bearer test-api-key")
+
+		if !handler.validateAPIKey(req, "test-api-key", types.ProtocolOpenAI) {
+			t.Error("期望正确的 API Key 通过验证")
+		}
+	})
+
+	t.Run("错误的 API Key 拒绝", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		req.Header.Set("Authorization", "Bearer wrong-api-key")
+
+		if handler.validateAPIKey(req, "test-api-key", types.ProtocolOpenAI) {
+			t.Error("期望错误的 API Key 被拒绝")
+		}
+	})
+
+	t.Run("缺少 API Key 拒绝", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+
+		if handler.validateAPIKey(req, "test-api-key", types.ProtocolOpenAI) {
+			t.Error("期望缺少 API Key 被拒绝")
+		}
+	})
+}
+
+func TestNewProxyHandler(t *testing.T) {
+	t.Run("创建非空处理器", func(t *testing.T) {
+		logger := &MockLogger{}
+		errorPresenter := NewErrorPresenter(logger)
+
+		handler := NewProxyHandler(nil, nil, logger, errorPresenter)
+
+		if handler == nil {
+			t.Error("期望创建非空处理器")
 		}
 	})
 }

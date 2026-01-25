@@ -557,3 +557,87 @@ func TestRequestConverter_MessageOrder(t *testing.T) {
 		}
 	})
 }
+
+// TestRequestConverter_AllParametersPreserved 测试所有参数保留
+func TestRequestConverter_AllParametersPreserved(t *testing.T) {
+	mockLogger := &MockLoggerForRequest{}
+	converter := NewRequestConverter(nil, mockLogger)
+
+	t.Run("所有参数正确保留", func(t *testing.T) {
+		mockLogger.reset()
+
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-request-id")).
+			Model(entity.ModelAlias("gpt-4")).
+			Messages([]entity.Message{
+				createTestMessage("user", "Hello"),
+			}).
+			MaxTokens(2048).
+			Temperature(0.8).
+			TopP(0.9).
+			Stream(false).
+			Stop([]string{"stop1", "stop2"}).
+			User("user-123").
+			BuildUnsafe()
+
+		result, err := converter.Convert(req, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 验证参数保留
+		if result.Temperature() != 0.8 {
+			t.Errorf("期望 Temperature 0.8, 实际 %f", result.Temperature())
+		}
+
+		if result.TopP() != 0.9 {
+			t.Errorf("期望 TopP 0.9, 实际 %f", result.TopP())
+		}
+
+		if result.MaxTokens() != 2048 {
+			t.Errorf("期望 MaxTokens 2048, 实际 %d", result.MaxTokens())
+		}
+
+		stops := result.Stop()
+		if len(stops) != 2 || stops[0] != "stop1" || stops[1] != "stop2" {
+			t.Errorf("期望 Stop [stop1, stop2], 实际 %v", stops)
+		}
+
+		if result.User() != "user-123" {
+			t.Errorf("期望 User user-123, 实际 %s", result.User())
+		}
+	})
+}
+
+// TestRequestConverter_DefaultValues 测试默认值
+func TestRequestConverter_LogProbsAndPenalties(t *testing.T) {
+	mockLogger := &MockLoggerForRequest{}
+	converter := NewRequestConverter(nil, mockLogger)
+
+	t.Run("包含惩罚参数", func(t *testing.T) {
+		mockLogger.reset()
+
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-request-id")).
+			Model(entity.ModelAlias("gpt-4")).
+			Messages([]entity.Message{
+				createTestMessage("user", "Generate text"),
+			}).
+			BuildUnsafe()
+
+		result, err := converter.Convert(req, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+	})
+}

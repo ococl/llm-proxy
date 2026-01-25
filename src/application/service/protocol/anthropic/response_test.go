@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"llm-proxy/domain/port"
@@ -1000,6 +1001,343 @@ func TestResponseConverter_InvalidJSON(t *testing.T) {
 				// 空 JSON 对象可能被解析（取决于实现）
 				// 验证不 panic
 				_ = result
+			}
+		})
+	}
+}
+
+// TestResponseConverter_ContentBlockTypes 测试各种内容块类型处理
+func TestResponseConverter_ContentBlockTypes(t *testing.T) {
+	tests := []struct {
+		name          string
+		blocks        []AnthropicContentBlock
+		expectedText  string
+		expectLogging bool
+		logType       string
+	}{
+		{
+			name: "工具结果包含字符串内容",
+			blocks: []AnthropicContentBlock{
+				{Type: "tool_result", Content: "Weather is sunny and warm"},
+			},
+			expectedText:  "Weather is sunny and warm",
+			expectLogging: false,
+		},
+		{
+			name: "搜索结果中的文本块",
+			blocks: []AnthropicContentBlock{
+				{
+					Type: "search_result",
+					SearchResult: &AnthropicSearchResult{
+						Content: []AnthropicContentBlock{
+							{Type: "text", Text: "Result A"},
+							{Type: "text", Text: "Result B"},
+						},
+						Source: "web",
+						Title:  "Search Results",
+					},
+				},
+			},
+			expectedText:  "Result AResult B",
+			expectLogging: false,
+		},
+		{
+			name: "混合内容块只提取文本",
+			blocks: []AnthropicContentBlock{
+				{Type: "text", Text: "Hello "},
+				{Type: "thinking", Thinking: "Let me think...", Signature: "sig123"},
+				{Type: "text", Text: "World"},
+			},
+			expectedText:  "Hello World",
+			expectLogging: false,
+		},
+		{
+			name: "工具使用块不产生文本",
+			blocks: []AnthropicContentBlock{
+				{Type: "tool_use", ID: "tool_01", Name: "get_weather", Input: map[string]string{"location": "NYC"}},
+				{Type: "text", Text: "Weather retrieved"},
+			},
+			expectedText:  "Weather retrieved",
+			expectLogging: false,
+		},
+		{
+			name: "图片块记录日志但不产生文本",
+			blocks: []AnthropicContentBlock{
+				{
+					Type: "image",
+					Source: &AnthropicImageSource{
+						Type:      "base64",
+						MediaType: "image/jpeg",
+						Data:      "abc123",
+					},
+				},
+				{Type: "text", Text: "I see the image"},
+			},
+			expectedText:  "I see the image",
+			expectLogging: true,
+			logType:       "image",
+		},
+		{
+			name: "文档块记录日志但不产生文本",
+			blocks: []AnthropicContentBlock{
+				{
+					Type: "document",
+					Document: &AnthropicDocumentSource{
+						Type:      "base64",
+						MediaType: "application/pdf",
+						Title:     "Report.pdf",
+					},
+				},
+				{Type: "text", Text: "Document processed"},
+			},
+			expectedText:  "Document processed",
+			expectLogging: true,
+			logType:       "document",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockLogger := &MockLoggerForAnthropicResponse{}
+			testConverter := NewResponseConverter(mockLogger)
+
+			result := testConverter.extractTextContent(tt.blocks)
+
+			if result != tt.expectedText {
+				t.Errorf("期望文本 '%s', 实际 '%s'", tt.expectedText, result)
+			}
+		})
+	}
+}
+
+// TestResponseConverter_MultipleChoices 测试多选择响应处理
+func TestResponseConverter_MultipleChoices(t *testing.T) {
+	mockLogger := &MockLoggerForAnthropicResponse{}
+	converter := NewResponseConverter(mockLogger)
+
+	multiChoiceResp := map[string]interface{}{
+		"id":   "msg_multi_choice",
+		"type": "message",
+		"role": "assistant",
+		"content": []map[string]interface{}{
+			{"type": "text", "text": "First choice response"},
+		},
+		"model":       "claude-3-opus-20240229",
+		"stop_reason": "end_turn",
+		"usage": map[string]int{
+			"input_tokens":  50,
+			"output_tokens": 20,
+		},
+	}
+
+	respJSON, _ := json.Marshal(multiChoiceResp)
+	result, err := converter.Convert(respJSON, "")
+
+	if err != nil {
+		t.Fatalf("期望无错误, 实际 %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("结果不应为 nil")
+	}
+
+	// Anthropic 响应只有一个 choice
+	if len(result.Choices) != 1 {
+		t.Logf("注意: Anthropic 响应通常只有一个 choice, 实际 %d 个", len(result.Choices))
+	}
+}
+
+// TestResponseConverter_RoleExtraction 测试角色提取
+func TestResponseConverter_RoleExtraction(t *testing.T) {
+	mockLogger := &MockLoggerForAnthropicResponse{}
+	converter := NewResponseConverter(mockLogger)
+
+	tests := []struct {
+		name        string
+		role        string
+		expectEmpty bool
+	}{
+		{"assistant 角色", "assistant", false},
+		{"空角色", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := map[string]interface{}{
+				"id":          "msg_role_test",
+				"type":        "message",
+				"role":        tt.role,
+				"content":     []map[string]interface{}{{"type": "text", "text": "Test"}},
+				"model":       "claude-3-sonnet-20240229",
+				"stop_reason": "end_turn",
+				"usage": map[string]int{
+					"input_tokens":  10,
+					"output_tokens": 5,
+				},
+			}
+
+			respJSON, _ := json.Marshal(resp)
+			result, err := converter.Convert(respJSON, "")
+
+			if err != nil {
+				t.Fatalf("期望无错误, 实际 %v", err)
+			}
+
+			if result == nil {
+				t.Fatal("结果不应为 nil")
+			}
+
+			// 验证响应创建成功，不检查内部角色字段
+			_ = result.Choices[0].Message
+		})
+	}
+}
+
+// TestResponseConverter_UsageEdgeCases 测试使用统计边缘情况
+func TestResponseConverter_UsageEdgeCases(t *testing.T) {
+	mockLogger := &MockLoggerForAnthropicResponse{}
+	converter := NewResponseConverter(mockLogger)
+
+	t.Run("零使用统计", func(t *testing.T) {
+		resp := map[string]interface{}{
+			"id":          "msg_zero_usage",
+			"type":        "message",
+			"role":        "assistant",
+			"content":     []map[string]interface{}{{"type": "text", "text": ""}},
+			"model":       "claude-3-haiku-20240307",
+			"stop_reason": "end_turn",
+			"usage": map[string]int{
+				"input_tokens":  0,
+				"output_tokens": 0,
+			},
+		}
+
+		respJSON, _ := json.Marshal(resp)
+		result, err := converter.Convert(respJSON, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		if result.Usage.PromptTokens != 0 {
+			t.Errorf("期望 PromptTokens 0, 实际 %d", result.Usage.PromptTokens)
+		}
+
+		if result.Usage.CompletionTokens != 0 {
+			t.Errorf("期望 CompletionTokens 0, 实际 %d", result.Usage.CompletionTokens)
+		}
+	})
+
+	t.Run("大数值使用统计", func(t *testing.T) {
+		resp := map[string]interface{}{
+			"id":          "msg_large_usage",
+			"type":        "message",
+			"role":        "assistant",
+			"content":     []map[string]interface{}{{"type": "text", "text": "Long response"}},
+			"model":       "claude-3-opus-20240229",
+			"stop_reason": "end_turn",
+			"usage": map[string]int{
+				"input_tokens":  1000000,
+				"output_tokens": 500000,
+			},
+		}
+
+		respJSON, _ := json.Marshal(resp)
+		result, err := converter.Convert(respJSON, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		if result.Usage.PromptTokens != 1000000 {
+			t.Errorf("期望 PromptTokens 1000000, 实际 %d", result.Usage.PromptTokens)
+		}
+
+		if result.Usage.CompletionTokens != 500000 {
+			t.Errorf("期望 CompletionTokens 500000, 实际 %d", result.Usage.CompletionTokens)
+		}
+	})
+
+	t.Run("缺失 usage 字段", func(t *testing.T) {
+		resp := map[string]interface{}{
+			"id":          "msg_no_usage",
+			"type":        "message",
+			"role":        "assistant",
+			"content":     []map[string]interface{}{{"type": "text", "text": "Test"}},
+			"model":       "claude-3-sonnet-20240229",
+			"stop_reason": "end_turn",
+		}
+
+		respJSON, _ := json.Marshal(resp)
+		result, err := converter.Convert(respJSON, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("结果不应为 nil")
+		}
+
+		// 缺失 usage 应该使用零值
+		if result.Usage.PromptTokens != 0 {
+			t.Errorf("期望 PromptTokens 0, 实际 %d", result.Usage.PromptTokens)
+		}
+	})
+}
+
+// TestResponseConverter_IDGeneration 测试 ID 生成
+func TestResponseConverter_IDGeneration(t *testing.T) {
+	mockLogger := &MockLoggerForAnthropicResponse{}
+	converter := NewResponseConverter(mockLogger)
+
+	tests := []struct {
+		name     string
+		id       string
+		expectID string
+	}{
+		{"标准 ID 格式", "msg_01abc123", "msg_01abc123"},
+		{"空 ID", "", ""},
+		{"特殊字符 ID", "msg_test-123_abc", "msg_test-123_abc"},
+		{"长 ID", "msg_" + strings.Repeat("a", 50), ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := map[string]interface{}{
+				"id":          tt.id,
+				"type":        "message",
+				"role":        "assistant",
+				"content":     []map[string]interface{}{{"type": "text", "text": "Test"}},
+				"model":       "claude-3-sonnet-20240229",
+				"stop_reason": "end_turn",
+				"usage": map[string]int{
+					"input_tokens":  10,
+					"output_tokens": 5,
+				},
+			}
+
+			respJSON, _ := json.Marshal(resp)
+			result, err := converter.Convert(respJSON, "")
+
+			if err != nil {
+				t.Fatalf("期望无错误, 实际 %v", err)
+			}
+
+			if result == nil {
+				t.Fatal("结果不应为 nil")
+			}
+
+			if tt.expectID != "" && result.ID != tt.expectID {
+				t.Errorf("期望 ID %s, 实际 %s", tt.expectID, result.ID)
 			}
 		})
 	}

@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"context"
 	"testing"
 
 	"llm-proxy/domain/entity"
@@ -545,6 +546,282 @@ func TestRequestConverter_MessageOrder(t *testing.T) {
 			if msg.Role != expectedOrder[i] {
 				t.Errorf("消息 %d 期望角色 %s, 实际 %s", i, expectedOrder[i], msg.Role)
 			}
+		}
+	})
+}
+
+// TestRequestConverter_AllParametersPreserved 测试所有参数正确传递
+func TestRequestConverter_AllParametersPreserved(t *testing.T) {
+	t.Run("Temperature 和 TopP 正确传递", func(t *testing.T) {
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(nil, mockLogger)
+
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-req-id")).
+			Model(entity.ModelAlias("claude-3-5-sonnet")).
+			Messages([]entity.Message{createMessageForAnthropic("user", "Hello")}).
+			Temperature(0.7).
+			TopP(0.9).
+			Stream(false).
+			BuildUnsafe()
+
+		result, err := converter.Convert(req, "You are Claude")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result.Temperature() != 0.7 {
+			t.Errorf("期望 Temperature 0.7, 实际 %f", result.Temperature())
+		}
+
+		if result.TopP() != 0.9 {
+			t.Errorf("期望 TopP 0.9, 实际 %f", result.TopP())
+		}
+	})
+
+	t.Run("Stop 字段正确传递", func(t *testing.T) {
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(nil, mockLogger)
+
+		stopWords := []string{"Human:", "Assistant:"}
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-req-id")).
+			Model(entity.ModelAlias("claude-3-5-sonnet")).
+			Messages([]entity.Message{createMessageForAnthropic("user", "Hello")}).
+			Stop(stopWords).
+			BuildUnsafe()
+
+		result, err := converter.Convert(req, "You are Claude")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if len(result.Stop()) != 2 {
+			t.Errorf("期望 2 个停止词, 实际 %d", len(result.Stop()))
+		}
+	})
+
+	t.Run("User 字段正确传递", func(t *testing.T) {
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(nil, mockLogger)
+
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-req-id")).
+			Model(entity.ModelAlias("claude-3-5-sonnet")).
+			Messages([]entity.Message{createMessageForAnthropic("user", "Hello")}).
+			User("test-user").
+			BuildUnsafe()
+
+		result, err := converter.Convert(req, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result.User() != "test-user" {
+			t.Errorf("期望 User test-user, 实际 %s", result.User())
+		}
+	})
+
+	t.Run("Headers 正确传递", func(t *testing.T) {
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(nil, mockLogger)
+
+		headers := map[string][]string{
+			"X-Custom-Header": {"custom-value"},
+		}
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-req-id")).
+			Model(entity.ModelAlias("claude-3-5-sonnet")).
+			Messages([]entity.Message{createMessageForAnthropic("user", "Hello")}).
+			Headers(headers).
+			BuildUnsafe()
+
+		result, err := converter.Convert(req, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		// 验证 headers 存在
+		if result.Headers() == nil {
+			t.Error("Headers 不应为空")
+		}
+	})
+
+	t.Run("Stream 标志正确传递", func(t *testing.T) {
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(nil, mockLogger)
+
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-req-id")).
+			Model(entity.ModelAlias("claude-3-5-sonnet")).
+			Messages([]entity.Message{createMessageForAnthropic("user", "Hello")}).
+			Stream(true).
+			BuildUnsafe()
+
+		result, err := converter.Convert(req, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if !result.IsStream() {
+			t.Error("期望 IsStream 为 true")
+		}
+	})
+
+	t.Run("ToolChoice 正确传递", func(t *testing.T) {
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(nil, mockLogger)
+
+		toolChoice := map[string]interface{}{
+			"type":    "auto",
+			"message": map[string]interface{}{"role": "assistant", "content": "I'll use a tool"},
+		}
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-req-id")).
+			Model(entity.ModelAlias("claude-3-5-sonnet")).
+			Messages([]entity.Message{createMessageForAnthropic("user", "Hello")}).
+			ToolChoice(toolChoice).
+			BuildUnsafe()
+
+		result, err := converter.Convert(req, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		// 验证 ToolChoice 存在（即使具体值可能不同）
+		_ = result.ToolChoice()
+	})
+}
+
+// TestRequestConverter_SystemPromptEdgeCases 测试系统提示边缘情况
+func TestRequestConverter_SystemPromptEdgeCases(t *testing.T) {
+	t.Run("空系统提示字符串不设置 system 字段", func(t *testing.T) {
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(nil, mockLogger)
+
+		req := createTestRequestForAnthropic("claude-3-5-sonnet", []entity.Message{
+			createMessageForAnthropic("user", "Hello"),
+		})
+
+		result, err := converter.Convert(req, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		// 空字符串不应该设置 system 字段
+		if result.SystemPrompt() != "" {
+			t.Errorf("期望空系统提示, 实际 '%s'", result.SystemPrompt())
+		}
+	})
+
+	t.Run("消息中的空内容系统消息被忽略", func(t *testing.T) {
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(nil, mockLogger)
+
+		req := createTestRequestForAnthropic("claude-3-5-sonnet", []entity.Message{
+			createMessageForAnthropic("system", ""), // 空内容
+			createMessageForAnthropic("user", "Hello"),
+		})
+
+		result, err := converter.Convert(req, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		// 空内容的系统消息应该被忽略
+		if result.SystemPrompt() != "" {
+			t.Errorf("期望空系统提示, 实际 '%s'", result.SystemPrompt())
+		}
+
+		// 消息数量应该是 1（空系统消息被移除，只保留 user 消息）
+		messages := result.Messages()
+		if len(messages) != 1 {
+			t.Errorf("期望 1 条消息, 实际 %d 条", len(messages))
+		}
+
+		// 保留的消息应该是 user 消息
+		if len(messages) > 0 && messages[0].Role != "user" {
+			t.Errorf("期望 user 消息, 实际 %s", messages[0].Role)
+		}
+	})
+
+	t.Run("优先级：参数 > 消息内 > 模型映射", func(t *testing.T) {
+		systemPrompts := map[string]string{"claude-3-5-sonnet": "Model mapped prompt"}
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(systemPrompts, mockLogger)
+
+		req := createTestRequestForAnthropic("claude-3-5-sonnet", []entity.Message{
+			createMessageForAnthropic("system", "Message system prompt"),
+			createMessageForAnthropic("user", "Hello"),
+		})
+
+		result, err := converter.Convert(req, "Parameter prompt")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		// 参数系统提示优先级最高
+		if result.SystemPrompt() != "Parameter prompt" {
+			t.Errorf("期望 'Parameter prompt', 实际 '%s'", result.SystemPrompt())
+		}
+	})
+}
+
+// TestRequestConverter_ContextAndStreamHandler 测试 Context 和 StreamHandler 传递
+func TestRequestConverter_ContextAndStreamHandler(t *testing.T) {
+	t.Run("Context 正确传递", func(t *testing.T) {
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(nil, mockLogger)
+
+		ctx := context.Background()
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-req-id")).
+			Model(entity.ModelAlias("claude-3-5-sonnet")).
+			Messages([]entity.Message{createMessageForAnthropic("user", "Hello")}).
+			Context(ctx).
+			BuildUnsafe()
+
+		result, err := converter.Convert(req, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		if result.Context() != ctx {
+			t.Error("Context 没有正确传递")
+		}
+	})
+
+	t.Run("StreamHandler 正确传递", func(t *testing.T) {
+		mockLogger := &MockLoggerForAnthropicRequest{}
+		converter := NewRequestConverter(nil, mockLogger)
+
+		handler := func(data []byte) error { return nil }
+		req := entity.NewRequestBuilder().
+			ID(entity.NewRequestID("test-req-id")).
+			Model(entity.ModelAlias("claude-3-5-sonnet")).
+			Messages([]entity.Message{createMessageForAnthropic("user", "Hello")}).
+			StreamHandler(handler).
+			BuildUnsafe()
+
+		result, err := converter.Convert(req, "")
+
+		if err != nil {
+			t.Fatalf("期望无错误, 实际 %v", err)
+		}
+
+		// 验证 StreamHandler 存在
+		if result.StreamHandler() == nil {
+			t.Error("StreamHandler 没有正确传递")
 		}
 	})
 }

@@ -90,6 +90,32 @@ type MockRequestLogger struct{}
 func (m *MockRequestLogger) LogRequest(reqID string, content string) {}
 func (m *MockRequestLogger) LogError(reqID string, content string)   {}
 
+// MockCooldownProvider is a mock implementation of port.CooldownProvider
+type MockCooldownProvider struct{}
+
+func (m *MockCooldownProvider) IsCoolingDown(backend, model string) bool {
+	return false
+}
+
+func (m *MockCooldownProvider) SetCooldown(backend, model string, duration time.Duration) {}
+
+func (m *MockCooldownProvider) ClearExpired() {}
+
+// MockLoadBalancer 是模拟的负载均衡器
+type MockLoadBalancer struct {
+	selectFunc func(routes []*port.Route) *entity.Backend
+}
+
+func (m *MockLoadBalancer) Select(routes []*port.Route) *entity.Backend {
+	if m.selectFunc != nil {
+		return m.selectFunc(routes)
+	}
+	if len(routes) > 0 {
+		return routes[0].Backend
+	}
+	return nil
+}
+
 func TestNewProxyRequestUseCase(t *testing.T) {
 	uc := NewProxyRequestUseCase(
 		&MockLogger{},
@@ -255,4 +281,206 @@ func TestLoadBalancer_EmptyRoutes(t *testing.T) {
 	if result != nil {
 		t.Error("LoadBalancer.Select should return nil for empty routes")
 	}
+}
+
+func TestProxyRequestUseCase_Execute_ValidationError(t *testing.T) {
+	uc := NewProxyRequestUseCase(
+		&MockLogger{},
+		&MockConfigProvider{},
+		&MockRouteResolver{},
+		nil,
+		&MockBackendClient{},
+		nil,
+		nil,
+		nil,
+		&MockMetricsProvider{},
+		&MockRequestLogger{},
+	)
+
+	req := entity.NewRequest(
+		entity.NewRequestID("test-123"),
+		entity.NewModelAlias(""), // 空模型名导致验证失败
+		[]entity.Message{
+			entity.NewMessage("user", "Hello"),
+		},
+	)
+
+	_, err := uc.Execute(context.Background(), req)
+	if err == nil {
+		t.Error("Execute 应该返回验证错误")
+	}
+}
+
+func TestProxyRequestUseCase_Execute_RouteNotFound(t *testing.T) {
+	mockRouteResolver := &MockRouteResolver{
+		resolveFunc: func(alias string) ([]*port.Route, error) {
+			return nil, nil // 找不到路由
+		},
+	}
+
+	fallbackStrategy := domain_service.NewFallbackStrategy(
+		nil,
+		map[string][]entity.ModelAlias{},
+		entity.DefaultRetryConfig(),
+	)
+
+	uc := NewProxyRequestUseCase(
+		&MockLogger{},
+		&MockConfigProvider{},
+		mockRouteResolver,
+		nil,
+		&MockBackendClient{},
+		nil,
+		fallbackStrategy,
+		nil,
+		&MockMetricsProvider{},
+		&MockRequestLogger{},
+	)
+
+	req := entity.NewRequest(
+		entity.NewRequestID("test-123"),
+		entity.NewModelAlias("gpt-4"),
+		[]entity.Message{
+			entity.NewMessage("user", "Hello"),
+		},
+	)
+
+	_, err := uc.Execute(context.Background(), req)
+	if err == nil {
+		t.Error("Execute 应该返回路由未找到错误")
+	}
+}
+
+func TestProxyRequestUseCase_Execute_NoAvailableBackends(t *testing.T) {
+	backend, _ := entity.NewBackend("test", "http://test", "key", true, types.ProtocolOpenAI)
+
+	mockRouteResolver := &MockRouteResolver{
+		resolveFunc: func(alias string) ([]*port.Route, error) {
+			return []*port.Route{
+				{Backend: backend, Model: "gpt-4", Priority: 1},
+			}, nil
+		},
+	}
+
+	fallbackStrategy := domain_service.NewFallbackStrategy(
+		&MockCooldownProvider{},          // cooldownMgr
+		map[string][]entity.ModelAlias{}, // fallbackAliases
+		entity.DefaultRetryConfig(),      // backoffConfig
+	)
+
+	// 使用 MockLoadBalancer 始终返回 nil (模拟无可用后端)
+	mockLoadBalancer := &MockLoadBalancer{
+		selectFunc: func(routes []*port.Route) *entity.Backend {
+			return nil
+		},
+	}
+
+	uc := NewProxyRequestUseCase(
+		&MockLogger{},
+		&MockConfigProvider{},
+		mockRouteResolver,
+		nil,
+		&MockBackendClient{},
+		nil,
+		fallbackStrategy,
+		mockLoadBalancer,
+		&MockMetricsProvider{},
+		&MockRequestLogger{},
+	)
+
+	req := entity.NewRequest(
+		entity.NewRequestID("test-123"),
+		entity.NewModelAlias("gpt-4"),
+		[]entity.Message{
+			entity.NewMessage("user", "Hello"),
+		},
+	)
+
+	_, err := uc.Execute(context.Background(), req)
+	if err == nil {
+		t.Error("Execute 应该返回无可用后端错误")
+	}
+}
+
+func TestProxyRequestUseCase_Execute_Success(t *testing.T) {
+	backend, _ := entity.NewBackend("test", "http://test", "key", true, types.ProtocolOpenAI)
+
+	mockRouteResolver := &MockRouteResolver{
+		resolveFunc: func(alias string) ([]*port.Route, error) {
+			return []*port.Route{
+				{Backend: backend, Model: "gpt-4", Priority: 1},
+			}, nil
+		},
+	}
+
+	mockClient := &MockBackendClient{
+		sendFunc: func(ctx context.Context, req *entity.Request, b *entity.Backend, backendModel string) (*entity.Response, error) {
+			resp, _ := entity.NewResponseBuilder().
+				ID("resp-123").
+				Model(backendModel).
+				Build()
+			return resp, nil
+		},
+	}
+
+	mockProtocolConverter := &MockProtocolConverter{}
+
+	fallbackStrategy := domain_service.NewFallbackStrategy(
+		&MockCooldownProvider{},          // cooldownMgr
+		map[string][]entity.ModelAlias{}, // fallbackAliases
+		entity.DefaultRetryConfig(),      // backoffConfig
+	)
+
+	uc := NewProxyRequestUseCase(
+		&MockLogger{},
+		&MockConfigProvider{},
+		mockRouteResolver,
+		mockProtocolConverter,
+		mockClient,
+		NewRetryStrategy(0, false, 0, 0, 0, 0),
+		fallbackStrategy,
+		domain_service.NewLoadBalancer(domain_service.StrategyRandom),
+		&MockMetricsProvider{},
+		&MockRequestLogger{},
+	)
+
+	req := entity.NewRequest(
+		entity.NewRequestID("test-123"),
+		entity.NewModelAlias("gpt-4"),
+		[]entity.Message{
+			entity.NewMessage("user", "Hello"),
+		},
+	)
+
+	resp, err := uc.Execute(context.Background(), req)
+	if err != nil {
+		t.Errorf("Execute 不应该返回错误: %v", err)
+	}
+	if resp == nil {
+		t.Error("Execute 应该返回响应")
+	}
+}
+
+// MockProtocolConverter 是 port.ProtocolConverter 的模拟实现
+type MockProtocolConverter struct {
+	toBackendFunc   func(req *entity.Request, protocol types.Protocol) (*entity.Request, error)
+	fromBackendFunc func(respBody []byte, model string, protocol types.Protocol) (*entity.Response, error)
+}
+
+func (m *MockProtocolConverter) ToBackend(req *entity.Request, protocol types.Protocol) (*entity.Request, error) {
+	if m.toBackendFunc != nil {
+		return m.toBackendFunc(req, protocol)
+	}
+	return req, nil
+}
+
+func (m *MockProtocolConverter) FromBackend(respBody []byte, model string, protocol types.Protocol) (*entity.Response, error) {
+	if m.fromBackendFunc != nil {
+		return m.fromBackendFunc(respBody, model, protocol)
+	}
+	resp, _ := entity.NewResponseBuilder().
+		ID("resp-123").
+		Model(model).
+		Build()
+	return resp, nil
 }
