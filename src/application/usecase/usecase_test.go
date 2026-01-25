@@ -255,8 +255,8 @@ func TestLoadBalancer_Select(t *testing.T) {
 	backend2, _ := entity.NewBackend("b2", "http://b2", "key2", true, types.ProtocolOpenAI)
 
 	routes := []*port.Route{
-		{Backend: backend1, Model: "m1", Priority: 1},
-		{Backend: backend2, Model: "m1", Priority: 1},
+		{Backend: backend1, Model: "m1", Priority: 1, Enabled: true},
+		{Backend: backend2, Model: "m1", Priority: 1, Enabled: true},
 	}
 
 	// Select should return one of the backends

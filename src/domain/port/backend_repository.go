@@ -19,10 +19,11 @@ type Route struct {
 	Model    string
 	Priority int
 	Protocol types.Protocol
+	Enabled  bool
 }
 
 func (r *Route) IsEnabled() bool {
-	return r.Backend != nil && r.Backend.IsEnabled()
+	return r.Enabled && r.Backend != nil && r.Backend.IsEnabled()
 }
 
 // LoadBalancer interface for selecting a backend from a list of routes.

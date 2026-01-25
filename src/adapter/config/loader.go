@@ -250,12 +250,14 @@ func (a *ConfigAdapter) convertBackend(cfg *config.Backend) (*entity.Backend, er
 		protocol = types.ProtocolAnthropic
 	}
 
-	return entity.NewBackend(
+	// 使用 NewBackendWithLocale 来传递 locale 配置
+	return entity.NewBackendWithLocale(
 		cfg.Name,
 		cfg.URL,
 		cfg.APIKey,
 		cfg.IsEnabled(),
 		protocol,
+		cfg.Locale,
 	)
 }
 

@@ -49,6 +49,7 @@ func (uc *RouteResolveUseCase) Resolve(alias string) ([]*port.Route, error) {
 			Model:    routeCfg.Model,
 			Priority: routeCfg.Priority,
 			Protocol: backend.Protocol(),
+			Enabled:  routeCfg.Enabled,
 		})
 	}
 

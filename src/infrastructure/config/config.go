@@ -16,6 +16,7 @@ type Backend struct {
 	APIKey   string `yaml:"api_key,omitempty"`
 	Enabled  *bool  `yaml:"enabled,omitempty"`
 	Protocol string `yaml:"protocol,omitempty"` // "openai" or "anthropic", default: "openai"
+	Locale   string `yaml:"locale,omitempty"`   // 接受语言设置，用于 Accept-Language header
 }
 
 func (b *Backend) IsEnabled() bool {

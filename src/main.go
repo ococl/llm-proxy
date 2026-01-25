@@ -58,6 +58,14 @@ func main() {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
+	// 启动配置热重载监控
+	notifyChan := configMgr.Watch()
+	go func() {
+		for range notifyChan {
+			infra_logging.GeneralSugar.Info("检测到配置文件变化,已重新加载")
+		}
+	}()
+
 	cfg := configMgr.Get()
 
 	if *disableColor {

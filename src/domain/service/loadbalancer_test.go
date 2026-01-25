@@ -43,7 +43,7 @@ func TestLoadBalancer_Select(t *testing.T) {
 		backend, _ := entity.NewBackend("openai", "https://api.openai.com", "key", true, types.ProtocolOpenAI)
 
 		routes := []*port.Route{
-			{Backend: backend, Model: "gpt-4", Priority: 1},
+			{Backend: backend, Model: "gpt-4", Priority: 1, Enabled: true},
 		}
 
 		result := lb.Select(routes)
@@ -61,8 +61,8 @@ func TestLoadBalancer_Select(t *testing.T) {
 		backend2, _ := entity.NewBackend("anthropic", "https://api.anthropic.com", "key2", true, types.ProtocolOpenAI)
 
 		routes := []*port.Route{
-			{Backend: backend1, Model: "gpt-4", Priority: 1},
-			{Backend: backend2, Model: "claude", Priority: 1},
+			{Backend: backend1, Model: "gpt-4", Priority: 1, Enabled: true},
+			{Backend: backend2, Model: "claude", Priority: 1, Enabled: true},
 		}
 
 		selectedBackends := make(map[string]int)
@@ -84,8 +84,8 @@ func TestLoadBalancer_Select(t *testing.T) {
 		backend2, _ := entity.NewBackend("anthropic", "https://api.anthropic.com", "key2", true, types.ProtocolOpenAI)
 
 		routes := []*port.Route{
-			{Backend: backend1, Model: "gpt-4", Priority: 1},
-			{Backend: backend2, Model: "claude", Priority: 1},
+			{Backend: backend1, Model: "gpt-4", Priority: 1, Enabled: true},
+			{Backend: backend2, Model: "claude", Priority: 1, Enabled: true},
 		}
 
 		result1 := lb.Select(routes)
@@ -103,8 +103,8 @@ func TestLoadBalancer_Select(t *testing.T) {
 		disabledBackend, _ := entity.NewBackend("disabled", "https://disabled.com", "key", false, types.ProtocolOpenAI)
 
 		routes := []*port.Route{
-			{Backend: disabledBackend, Model: "model", Priority: 1},
-			{Backend: enabledBackend, Model: "model", Priority: 1},
+			{Backend: disabledBackend, Model: "model", Priority: 1, Enabled: false},
+			{Backend: enabledBackend, Model: "model", Priority: 1, Enabled: true},
 		}
 
 		result := lb.Select(routes)
