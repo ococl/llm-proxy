@@ -130,7 +130,8 @@ func main() {
 	}
 
 	httpClient := backend_adapter.NewHTTPClient(infra_http.NewHTTPClient(clientConfig))
-	backendClient := backend_adapter.NewBackendClientAdapter(httpClient, proxyLogger)
+	bodyLoggerAdapter := logging_adapter.NewBodyLoggerAdapter()
+	backendClient := backend_adapter.NewBackendClientAdapter(httpClient, proxyLogger, bodyLoggerAdapter)
 
 	loadBalancer := domain_service.NewLoadBalancer(domain_service.StrategyWeighted)
 
@@ -179,7 +180,7 @@ func main() {
 	)
 
 	errorPresenter := http_adapter.NewErrorPresenter(proxyLogger)
-	proxyHandler := http_adapter.NewProxyHandler(proxyUseCase, configAdapter, proxyLogger, errorPresenter)
+	proxyHandler := http_adapter.NewProxyHandler(proxyUseCase, configAdapter, proxyLogger, bodyLoggerAdapter, errorPresenter)
 	healthHandler := http_adapter.NewHealthHandler(configAdapter, proxyLogger)
 	modelsHandler := http_adapter.NewModelsHandler(configAdapter, proxyLogger)
 	recoveryMiddleware := http_adapter.NewRecoveryMiddleware(proxyLogger)

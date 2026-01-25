@@ -12,7 +12,6 @@ import (
 
 	"llm-proxy/domain/entity"
 	"llm-proxy/domain/port"
-	"llm-proxy/infrastructure/logging"
 )
 
 // 协议路径常量定义
@@ -21,8 +20,9 @@ const (
 )
 
 type BackendClientAdapter struct {
-	client *HTTPClient
-	logger port.Logger
+	client     *HTTPClient
+	logger     port.Logger
+	bodyLogger port.BodyLogger
 }
 
 type BackendError struct {
@@ -35,13 +35,17 @@ func (e *BackendError) Error() string {
 }
 
 // NewBackendClientAdapter creates a new backend client adapter.
-func NewBackendClientAdapter(client *HTTPClient, logger port.Logger) *BackendClientAdapter {
+func NewBackendClientAdapter(client *HTTPClient, logger port.Logger, bodyLogger port.BodyLogger) *BackendClientAdapter {
 	if logger == nil {
 		logger = &port.NopLogger{}
 	}
+	if bodyLogger == nil {
+		bodyLogger = &port.NopBodyLogger{}
+	}
 	return &BackendClientAdapter{
-		client: client,
-		logger: logger,
+		client:     client,
+		logger:     logger,
+		bodyLogger: bodyLogger,
 	}
 }
 
@@ -56,17 +60,8 @@ func getKeys(m map[string]interface{}) string {
 	return keys
 }
 
-// Send sends a non-streaming request to the backend and returns a response.
-func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*entity.Response, error) {
-	reqID := req.ID().String()
-
-	a.logger.Debug("准备发送上游请求",
-		port.String("req_id", reqID),
-		port.String("backend", backend.Name()),
-		port.String("backend_url", backend.URL().String()),
-		port.String("backend_model", backendModel),
-	)
-
+// buildRequestBody 构建请求体 map，复用逻辑
+func buildRequestBody(req *entity.Request, backendModel string, stream bool) map[string]interface{} {
 	body := map[string]interface{}{
 		"model":    backendModel,
 		"messages": req.Messages(),
@@ -93,9 +88,25 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	if req.User() != "" {
 		body["user"] = req.User()
 	}
-	body["stream"] = false
+	body["stream"] = stream
 
-	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	return body
+}
+
+// Send sends a non-streaming request to the backend and returns a response.
+func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*entity.Response, error) {
+	reqID := req.ID().String()
+
+	a.logger.Debug("准备发送上游请求",
+		port.String("req_id", reqID),
+		port.String("backend", backend.Name()),
+		port.String("backend_url", backend.URL().String()),
+		port.String("backend_model", backendModel),
+	)
+
+	body := buildRequestBody(req, backendModel, false)
+
+	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
@@ -145,7 +156,7 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	)
 
 	// 记录上游响应体（需要先读取 Body）
-	logging.LogResponseBody(reqID, logging.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
+	a.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
 
 	// 放回 Body 以便后续处理
 	httpResp.Body = io.NopCloser(bytes.NewReader(respBody))
@@ -257,35 +268,9 @@ func (a *BackendClientAdapter) SendStreaming(
 		port.String("backend_model", backendModel),
 	)
 
-	body := map[string]interface{}{
-		"model":    backendModel,
-		"messages": req.Messages(),
-	}
+	body := buildRequestBody(req, backendModel, true)
 
-	if req.MaxTokens() > 0 {
-		body["max_tokens"] = req.MaxTokens()
-	}
-	if req.Temperature() != 1.0 {
-		body["temperature"] = req.Temperature()
-	}
-	if req.TopP() != 1.0 {
-		body["top_p"] = req.TopP()
-	}
-	if len(req.Stop()) > 0 {
-		body["stop"] = req.Stop()
-	}
-	if len(req.Tools()) > 0 {
-		body["tools"] = req.Tools()
-	}
-	if req.ToolChoice() != nil {
-		body["tool_choice"] = req.ToolChoice()
-	}
-	if req.User() != "" {
-		body["user"] = req.User()
-	}
-	body["stream"] = true
-
-	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
@@ -321,7 +306,7 @@ func (a *BackendClientAdapter) SendStreaming(
 		respBody, _ := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
 
-		logging.LogResponseBody(reqID, logging.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
+		a.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
 
 		a.logger.Warn("上游流式请求返回错误状态码",
 			port.String("req_id", reqID),
@@ -340,7 +325,7 @@ func (a *BackendClientAdapter) SendStreaming(
 	)
 
 	// 记录成功的流式响应头
-	logging.LogResponseBody(reqID, logging.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, nil)
+	a.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, nil)
 
 	reader := bufio.NewReader(httpResp.Body)
 	chunkCount := 0
@@ -428,35 +413,9 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 		port.String("backend_model", backendModel),
 	)
 
-	body := map[string]interface{}{
-		"model":    backendModel,
-		"messages": req.Messages(),
-	}
+	body := buildRequestBody(req, backendModel, true)
 
-	if req.MaxTokens() > 0 {
-		body["max_tokens"] = req.MaxTokens()
-	}
-	if req.Temperature() != 1.0 {
-		body["temperature"] = req.Temperature()
-	}
-	if req.TopP() != 1.0 {
-		body["top_p"] = req.TopP()
-	}
-	if len(req.Stop()) > 0 {
-		body["stop"] = req.Stop()
-	}
-	if len(req.Tools()) > 0 {
-		body["tools"] = req.Tools()
-	}
-	if req.ToolChoice() != nil {
-		body["tool_choice"] = req.ToolChoice()
-	}
-	if req.User() != "" {
-		body["user"] = req.User()
-	}
-	body["stream"] = true
-
-	logging.LogRequestBody(reqID, logging.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
@@ -489,13 +448,13 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 	)
 
 	// 记录成功的流式响应头（透传模式）
-	logging.LogResponseBody(reqID, logging.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, nil)
+	a.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, nil)
 
 	if httpResp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
 
-		logging.LogResponseBody(reqID, logging.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
+		a.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
 
 		a.logger.Warn("上游流式请求返回错误状态码(透传模式)",
 			port.String("req_id", reqID),

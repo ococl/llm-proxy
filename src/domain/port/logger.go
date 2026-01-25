@@ -74,3 +74,11 @@ func (n *NopLogger) Fatal(msg string, fields ...Field)       {}
 func (n *NopLogger) With(fields ...Field) Logger             { return n }
 func (n *NopLogger) LogRequest(reqID string, content string) {}
 func (n *NopLogger) LogError(reqID string, content string)   {}
+
+// NopBodyLogger is a no-op body logger implementation for testing.
+type NopBodyLogger struct{}
+
+func (n *NopBodyLogger) LogRequestBody(reqID string, logType BodyLogType, method, path, protocol string, headers map[string][]string, body map[string]interface{}) {
+}
+func (n *NopBodyLogger) LogResponseBody(reqID string, logType BodyLogType, statusCode int, headers map[string][]string, body interface{}) {
+}

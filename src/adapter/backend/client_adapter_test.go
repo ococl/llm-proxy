@@ -10,7 +10,7 @@ import (
 func TestBackendClientAdapter_Send_Success(t *testing.T) {
 	mockClient := &http.Client{}
 	httpClient := NewHTTPClient(mockClient)
-	adapter := NewBackendClientAdapter(httpClient, &port.NopLogger{})
+	adapter := NewBackendClientAdapter(httpClient, &port.NopLogger{}, &port.NopBodyLogger{})
 
 	if adapter == nil {
 		t.Error("BackendClientAdapter should not be nil")
@@ -24,7 +24,7 @@ func TestBackendClientAdapter_Send_Success(t *testing.T) {
 func TestBackendClientAdapter_Send_WithAllOptions(t *testing.T) {
 	mockClient := &http.Client{}
 	httpClient := NewHTTPClient(mockClient)
-	adapter := NewBackendClientAdapter(httpClient, &port.NopLogger{})
+	adapter := NewBackendClientAdapter(httpClient, &port.NopLogger{}, &port.NopBodyLogger{})
 
 	if adapter == nil {
 		t.Fatal("BackendClientAdapter should not be nil")

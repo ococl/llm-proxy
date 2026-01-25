@@ -14,13 +14,13 @@ import (
 	domainerror "llm-proxy/domain/error"
 	"llm-proxy/domain/port"
 	"llm-proxy/domain/types"
-	"llm-proxy/infrastructure/logging"
 )
 
 type ProxyHandler struct {
 	proxyUseCase   *usecase.ProxyRequestUseCase
 	config         port.ConfigProvider
 	logger         port.Logger
+	bodyLogger     port.BodyLogger
 	errorPresenter *ErrorPresenter
 }
 
@@ -28,12 +28,14 @@ func NewProxyHandler(
 	proxyUseCase *usecase.ProxyRequestUseCase,
 	config port.ConfigProvider,
 	logger port.Logger,
+	bodyLogger port.BodyLogger,
 	errorPresenter *ErrorPresenter,
 ) *ProxyHandler {
 	return &ProxyHandler{
 		proxyUseCase:   proxyUseCase,
 		config:         config,
 		logger:         logger,
+		bodyLogger:     bodyLogger,
 		errorPresenter: errorPresenter,
 	}
 }
@@ -95,7 +97,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		port.String("req_id", reqID),
 	)
 
-	logging.LogRequestBody(reqID, logging.BodyLogTypeClientRequest, r.Method, r.URL.Path, r.Proto, map[string][]string(r.Header), reqBody)
+	h.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeClientRequest, r.Method, r.URL.Path, r.Proto, map[string][]string(r.Header), reqBody)
 
 	if cfg.Proxy.EnableSystemPrompt {
 		reqBody = h.injectSystemPrompt(reqBody)
@@ -149,7 +151,7 @@ func (h *ProxyHandler) handleNonStreamingRequest(w http.ResponseWriter, r *http.
 		port.String("response_id", resp.ID),
 	)
 
-	logging.LogResponseBody(req.ID().String(), logging.BodyLogTypeClientResponse, http.StatusOK, resp.Headers, resp)
+	h.bodyLogger.LogResponseBody(req.ID().String(), port.BodyLogTypeClientResponse, http.StatusOK, resp.Headers, resp)
 
 	h.writeResponse(w, resp)
 }

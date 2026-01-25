@@ -506,7 +506,7 @@ func TestNewProxyHandler(t *testing.T) {
 		logger := &MockLogger{}
 		errorPresenter := NewErrorPresenter(logger)
 
-		handler := NewProxyHandler(nil, nil, logger, errorPresenter)
+		handler := NewProxyHandler(nil, nil, logger, &port.NopBodyLogger{}, errorPresenter)
 
 		if handler == nil {
 			t.Error("期望创建非空处理器")
