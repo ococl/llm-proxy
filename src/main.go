@@ -19,9 +19,11 @@ import (
 	http_adapter "llm-proxy/adapter/http"
 	http_middleware "llm-proxy/adapter/http/middleware"
 	logging_adapter "llm-proxy/adapter/logging"
+	metrics_adapter "llm-proxy/adapter/metrics"
 	"llm-proxy/application/service"
 	"llm-proxy/application/usecase"
 	"llm-proxy/domain/entity"
+	"llm-proxy/domain/port"
 	domain_service "llm-proxy/domain/service"
 	infra_config "llm-proxy/infrastructure/config"
 	infra_http "llm-proxy/infrastructure/http"
@@ -175,8 +177,8 @@ func main() {
 		retryStrategy,
 		fallbackStrategy,
 		loadBalancer,
-		&NopMetricsProvider{},
-		&NopRequestLogger{},
+		&metrics_adapter.PrometheusMetricsAdapter{},
+		&port.NopLogger{},
 	)
 
 	errorPresenter := http_adapter.NewErrorPresenter(proxyLogger)
@@ -325,18 +327,3 @@ func calculateMaxConns(backendCount int) int {
 	}
 	return maxConns
 }
-
-type NopMetricsProvider struct{}
-
-func (n *NopMetricsProvider) IncRequestsTotal(backend string)                       {}
-func (n *NopMetricsProvider) RecordDuration(backend string, duration time.Duration) {}
-func (n *NopMetricsProvider) IncBackendErrors(backend string)                       {}
-func (n *NopMetricsProvider) SetCircuitBreakerState(backend string, state int)      {}
-func (n *NopMetricsProvider) IncActiveRequests()                                    {}
-func (n *NopMetricsProvider) DecActiveRequests()                                    {}
-func (n *NopMetricsProvider) GetSnapshot() map[string]interface{}                   { return nil }
-
-type NopRequestLogger struct{}
-
-func (n *NopRequestLogger) LogRequest(reqID string, content string) {}
-func (n *NopRequestLogger) LogError(reqID string, content string)   {}

@@ -34,3 +34,27 @@ type RetryStrategy interface {
 	GetDelay(attempt int) time.Duration
 	GetMaxRetries() int
 }
+
+// NopMetricsProvider is a no-op implementation of MetricsProvider for testing.
+type NopMetricsProvider struct{}
+
+// IncRequestsTotal does nothing.
+func (n *NopMetricsProvider) IncRequestsTotal(backend string) {}
+
+// RecordDuration does nothing.
+func (n *NopMetricsProvider) RecordDuration(backend string, duration time.Duration) {}
+
+// IncBackendErrors does nothing.
+func (n *NopMetricsProvider) IncBackendErrors(backend string) {}
+
+// SetCircuitBreakerState does nothing.
+func (n *NopMetricsProvider) SetCircuitBreakerState(backend string, state int) {}
+
+// IncActiveRequests does nothing.
+func (n *NopMetricsProvider) IncActiveRequests() {}
+
+// DecActiveRequests does nothing.
+func (n *NopMetricsProvider) DecActiveRequests() {}
+
+// GetSnapshot returns an empty map.
+func (n *NopMetricsProvider) GetSnapshot() map[string]interface{} { return nil }
