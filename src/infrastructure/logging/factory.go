@@ -138,17 +138,13 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 	}
 	line.WriteString(" | ")
 
-	var reqID, model, backendModel, backend string
+	var reqID, backendModel, backend, protocol string
 	filteredFields := make([]zapcore.Field, 0, len(fields))
 	for _, field := range fields {
 		switch field.Key {
 		case "req_id":
 			if field.Type == zapcore.StringType {
 				reqID = field.String
-			}
-		case "model":
-			if field.Type == zapcore.StringType {
-				model = field.String
 			}
 		case "backend_model":
 			if field.Type == zapcore.StringType {
@@ -157,6 +153,10 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 		case "backend":
 			if field.Type == zapcore.StringType {
 				backend = field.String
+			}
+		case "protocol":
+			if field.Type == zapcore.StringType {
+				protocol = field.String
 			}
 		case "logger":
 		default:
@@ -180,20 +180,26 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 	msg := entry.Message
 	line.WriteString(msg)
 
-	if model != "" || backendModel != "" || backend != "" {
+	if backend != "" {
 		colorMgr := GetGlobalColorManager()
 		reqColor := colorMgr.GetRequestColor(reqID)
 		if enc.colored && reqColor != "" {
 			line.WriteString(" [backend=")
 			line.WriteString(reqColor)
 			line.WriteString(backend)
+			line.WriteString("\033[0m")
 			if backendModel != "" {
-				line.WriteString("\033[0m")
 				line.WriteString(", model=")
 				line.WriteString(reqColor)
 				line.WriteString(backendModel)
+				line.WriteString("\033[0m")
 			}
-			line.WriteString("\033[0m")
+			if protocol != "" {
+				line.WriteString(", protocol=")
+				line.WriteString(reqColor)
+				line.WriteString(protocol)
+				line.WriteString("\033[0m")
+			}
 			line.WriteString("]")
 		} else {
 			line.WriteString(" [backend=")
@@ -201,6 +207,10 @@ func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zap
 			if backendModel != "" {
 				line.WriteString(", model=")
 				line.WriteString(backendModel)
+			}
+			if protocol != "" {
+				line.WriteString(", protocol=")
+				line.WriteString(protocol)
 			}
 			line.WriteString("]")
 		}

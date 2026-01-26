@@ -228,9 +228,19 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	lines := strings.Split(string(sseChunks), "\n")
+	validChunks := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, "data:") || line == "" || strings.HasPrefix(line, ":") {
+			validChunks++
+		}
+	}
+
 	h.logger.Info("流式请求处理成功",
 		port.ReqID(req.ID().String()),
 		port.Model(req.Model().String()),
+		port.Field{Key: "chunks", Value: validChunks},
+		port.Field{Key: "bytes", Value: len(sseChunks)},
 	)
 
 	h.bodyLogger.LogResponseBody(req.ID().String(), port.BodyLogTypeClientResponse, http.StatusOK, w.Header(), string(sseChunks))
