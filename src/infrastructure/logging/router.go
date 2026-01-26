@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -42,9 +41,9 @@ func InitMultiTargetRouter(cfg *config.Config) error {
 	routerMu.Lock()
 	defer routerMu.Unlock()
 
-	dateDir := time.Now().Format("2006-01-02")
 	multiCfg := ConvertFromLegacyConfig(cfg)
-	multiCfg.File.BaseDir = filepath.Join(multiCfg.File.BaseDir, dateDir)
+	// baseDir 已经在 Init 函数中包含了日期目录，这里直接使用
+	// 避免：./logs/2026-01-26/2026-01-26/ 双层日期目录问题
 
 	router := &MultiTargetRouter{
 		config:  multiCfg,

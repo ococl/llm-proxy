@@ -322,6 +322,17 @@ func (l *Logging) GetMaxLogContentSize() int {
 
 // RequestBodyConfig Getter 方法
 func (r *RequestBodyConfig) IsEnabled() bool {
+	// 如果所有配置字段都是零值（配置文件中未定义request_body段），则默认启用
+	isEmptyConfig := r.BaseDir == "" &&
+		r.MaxSizeMB == 0 &&
+		r.MaxAgeDays == 0 &&
+		r.MaxBackups == 0 &&
+		!r.Compress &&
+		r.IncludeBody == nil
+
+	if isEmptyConfig {
+		return true
+	}
 	return r.Enabled
 }
 

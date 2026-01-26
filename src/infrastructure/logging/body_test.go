@@ -758,3 +758,9 @@ type failingReader struct{}
 func (r *failingReader) Read(p []byte) (n int, err error) {
 	return 0, fmt.Errorf("模拟读取失败")
 }
+
+// getTestDateDir 获取测试日期目录（与 InitRequestBodyLogger 保持一致）
+func getTestDateDir(tempDir string) string {
+	dateDir := time.Now().Format("2006-01-02")
+	return filepath.Join(tempDir, dateDir, "request_body")
+}

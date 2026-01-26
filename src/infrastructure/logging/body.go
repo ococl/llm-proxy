@@ -62,7 +62,8 @@ func InitRequestBodyLogger(cfg *config.Config) error {
 		return nil
 	}
 
-	baseDir := cfg.Logging.RequestBody.GetBaseDir()
+	dateDir := time.Now().Format("2006-01-02")
+	baseDir := filepath.Join(cfg.Logging.GetBaseDir(), dateDir, "request_body")
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("创建请求体日志目录失败: %w", err)
 	}
@@ -131,18 +132,12 @@ func (l *RequestBodyLogger) Write(reqID string, logType BodyLogType, httpReq *ht
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// 生成文件名: {date}/{time}_{req_id}_{type}.httpdump
 	now := time.Now()
-	dateDir := now.Format("2006-01-02")
 	timePrefix := now.Format("150405")
 
-	dir := filepath.Join(l.baseDir, dateDir)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("创建日期目录失败: %w", err)
-	}
-
+	// baseDir 已经包含了日期目录和 request_body 子目录
 	filename := fmt.Sprintf("%s_%s_%s.httpdump", timePrefix, reqID, string(logType))
-	filePath := filepath.Join(dir, filename)
+	filePath := filepath.Join(l.baseDir, filename)
 
 	// 构建 HTTP Dump 内容
 	var sb strings.Builder
@@ -180,18 +175,12 @@ func (l *RequestBodyLogger) WriteResponse(reqID string, logType BodyLogType, sta
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// 生成文件名: {date}/{time}_{req_id}_{type}.httpdump
 	now := time.Now()
-	dateDir := now.Format("2006-01-02")
 	timePrefix := now.Format("150405")
 
-	dir := filepath.Join(l.baseDir, dateDir)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("创建日期目录失败: %w", err)
-	}
-
+	// baseDir 已经包含了日期目录和 request_body 子目录
 	filename := fmt.Sprintf("%s_%s_%s.httpdump", timePrefix, reqID, string(logType))
-	filePath := filepath.Join(dir, filename)
+	filePath := filepath.Join(l.baseDir, filename)
 
 	// 构建 HTTP Dump 内容
 	var sb strings.Builder
@@ -232,16 +221,11 @@ func (l *RequestBodyLogger) WriteFromMap(reqID string, logType BodyLogType, meth
 	defer l.mu.Unlock()
 
 	now := time.Now()
-	dateDir := now.Format("2006-01-02")
 	timePrefix := now.Format("150405")
 
-	dir := filepath.Join(l.baseDir, dateDir)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("创建日期目录失败: %w", err)
-	}
-
+	// baseDir 已经包含了日期目录和 request_body 子目录
 	filename := fmt.Sprintf("%s_%s_%s.httpdump", timePrefix, reqID, string(logType))
-	filePath := filepath.Join(dir, filename)
+	filePath := filepath.Join(l.baseDir, filename)
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s %s %s\r\n", method, path, protocol))
@@ -276,16 +260,11 @@ func (l *RequestBodyLogger) WriteResponseFromMap(reqID string, logType BodyLogTy
 	defer l.mu.Unlock()
 
 	now := time.Now()
-	dateDir := now.Format("2006-01-02")
 	timePrefix := now.Format("150405")
 
-	dir := filepath.Join(l.baseDir, dateDir)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("创建日期目录失败: %w", err)
-	}
-
+	// baseDir 已经包含了日期目录和 request_body 子目录
 	filename := fmt.Sprintf("%s_%s_%s.httpdump", timePrefix, reqID, string(logType))
-	filePath := filepath.Join(dir, filename)
+	filePath := filepath.Join(l.baseDir, filename)
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, getStatusText(statusCode)))
@@ -331,16 +310,11 @@ func (l *RequestBodyLogger) WriteUpstreamResponse(reqID string, statusCode int, 
 	defer l.mu.Unlock()
 
 	now := time.Now()
-	dateDir := now.Format("2006-01-02")
 	timePrefix := now.Format("150405")
 
-	dir := filepath.Join(l.baseDir, dateDir)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("创建日期目录失败: %w", err)
-	}
-
+	// baseDir 已经包含了日期目录和 request_body 子目录
 	filename := fmt.Sprintf("%s_%s_%s.httpdump", timePrefix, reqID, string(BodyLogTypeUpstreamResponse))
-	filePath := filepath.Join(dir, filename)
+	filePath := filepath.Join(l.baseDir, filename)
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, getStatusText(statusCode)))
