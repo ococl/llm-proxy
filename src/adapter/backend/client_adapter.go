@@ -98,10 +98,10 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	reqID := req.ID().String()
 
 	a.logger.Debug("准备发送上游请求",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.String("后端地址", backend.URL().String()),
-		port.String("后端模型", backendModel),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.BackendURL(backend.URL().String()),
+		port.BackendModel(backendModel),
 	)
 
 	body := buildRequestBody(req, backendModel, false)
@@ -117,16 +117,16 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	}
 
 	a.logger.Info("发送上游请求",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.String("后端模型", backendModel),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.BackendModel(backendModel),
 	)
 
 	httpResp, err := a.client.Send(ctx, backendReq)
 	if err != nil {
 		a.logger.Error("上游请求发送失败",
-			port.String("请求ID", reqID),
-			port.String("后端", backend.Name()),
+			port.ReqID(reqID),
+			port.Backend(backend.Name()),
 			port.Error(err),
 		)
 		return nil, err
@@ -134,25 +134,25 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	defer httpResp.Body.Close()
 
 	a.logger.Debug("收到上游响应",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.Int("状态码", httpResp.StatusCode),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.StatusCode(httpResp.StatusCode),
 	)
 
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		a.logger.Error("读取上游响应失败",
-			port.String("请求ID", reqID),
-			port.String("后端", backend.Name()),
+			port.ReqID(reqID),
+			port.Backend(backend.Name()),
 			port.Error(err),
 		)
 		return nil, err
 	}
 
 	a.logger.Debug("上游响应体读取完成",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.Int("请求体大小", len(respBody)),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.BodySize(len(respBody)),
 	)
 
 	// 记录上游响应体（需要先读取 Body）
@@ -162,10 +162,10 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	httpResp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 	if httpResp.StatusCode >= 400 {
-		a.logger.Warn("上游返回错误状态码",
-			port.String("请求ID", reqID),
-			port.String("后端", backend.Name()),
-			port.Int("状态码", httpResp.StatusCode),
+		a.logger.Warn("上游返回错误status_code",
+			port.ReqID(reqID),
+			port.Backend(backend.Name()),
+			port.StatusCode(httpResp.StatusCode),
 		)
 		return nil, &BackendError{
 			StatusCode: httpResp.StatusCode,
@@ -176,16 +176,16 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	var respData map[string]interface{}
 	if err := json.Unmarshal(respBody, &respData); err != nil {
 		a.logger.Error("解析上游响应JSON失败",
-			port.String("请求ID", reqID),
-			port.String("后端", backend.Name()),
+			port.ReqID(reqID),
+			port.Backend(backend.Name()),
 			port.Error(err),
 		)
 		return nil, err
 	}
 
 	a.logger.Debug("上游响应解析成功",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
 	)
 
 	responseID := httpResp.Header.Get("x-request-id")
@@ -214,8 +214,8 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	choicesRaw, choicesExists := respData["choices"]
 	if choicesExists && choicesRaw == nil {
 		a.logger.Warn("上游返回空choices字段",
-			port.String("请求ID", reqID),
-			port.String("后端", backend.Name()),
+			port.ReqID(reqID),
+			port.Backend(backend.Name()),
 		)
 		builder.Choices([]entity.Choice{})
 	} else if choices, ok := respData["choices"].([]interface{}); ok && len(choices) > 0 {
@@ -243,9 +243,9 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	response := builder.BuildUnsafe()
 
 	a.logger.Info("上游请求完成",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.String("响应ID", response.ID),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.ResponseID(response.ID),
 	)
 
 	return response, nil
@@ -262,10 +262,10 @@ func (a *BackendClientAdapter) SendStreaming(
 	reqID := req.ID().String()
 
 	a.logger.Debug("准备发送上游流式请求",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.String("后端地址", backend.URL().String()),
-		port.String("后端模型", backendModel),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.BackendURL(backend.URL().String()),
+		port.BackendModel(backendModel),
 	)
 
 	body := buildRequestBody(req, backendModel, true)
@@ -281,25 +281,25 @@ func (a *BackendClientAdapter) SendStreaming(
 	}
 
 	a.logger.Info("发送上游流式请求",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.String("后端模型", backendModel),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.BackendModel(backendModel),
 	)
 
 	httpResp, err := a.client.Send(ctx, backendReq)
 	if err != nil {
 		a.logger.Error("上游流式请求发送失败",
-			port.String("请求ID", reqID),
-			port.String("后端", backend.Name()),
+			port.ReqID(reqID),
+			port.Backend(backend.Name()),
 			port.Error(err),
 		)
 		return err
 	}
 
 	a.logger.Debug("收到上游流式响应",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.Int("状态码", httpResp.StatusCode),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.StatusCode(httpResp.StatusCode),
 	)
 
 	if httpResp.StatusCode >= 400 {
@@ -308,10 +308,10 @@ func (a *BackendClientAdapter) SendStreaming(
 
 		a.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
 
-		a.logger.Warn("上游流式请求返回错误状态码",
-			port.String("请求ID", reqID),
-			port.String("后端", backend.Name()),
-			port.Int("状态码", httpResp.StatusCode),
+		a.logger.Warn("上游流式请求返回错误status_code",
+			port.ReqID(reqID),
+			port.Backend(backend.Name()),
+			port.StatusCode(httpResp.StatusCode),
 		)
 		return &BackendError{
 			StatusCode: httpResp.StatusCode,
@@ -320,8 +320,8 @@ func (a *BackendClientAdapter) SendStreaming(
 	}
 
 	a.logger.Debug("开始读取上游流式响应",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
 	)
 
 	var sseChunks []byte
@@ -333,15 +333,15 @@ func (a *BackendClientAdapter) SendStreaming(
 		if err != nil {
 			if err == io.EOF {
 				a.logger.Debug("上游流式响应结束",
-					port.String("请求ID", reqID),
-					port.String("后端", backend.Name()),
-					port.Int("总数据块数", chunkCount),
+					port.ReqID(reqID),
+					port.Backend(backend.Name()),
+					port.ChunkCount(chunkCount),
 				)
 				break
 			}
 			a.logger.Error("读取上游流式响应失败",
-				port.String("请求ID", reqID),
-				port.String("后端", backend.Name()),
+				port.ReqID(reqID),
+				port.Backend(backend.Name()),
 				port.Error(err),
 			)
 			return err
@@ -366,24 +366,23 @@ func (a *BackendClientAdapter) SendStreaming(
 		// Check for [DONE] message
 		if data == "[DONE]" {
 			a.logger.Debug("收到上游[DONE]信号",
-				port.String("请求ID", reqID),
-				port.String("后端", backend.Name()),
+				port.ReqID(reqID),
+				port.Backend(backend.Name()),
 			)
 			break
 		}
 
 		chunkCount++
-		a.logger.Debug("收到上游流式数据块",
-			port.String("请求ID", reqID),
-			port.String("后端", backend.Name()),
-			port.Int("数据块索引", chunkCount),
-			port.String("数据块", data),
+		a.logger.Debug("收到上游流式data",
+			port.ReqID(reqID),
+			port.Backend(backend.Name()),
+			port.ChunkIndex(chunkCount),
 		)
 		if err := handler([]byte(data)); err != nil {
-			a.logger.Error("处理上游流式数据块失败",
-				port.String("请求ID", reqID),
-				port.String("后端", backend.Name()),
-				port.Int("数据块索引", chunkCount),
+			a.logger.Error("处理上游流式data失败",
+				port.ReqID(reqID),
+				port.Backend(backend.Name()),
+				port.ChunkIndex(chunkCount),
 				port.Error(err),
 			)
 			return err
@@ -391,9 +390,9 @@ func (a *BackendClientAdapter) SendStreaming(
 	}
 
 	a.logger.Info("上游流式请求完成",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.Int("总数据块数", chunkCount),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.ChunkCount(chunkCount),
 	)
 
 	a.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, string(sseChunks))
@@ -410,10 +409,10 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 	reqID := req.ID().String()
 
 	a.logger.Debug("准备发送上游流式请求(透传模式)",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.String("后端地址", backend.URL().String()),
-		port.String("后端模型", backendModel),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.BackendURL(backend.URL().String()),
+		port.BackendModel(backendModel),
 	)
 
 	body := buildRequestBody(req, backendModel, true)
@@ -429,25 +428,25 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 	}
 
 	a.logger.Info("发送上游流式请求(透传模式)",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.String("后端模型", backendModel),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.BackendModel(backendModel),
 	)
 
 	httpResp, err := a.client.Send(ctx, backendReq)
 	if err != nil {
 		a.logger.Error("上游流式请求发送失败(透传模式)",
-			port.String("请求ID", reqID),
-			port.String("后端", backend.Name()),
+			port.ReqID(reqID),
+			port.Backend(backend.Name()),
 			port.Error(err),
 		)
 		return nil, err
 	}
 
 	a.logger.Debug("收到上游流式响应(透传模式)",
-		port.String("请求ID", reqID),
-		port.String("后端", backend.Name()),
-		port.Int("状态码", httpResp.StatusCode),
+		port.ReqID(reqID),
+		port.Backend(backend.Name()),
+		port.StatusCode(httpResp.StatusCode),
 	)
 
 	// 记录成功的流式响应头（透传模式）
@@ -459,10 +458,10 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 
 		a.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, respBody)
 
-		a.logger.Warn("上游流式请求返回错误状态码(透传模式)",
-			port.String("请求ID", reqID),
-			port.String("后端", backend.Name()),
-			port.Int("状态码", httpResp.StatusCode),
+		a.logger.Warn("上游流式请求返回错误status_code(透传模式)",
+			port.ReqID(reqID),
+			port.Backend(backend.Name()),
+			port.StatusCode(httpResp.StatusCode),
 		)
 		return nil, &BackendError{
 			StatusCode: httpResp.StatusCode,

@@ -121,7 +121,7 @@ func main() {
 			select {
 			case <-cleanupTicker.C:
 				if err := infra_logging.CleanupOldLogs(); err != nil {
-					infra_logging.GeneralSugar.Errorw("清理请求体日志失败", "错误", err)
+					infra_logging.GeneralSugar.Errorw("清理请求体日志失败", "error", err)
 				}
 			case <-shutdownBodyLogCleanup:
 				return

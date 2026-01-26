@@ -65,16 +65,16 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	modelName := req.Model().String()
 
 	uc.logger.Info("非流式请求开始",
-		port.String("请求ID", reqID),
-		port.String("模型", modelName),
-		port.String("客户端协议", req.ClientProtocol()),
-		port.Bool("流式", req.IsStream()),
+		port.ReqID(reqID),
+		port.Model(modelName),
+		port.ClientProtocol(req.ClientProtocol()),
+		port.Streaming(req.IsStream()),
 	)
 
 	if err := uc.validateRequest(req); err != nil {
 		uc.logger.Warn("非流式验证失败",
-			port.String("请求ID", reqID),
-			port.String("模型", modelName),
+			port.ReqID(reqID),
+			port.Model(modelName),
 			port.Error(err),
 		)
 		return nil, err
@@ -83,55 +83,55 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	routes, err := uc.routeResolver.Resolve(req.Model().String())
 	if err != nil {
 		uc.logger.Error("非流式解析路由失败",
-			port.String("请求ID", reqID),
-			port.String("模型", modelName),
+			port.ReqID(reqID),
+			port.Model(modelName),
 			port.Error(err),
 		)
 		return nil, err
 	}
 
 	uc.logger.Debug("路由解析完成",
-		port.String("请求ID", reqID),
-		port.String("模型", modelName),
-		port.Int("总路由数", len(routes)),
+		port.ReqID(reqID),
+		port.Model(modelName),
+		port.TotalRoutes(len(routes)),
 	)
 
 	availableRoutes := uc.fallbackStrategy.FilterAvailableRoutes(routes)
 	if len(availableRoutes) == 0 {
 		uc.logger.Warn("非流式后端全部冷却，尝试降级",
-			port.String("请求ID", reqID),
-			port.String("模型", modelName),
-			port.Int("冷却数量", len(routes)),
+			port.ReqID(reqID),
+			port.Model(modelName),
+			port.CooldownCount(len(routes)),
 		)
 
 		fallbackRoutes, err := uc.fallbackStrategy.GetFallbackRoutes(req.Model().String(), uc.routeResolver)
 		if err != nil || len(fallbackRoutes) == 0 {
 			uc.logger.Error("非流式无可用后端",
-				port.String("请求ID", reqID),
-				port.String("模型", modelName),
+				port.ReqID(reqID),
+				port.Model(modelName),
 			)
 			return nil, domainerror.NewNoBackend()
 		}
 
 		uc.logger.Info("非流式触发降级",
-			port.String("请求ID", reqID),
-			port.String("原始模型", modelName),
-			port.Int("降级路由数", len(fallbackRoutes)),
+			port.ReqID(reqID),
+			port.OriginalModel(modelName),
+			port.FallbackRoutes(len(fallbackRoutes)),
 		)
 		availableRoutes = fallbackRoutes
 	}
 
 	uc.logger.Debug("路由过滤完成",
-		port.String("请求ID", reqID),
-		port.String("模型", modelName),
-		port.Int("可用数量", len(availableRoutes)),
+		port.ReqID(reqID),
+		port.Model(modelName),
+		port.AvailableCount(len(availableRoutes)),
 	)
 
 	backend := uc.loadBalancer.Select(availableRoutes)
 	if backend == nil {
 		uc.logger.Error("非流式选择后端失败",
-			port.String("请求ID", reqID),
-			port.String("模型", modelName),
+			port.ReqID(reqID),
+			port.Model(modelName),
 		)
 		return nil, domainerror.NewNoBackend()
 	}
@@ -142,20 +142,20 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 		backendModelName = selectedRoute.Model
 	}
 
-	uc.logger.Debug("后端选择",
-		port.String("请求ID", reqID),
-		port.String("模型", modelName),
-		port.String("后端", backend.Name()),
-		port.String("后端模型", backendModelName),
+	uc.logger.Debug("backend选择",
+		port.ReqID(reqID),
+		port.Model(modelName),
+		port.Backend(backend.Name()),
+		port.BackendModel(backendModelName),
 	)
 
 	backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
 	if err != nil {
 		uc.logger.Error("非流式转换协议失败",
-			port.String("请求ID", reqID),
-			port.String("模型", modelName),
-			port.String("后端", backend.Name()),
-			port.String("后端模型", backendModelName),
+			port.ReqID(reqID),
+			port.Model(modelName),
+			port.Backend(backend.Name()),
+			port.BackendModel(backendModelName),
 			port.Error(err),
 		)
 		return nil, domainerror.NewProtocolError("failed to convert request", err)
@@ -164,9 +164,9 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	resp, err := uc.executeWithRetry(ctx, backendReq, availableRoutes, backendModelName)
 	if err != nil {
 		uc.logger.Error("非流式请求失败",
-			port.String("请求ID", reqID),
-			port.String("模型", modelName),
-			port.Int64("持续时间毫秒", time.Since(startTime).Milliseconds()),
+			port.ReqID(reqID),
+			port.Model(modelName),
+			port.DurationMSInt(time.Since(startTime).Milliseconds()),
 			port.Error(err),
 		)
 		return nil, err
@@ -177,18 +177,18 @@ func (uc *ProxyRequestUseCase) Execute(ctx context.Context, req *entity.Request)
 	clientResp, err := uc.protocolConv.FromBackend(respBody, modelName, backend.Protocol())
 	if err != nil {
 		uc.logger.Error("非流式响应转换失败",
-			port.String("请求ID", reqID),
-			port.String("模型", modelName),
-			port.String("后端", backend.Name()),
-			port.String("后端模型", backendModelName),
+			port.ReqID(reqID),
+			port.Model(modelName),
+			port.Backend(backend.Name()),
+			port.BackendModel(backendModelName),
 			port.Error(err),
 		)
 		return nil, domainerror.NewProtocolError("failed to convert response", err)
 	}
 
 	uc.logger.Info("非流式请求完成",
-		port.String("请求ID", reqID),
-		port.Int64("持续时间毫秒", time.Since(startTime).Milliseconds()),
+		port.ReqID(reqID),
+		port.DurationMSInt(time.Since(startTime).Milliseconds()),
 	)
 
 	return clientResp, nil
@@ -217,10 +217,10 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		backend := uc.loadBalancer.Select(routes)
 		if backend == nil {
-			uc.logger.Error("重试时无可用后端",
-				port.String("请求ID", reqID),
-				port.String("模型", modelName),
-				port.Int("尝试次数", attempt),
+			uc.logger.Error("重试时无可用backend",
+				port.ReqID(reqID),
+				port.Model(modelName),
+				port.Attempt(attempt),
 			)
 			return nil, domainerror.NewNoBackend()
 		}
@@ -233,23 +233,23 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 
 		if attempt > 0 {
 			uc.logger.Debug("重试请求",
-				port.String("请求ID", reqID),
-				port.String("模型", modelName),
-				port.String("后端", backend.Name()),
-				port.String("后端模型", currentBackendModel),
-				port.Int("尝试次数", attempt),
-				port.Int("最大重试次数", maxRetries),
+				port.ReqID(reqID),
+				port.Model(modelName),
+				port.Backend(backend.Name()),
+				port.BackendModel(currentBackendModel),
+				port.Attempt(attempt),
+				port.MaxRetries(maxRetries),
 			)
 		}
 
 		backendReq, err := uc.protocolConv.ToBackend(req, backend.Protocol())
 		if err != nil {
 			uc.logger.Error("重试时转换失败",
-				port.String("请求ID", reqID),
-				port.String("模型", modelName),
-				port.String("后端", backend.Name()),
-				port.String("后端模型", currentBackendModel),
-				port.Int("尝试次数", attempt),
+				port.ReqID(reqID),
+				port.Model(modelName),
+				port.Backend(backend.Name()),
+				port.BackendModel(currentBackendModel),
+				port.Attempt(attempt),
 				port.Error(err),
 			)
 			return nil, domainerror.NewProtocolError("request conversion failed", err)
@@ -259,11 +259,11 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		if err == nil {
 			if attempt > 0 {
 				uc.logger.Info("重试成功",
-					port.String("请求ID", reqID),
-					port.String("模型", modelName),
-					port.String("后端", backend.Name()),
-					port.String("后端模型", currentBackendModel),
-					port.Int("尝试次数", attempt),
+					port.ReqID(reqID),
+					port.Model(modelName),
+					port.Backend(backend.Name()),
+					port.BackendModel(currentBackendModel),
+					port.Attempt(attempt),
 				)
 			}
 			return resp, nil
@@ -272,22 +272,22 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		lastErr = err
 		uc.metrics.IncBackendErrors(backend.Name())
 
-		uc.logger.Warn("后端错误，尝试重试",
-			port.String("请求ID", reqID),
-			port.String("模型", modelName),
-			port.String("后端", backend.Name()),
-			port.String("后端模型", currentBackendModel),
-			port.Int("尝试次数", attempt),
+		uc.logger.Warn("backend错误，尝试重试",
+			port.ReqID(reqID),
+			port.Model(modelName),
+			port.Backend(backend.Name()),
+			port.BackendModel(currentBackendModel),
+			port.Attempt(attempt),
 			port.Error(err),
 		)
 
 		if !uc.retryStrategy.ShouldRetry(attempt, err) {
 			uc.logger.Error("重试次数耗尽",
-				port.String("请求ID", reqID),
-				port.String("模型", modelName),
-				port.String("后端", backend.Name()),
-				port.String("后端模型", currentBackendModel),
-				port.Int("总尝试次数", attempt+1),
+				port.ReqID(reqID),
+				port.Model(modelName),
+				port.Backend(backend.Name()),
+				port.BackendModel(currentBackendModel),
+				port.TotalAttempts(attempt+1),
 				port.Error(lastErr),
 			)
 			return nil, domainerror.NewBackendError(backend.Name(), err)
@@ -296,18 +296,18 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		delay := uc.retryStrategy.GetDelay(attempt)
 		if delay > 0 {
 			uc.logger.Debug("重试等待",
-				port.String("请求ID", reqID),
-				port.String("模型", modelName),
-				port.Int64("延迟毫秒", delay.Milliseconds()),
-				port.Int("下次尝试", attempt+1),
+				port.ReqID(reqID),
+				port.Model(modelName),
+				port.DelayMSInt(delay.Milliseconds()),
+				port.NextAttempt(attempt+1),
 			)
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
 				uc.logger.Warn("重试被取消",
-					port.String("请求ID", reqID),
-					port.String("模型", modelName),
-					port.Int("尝试次数", attempt),
+					port.ReqID(reqID),
+					port.Model(modelName),
+					port.Attempt(attempt),
 				)
 				return nil, ctx.Err()
 			}
@@ -320,7 +320,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 	return nil, domainerror.NewNoBackend()
 }
 
-// findRouteForBackend 根据后端查找对应的路由
+// findRouteForBackend 根据backend查找对应的路由
 func findRouteForBackend(routes []*port.Route, backend *entity.Backend) *port.Route {
 	for _, route := range routes {
 		if route.Backend.Name() == backend.Name() {

@@ -45,10 +45,10 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqID := h.generateRequestID()
 
 	h.logger.Info("收到客户端请求",
-		port.String("请求ID", reqID),
-		port.String("方法", r.Method),
-		port.String("路径", r.URL.Path),
-		port.String("远程地址", r.RemoteAddr),
+		port.ReqID(reqID),
+		port.Method(r.Method),
+		port.Path(r.URL.Path),
+		port.RemoteAddr(r.RemoteAddr),
 	)
 
 	cfg := h.config.Get()
@@ -56,7 +56,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	clientProtocol := h.detectProtocol(r)
 
 	h.logger.Debug("检测客户端协议",
-		port.String("req_id", reqID),
+		port.ReqID(reqID),
 		port.String("protocol", string(clientProtocol)),
 	)
 
@@ -70,7 +70,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		h.logger.Error("读取请求体失败",
-			port.String("请求ID", reqID),
+			port.ReqID(reqID),
 			port.Error(err),
 		)
 		h.errorPresenter.WriteError(w, r, domainerror.NewBadRequest("无法读取请求体"))
@@ -79,14 +79,14 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	h.logger.Debug("请求体读取成功",
-		port.String("请求ID", reqID),
-		port.Int("请求体大小", len(bodyBytes)),
+		port.ReqID(reqID),
+		port.BodySize(len(bodyBytes)),
 	)
 
 	var reqBody map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &reqBody); err != nil {
 		h.logger.Error("解析请求体JSON失败",
-			port.String("请求ID", reqID),
+			port.ReqID(reqID),
 			port.Error(err),
 		)
 		h.errorPresenter.WriteError(w, r, domainerror.NewInvalidJSON(err))
@@ -94,7 +94,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Debug("请求体解析成功",
-		port.String("请求ID", reqID),
+		port.ReqID(reqID),
 	)
 
 	h.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeClientRequest, r.Method, r.URL.Path, r.Proto, map[string][]string(r.Header), reqBody)
@@ -106,7 +106,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	req, err := h.buildDomainRequest(ctx, reqID, reqBody, clientProtocol, r.Header)
 	if err != nil {
 		h.logger.Error("构建领域请求失败",
-			port.String("请求ID", reqID),
+			port.ReqID(reqID),
 			port.Error(err),
 		)
 		h.errorPresenter.WriteError(w, r, err)
@@ -114,9 +114,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Debug("领域请求构建完成",
-		port.String("请求ID", reqID),
-		port.String("模型", req.Model().String()),
-		port.Bool("流式", req.IsStream()),
+		port.ReqID(reqID),
+		port.Model(req.Model().String()),
+		port.Streaming(req.IsStream()),
 	)
 
 	isStream := h.isStreamRequest(reqBody)
@@ -130,15 +130,15 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *ProxyHandler) handleNonStreamingRequest(w http.ResponseWriter, r *http.Request, req *entity.Request) {
 	h.logger.Debug("开始处理非流式请求",
-		port.String("请求ID", req.ID().String()),
-		port.String("模型", req.Model().String()),
+		port.ReqID(req.ID().String()),
+		port.Model(req.Model().String()),
 	)
 
 	resp, err := h.proxyUseCase.Execute(r.Context(), req)
 	if err != nil {
 		h.logger.Error("非流式请求处理失败",
-			port.String("请求ID", req.ID().String()),
-			port.String("模型", req.Model().String()),
+			port.ReqID(req.ID().String()),
+			port.Model(req.Model().String()),
 			port.Error(err),
 		)
 		h.errorPresenter.WriteError(w, r, err)
@@ -146,9 +146,9 @@ func (h *ProxyHandler) handleNonStreamingRequest(w http.ResponseWriter, r *http.
 	}
 
 	h.logger.Info("非流式请求处理成功",
-		port.String("请求ID", req.ID().String()),
-		port.String("模型", req.Model().String()),
-		port.String("响应ID", resp.ID),
+		port.ReqID(req.ID().String()),
+		port.Model(req.Model().String()),
+		port.ResponseID(resp.ID),
 	)
 
 	h.bodyLogger.LogResponseBody(req.ID().String(), port.BodyLogTypeClientResponse, http.StatusOK, resp.Headers, resp)
@@ -158,14 +158,14 @@ func (h *ProxyHandler) handleNonStreamingRequest(w http.ResponseWriter, r *http.
 
 func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Request, req *entity.Request) {
 	h.logger.Debug("开始处理流式请求",
-		port.String("请求ID", req.ID().String()),
-		port.String("模型", req.Model().String()),
+		port.ReqID(req.ID().String()),
+		port.Model(req.Model().String()),
 	)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		h.logger.Error("响应写入器不支持流式传输",
-			port.String("请求ID", req.ID().String()),
+		h.logger.Error("响应写入器不支持streaming传输",
+			port.ReqID(req.ID().String()),
 		)
 		h.errorPresenter.WriteError(w, r, domainerror.NewInternalError("streaming not supported", nil))
 		return
@@ -180,8 +180,8 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 	var sseChunks []byte
 	passthroughHandler := func(chunk []byte) error {
 		if _, err := w.Write(chunk); err != nil {
-			h.logger.Error("写入流式数据块失败",
-				port.String("req_id", req.ID().String()),
+			h.logger.Error("写入streaming数据块失败",
+				port.ReqID(req.ID().String()),
 				port.Error(err),
 			)
 			return err
@@ -196,16 +196,16 @@ func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Req
 
 	if err := h.proxyUseCase.ExecuteStreamingPassthrough(ctx, req, passthroughHandler); err != nil {
 		h.logger.Error("流式请求处理失败",
-			port.String("请求ID", req.ID().String()),
-			port.String("模型", req.Model().String()),
+			port.ReqID(req.ID().String()),
+			port.Model(req.Model().String()),
 			port.Error(err),
 		)
 		return
 	}
 
 	h.logger.Info("流式请求处理成功",
-		port.String("请求ID", req.ID().String()),
-		port.String("模型", req.Model().String()),
+		port.ReqID(req.ID().String()),
+		port.Model(req.Model().String()),
 	)
 
 	h.bodyLogger.LogResponseBody(req.ID().String(), port.BodyLogTypeClientResponse, http.StatusOK, w.Header(), string(sseChunks))

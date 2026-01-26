@@ -14,6 +14,31 @@ import (
 	"llm-proxy/infrastructure/config"
 )
 
+// safeJoin 安全地连接 baseDir 和 relPath，防止路径逃逸攻击。
+// 如果 relPath 尝试跳出 baseDir，返回错误。
+func safeJoin(baseDir, relPath string) (string, error) {
+	// 如果 relPath 是绝对路径，直接拒绝（除非它等于 baseDir）
+	if filepath.IsAbs(relPath) {
+		return "", fmt.Errorf("拒绝绝对路径: %s", relPath)
+	}
+
+	// 清理路径并获取规范路径
+	fullPath := filepath.Join(baseDir, relPath)
+	cleanPath := filepath.Clean(fullPath)
+
+	// 验证清理后的路径仍然在 baseDir 内
+	// 使用 strings.HasPrefix 需要确保 baseDir 以目录分隔符结尾
+	baseDirClean := filepath.Clean(baseDir)
+	if !strings.HasPrefix(cleanPath, baseDirClean) {
+		// 再次检查边界情况（如 baseDir 是 cleanPath 的前缀但不是目录边界）
+		if cleanPath != baseDirClean && !strings.HasPrefix(cleanPath, baseDirClean+string(filepath.Separator)) {
+			return "", fmt.Errorf("路径逃逸尝试: %s -> %s", relPath, cleanPath)
+		}
+	}
+
+	return cleanPath, nil
+}
+
 // TargetLogger 为每个输出目标维护独立的 logger 实例
 type TargetLogger struct {
 	consoleLogger *zap.Logger
@@ -244,11 +269,23 @@ func (r *MultiTargetRouter) getLogFilePath(category LogCategory, cfg *TargetConf
 	baseDir := r.config.File.BaseDir
 
 	if cfg != nil && cfg.Path != "" {
-		// 相对路径：相对于 baseDir
+		// 相对路径：相对于 baseDir，使用 safeJoin 防止路径逃逸
 		if !filepath.IsAbs(cfg.Path) {
-			return filepath.Join(baseDir, cfg.Path)
+			safePath, err := safeJoin(baseDir, cfg.Path)
+			if err != nil {
+				// 如果 safeJoin 失败，回退到默认路径
+				fmt.Fprintf(os.Stderr, "safeJoin failed for category %s: %v, falling back to default\n", category, err)
+				return filepath.Join(baseDir, "general.log")
+			}
+			return safePath
 		}
-		return cfg.Path
+		// 绝对路径：安全检查后使用
+		safePath, err := safeJoin(filepath.Dir(cfg.Path), filepath.Base(cfg.Path))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "safeJoin failed for absolute path %s: %v, falling back to default\n", cfg.Path, err)
+			return filepath.Join(baseDir, "general.log")
+		}
+		return safePath
 	}
 
 	// 默认路径

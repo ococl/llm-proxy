@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"llm-proxy/domain/port"
 	"llm-proxy/infrastructure/config"
 
 	"go.uber.org/zap"
@@ -663,14 +664,20 @@ func WriteRequestLog(reqID, content string) {
 	if requestLogger == nil {
 		return
 	}
-	requestLogger.Infow("请求日志", "reqID", reqID, "content", content)
+	requestLogger.Infow("请求日志",
+		port.ReqID(reqID),
+		port.Content(content),
+	)
 }
 
 func WriteErrorLog(reqID, content string) {
 	if errorLogger == nil {
 		return
 	}
-	errorLogger.Errorw("错误日志", "reqID", reqID, "content", content)
+	errorLogger.Errorw("错误日志",
+		port.ReqID(reqID),
+		port.Content(content),
+	)
 }
 
 func LogMetrics(reqID, modelAlias, status, finalBackend string, attempts int, totalLatencyMs int64, backendDetails string) {
@@ -678,13 +685,13 @@ func LogMetrics(reqID, modelAlias, status, finalBackend string, attempts int, to
 		return
 	}
 	GeneralSugar.Infow("性能指标",
-		"reqID", reqID,
-		"model", modelAlias,
-		"status", status,
-		"backend", finalBackend,
-		"attempts", attempts,
-		"total_latency_ms", totalLatencyMs,
-		"backend_details", backendDetails,
+		port.ReqID(reqID),
+		port.Model(modelAlias),
+		port.Status(status),
+		port.Backend(finalBackend),
+		port.Attempt(attempts),
+		port.DurationMSInt(totalLatencyMs),
+		port.BackendDetails(backendDetails),
 	)
 }
 
