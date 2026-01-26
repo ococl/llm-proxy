@@ -31,7 +31,13 @@ type BackendError struct {
 }
 
 func (e *BackendError) Error() string {
-	return fmt.Sprintf("backend error: status=%d, body=%s", e.StatusCode, e.Body)
+	// 只返回简洁的错误摘要，避免在控制台日志中打印庞大的响应体
+	// 响应体已通过 bodyLogger 记录到文件日志中
+	bodyPreview := e.Body
+	if len(bodyPreview) > 200 {
+		bodyPreview = bodyPreview[:200] + "...(已截断)"
+	}
+	return fmt.Sprintf("backend error: status=%d, body=%s", e.StatusCode, bodyPreview)
 }
 
 // NewBackendClientAdapter creates a new backend client adapter.
