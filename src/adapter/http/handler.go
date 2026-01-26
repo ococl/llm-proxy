@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"llm-proxy/application/usecase"
@@ -40,6 +41,30 @@ func NewProxyHandler(
 	}
 }
 
+// getRealIP 从请求头中获取真实客户端 IP。
+// 优先使用 X-Real-Ip，其次使用 X-Forwarded-For，最后回退到 RemoteAddr。
+func getRealIP(r *http.Request) string {
+	// 优先检查 X-Real-Ip 头
+	realIP := r.Header.Get("X-Real-Ip")
+	if realIP != "" {
+		return realIP
+	}
+
+	// 检查 X-Forwarded-For 头（可能包含多个 IP，取第一个）
+	forwardedFor := r.Header.Get("X-Forwarded-For")
+	if forwardedFor != "" {
+		// X-Forwarded-For 格式: "client, proxy1, proxy2"
+		// 取第一个逗号之前的部分作为真实客户端 IP
+		if idx := strings.Index(forwardedFor, ","); idx != -1 {
+			return strings.TrimSpace(forwardedFor[:idx])
+		}
+		return forwardedFor
+	}
+
+	// 回退到 RemoteAddr
+	return r.RemoteAddr
+}
+
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	reqID := h.generateRequestID()
@@ -48,7 +73,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		port.ReqID(reqID),
 		port.Method(r.Method),
 		port.Path(r.URL.Path),
-		port.RemoteAddr(r.RemoteAddr),
+		port.RemoteAddr(getRealIP(r)),
 	)
 
 	cfg := h.config.Get()

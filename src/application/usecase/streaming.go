@@ -225,7 +225,6 @@ func (a *PassthroughStreamingAdapter) Execute(ctx context.Context, backendReq *e
 	}
 	a.uc.logger.Info("上游流式请求完成(透传模式)",
 		port.ReqID(reqID),
-		port.Backend(backend.Name()),
 		port.TotalBytes(totalBytes),
 	)
 	return nil

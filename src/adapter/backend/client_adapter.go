@@ -437,6 +437,7 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 		port.ReqID(reqID),
 		port.Backend(backend.Name()),
 		port.BackendModel(backendModel),
+		port.Protocol(string(backend.Protocol())),
 	)
 
 	httpResp, err := a.client.Send(ctx, backendReq)

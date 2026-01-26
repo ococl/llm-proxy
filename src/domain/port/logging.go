@@ -224,6 +224,11 @@ func Status(s string) Field {
 	return String("status", s)
 }
 
+// Protocol 创建协议字段
+func Protocol(p string) Field {
+	return String(FieldProtocol, p)
+}
+
 // BackendDetails 创建后端详情字段
 func BackendDetails(d string) Field {
 	return String("backend_details", d)
