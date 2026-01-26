@@ -238,6 +238,9 @@ func (l *RequestBodyLogger) WriteFromMap(reqID string, logType BodyLogType, meth
 
 	// 写入请求头
 	for key, values := range headers {
+		if isHopByHopHeader(key) {
+			continue
+		}
 		for _, value := range values {
 			sb.WriteString(fmt.Sprintf("%s: %s\r\n", key, value))
 		}

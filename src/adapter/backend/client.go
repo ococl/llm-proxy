@@ -86,9 +86,12 @@ func (h *HTTPClient) buildHTTPRequest(ctx context.Context, backendReq *BackendRe
 
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	if locale := backendReq.Backend.Locale(); locale != "" {
-		httpReq.Header.Set("Accept-Language", locale)
+	// 默认使用中国大陆、简体中文，除非后端显式配置了 locale
+	locale := backendReq.Backend.Locale()
+	if locale == "" {
+		locale = "zh-CN"
 	}
+	httpReq.Header.Set("Accept-Language", locale)
 
 	apiKey := backendReq.Backend.APIKey()
 	if !apiKey.IsEmpty() {
