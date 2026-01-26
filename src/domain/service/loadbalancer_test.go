@@ -115,4 +115,138 @@ func TestLoadBalancer_Select(t *testing.T) {
 			t.Errorf("Expected 'enabled', got '%s'", result.Name())
 		}
 	})
+
+	// ============ Weighted Strategy Tests ============
+
+	t.Run("Weighted selects highest priority", func(t *testing.T) {
+		lb := NewLoadBalancer(StrategyWeighted)
+		backend1, _ := entity.NewBackend("high-priority", "https://high.com", "key1", true, types.ProtocolOpenAI)
+		backend2, _ := entity.NewBackend("low-priority", "https://low.com", "key2", true, types.ProtocolOpenAI)
+
+		routes := []*port.Route{
+			{Backend: backend1, Model: "model", Priority: 1, Enabled: true},
+			{Backend: backend2, Model: "model", Priority: 10, Enabled: true},
+		}
+
+		// 多次选择，应该总是返回高优先级
+		for i := 0; i < 20; i++ {
+			result := lb.Select(routes)
+			if result == nil {
+				t.Error("Expected non-nil result")
+			}
+			if result.Name() != "high-priority" {
+				t.Errorf("Expected 'high-priority', got '%s'", result.Name())
+			}
+		}
+	})
+
+	t.Run("Weighted falls back to next priority when highest unavailable", func(t *testing.T) {
+		lb := NewLoadBalancer(StrategyWeighted)
+		backend1, _ := entity.NewBackend("high-priority", "https://high.com", "key1", true, types.ProtocolOpenAI)
+		backend2, _ := entity.NewBackend("medium-priority", "https://medium.com", "key2", true, types.ProtocolOpenAI)
+		backend3, _ := entity.NewBackend("low-priority", "https://low.com", "key3", true, types.ProtocolOpenAI)
+
+		routes := []*port.Route{
+			{Backend: backend1, Model: "model", Priority: 1, Enabled: false}, // 禁用
+			{Backend: backend2, Model: "model", Priority: 5, Enabled: true},
+			{Backend: backend3, Model: "model", Priority: 10, Enabled: true},
+		}
+
+		// 应该回退到 priority 5
+		result := lb.Select(routes)
+		if result == nil {
+			t.Error("Expected non-nil result with fallback")
+		}
+		if result.Name() != "medium-priority" {
+			t.Errorf("Expected 'medium-priority', got '%s'", result.Name())
+		}
+	})
+
+	t.Run("Weighted falls back through all priorities", func(t *testing.T) {
+		lb := NewLoadBalancer(StrategyWeighted)
+		backend1, _ := entity.NewBackend("p1", "https://p1.com", "key1", true, types.ProtocolOpenAI)
+		backend2, _ := entity.NewBackend("p2", "https://p2.com", "key2", true, types.ProtocolOpenAI)
+		backend3, _ := entity.NewBackend("p3", "https://p3.com", "key3", true, types.ProtocolOpenAI)
+
+		routes := []*port.Route{
+			{Backend: backend1, Model: "model", Priority: 1, Enabled: false},
+			{Backend: backend2, Model: "model", Priority: 2, Enabled: false},
+			{Backend: backend3, Model: "model", Priority: 3, Enabled: true},
+		}
+
+		result := lb.Select(routes)
+		if result == nil {
+			t.Error("Expected non-nil result with fallback")
+		}
+		if result.Name() != "p3" {
+			t.Errorf("Expected 'p3', got '%s'", result.Name())
+		}
+	})
+
+	t.Run("Weighted selects from same priority group randomly", func(t *testing.T) {
+		lb := NewLoadBalancer(StrategyWeighted)
+		backend1, _ := entity.NewBackend("backend1", "https://b1.com", "key1", true, types.ProtocolOpenAI)
+		backend2, _ := entity.NewBackend("backend2", "https://b2.com", "key2", true, types.ProtocolOpenAI)
+		backend3, _ := entity.NewBackend("backend3", "https://b3.com", "key3", true, types.ProtocolOpenAI)
+
+		routes := []*port.Route{
+			{Backend: backend1, Model: "model", Priority: 1, Enabled: true},
+			{Backend: backend2, Model: "model", Priority: 1, Enabled: true},
+			{Backend: backend3, Model: "model", Priority: 2, Enabled: true},
+		}
+
+		// 多次选择，应该在 priority 1 的两个后端中随机选择
+		selectedP1 := make(map[string]int)
+		for i := 0; i < 100; i++ {
+			result := lb.Select(routes)
+			if result == nil {
+				t.Error("Expected non-nil result")
+			}
+			if result.Name() != "backend3" {
+				selectedP1[result.Name()]++
+			}
+		}
+
+		// 应该只在 backend1 和 backend2 中选择（都在 priority 1）
+		if len(selectedP1) != 2 {
+			t.Errorf("Expected selection from 2 backends in priority 1, got %v", selectedP1)
+		}
+		// backend3 不应该被选择（priority 2 更低）
+	})
+
+	t.Run("Weighted handles negative priorities", func(t *testing.T) {
+		lb := NewLoadBalancer(StrategyWeighted)
+		backend1, _ := entity.NewBackend("negative", "https://neg.com", "key1", true, types.ProtocolOpenAI)
+		backend2, _ := entity.NewBackend("positive", "https://pos.com", "key2", true, types.ProtocolOpenAI)
+
+		routes := []*port.Route{
+			{Backend: backend1, Model: "model", Priority: -5, Enabled: true}, // 更高优先级（更小的数字）
+			{Backend: backend2, Model: "model", Priority: 10, Enabled: true},
+		}
+
+		// 应该总是选择负数优先级（更高优先级）
+		result := lb.Select(routes)
+		if result == nil {
+			t.Error("Expected non-nil result")
+		}
+		if result.Name() != "negative" {
+			t.Errorf("Expected 'negative' (priority -5), got '%s'", result.Name())
+		}
+	})
+
+	t.Run("Weighted returns nil when all routes disabled", func(t *testing.T) {
+		lb := NewLoadBalancer(StrategyWeighted)
+		backend1, _ := entity.NewBackend("backend1", "https://b1.com", "key1", true, types.ProtocolOpenAI)
+		backend2, _ := entity.NewBackend("backend2", "https://b2.com", "key2", true, types.ProtocolOpenAI)
+
+		routes := []*port.Route{
+			{Backend: backend1, Model: "model", Priority: 1, Enabled: false},
+			{Backend: backend2, Model: "model", Priority: 2, Enabled: false},
+		}
+
+		result := lb.Select(routes)
+		if result != nil {
+			t.Error("Expected nil when all routes disabled")
+		}
+	})
 }
