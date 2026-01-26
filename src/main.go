@@ -179,6 +179,9 @@ func main() {
 	backendRepo := config_adapter.NewBackendRepository(configAdapter)
 	routeResolver := usecase.NewRouteResolveUseCase(configAdapter, backendRepo, cfg.Fallback.AliasFallback)
 
+	// 初始化 Prometheus 指标适配器
+	metricsProvider := metrics_adapter.NewPrometheusMetricsAdapter()
+
 	proxyUseCase := usecase.NewProxyRequestUseCase(
 		proxyLogger,
 		configAdapter,
@@ -188,7 +191,7 @@ func main() {
 		retryStrategy,
 		fallbackStrategy,
 		loadBalancer,
-		&metrics_adapter.PrometheusMetricsAdapter{},
+		metricsProvider,
 		&port.NopLogger{},
 	)
 
