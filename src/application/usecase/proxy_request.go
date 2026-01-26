@@ -23,6 +23,7 @@ type ProxyRequestUseCase struct {
 	loadBalancer     port.LoadBalancer
 	metrics          port.MetricsProvider
 	requestLogger    port.RequestLogger
+	bodyLogger       port.BodyLogger
 }
 
 // NewProxyRequestUseCase creates a new proxy request use case.
@@ -37,7 +38,11 @@ func NewProxyRequestUseCase(
 	loadBalancer port.LoadBalancer,
 	metrics port.MetricsProvider,
 	requestLogger port.RequestLogger,
+	bodyLogger port.BodyLogger,
 ) *ProxyRequestUseCase {
+	if bodyLogger == nil {
+		bodyLogger = &port.NopBodyLogger{}
+	}
 	return &ProxyRequestUseCase{
 		logger:           logger,
 		config:           config,
@@ -49,6 +54,7 @@ func NewProxyRequestUseCase(
 		loadBalancer:     loadBalancer,
 		metrics:          metrics,
 		requestLogger:    requestLogger,
+		bodyLogger:       bodyLogger,
 	}
 }
 

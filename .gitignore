@@ -15,8 +15,7 @@ nul
 *.exe
 tmp
 temp_*
-coverage.out
-coverage.html
+coverage.*
 coverage_*
 coverage-*
 logs

@@ -128,6 +128,7 @@ func TestNewProxyRequestUseCase(t *testing.T) {
 		nil, // loadBalancer
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
+		&port.NopBodyLogger{},
 	)
 
 	if uc == nil {
@@ -147,6 +148,7 @@ func TestProxyRequestUseCase_ValidateRequest_EmptyModel(t *testing.T) {
 		nil,
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
+		&port.NopBodyLogger{},
 	)
 
 	req := entity.NewRequest(
@@ -295,6 +297,7 @@ func TestProxyRequestUseCase_Execute_ValidationError(t *testing.T) {
 		nil,
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
+		&port.NopBodyLogger{},
 	)
 
 	req := entity.NewRequest(
@@ -335,6 +338,7 @@ func TestProxyRequestUseCase_Execute_RouteNotFound(t *testing.T) {
 		nil,
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
+		&port.NopBodyLogger{},
 	)
 
 	req := entity.NewRequest(
@@ -386,6 +390,7 @@ func TestProxyRequestUseCase_Execute_NoAvailableBackends(t *testing.T) {
 		mockLoadBalancer,
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
+		&port.NopBodyLogger{},
 	)
 
 	req := entity.NewRequest(
@@ -442,6 +447,7 @@ func TestProxyRequestUseCase_Execute_Success(t *testing.T) {
 		domain_service.NewLoadBalancer(domain_service.StrategyRandom),
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
+		&port.NopBodyLogger{},
 	)
 
 	req := entity.NewRequest(

@@ -193,6 +193,7 @@ func main() {
 		loadBalancer,
 		metricsProvider,
 		&port.NopLogger{},
+		bodyLoggerAdapter,
 	)
 
 	errorPresenter := http_adapter.NewErrorPresenter(proxyLogger)

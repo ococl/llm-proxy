@@ -49,24 +49,25 @@ type DetectionConfig struct {
 }
 
 type LoggingConfig struct {
-	Level         string
-	ConsoleLevel  string
-	BaseDir       string
-	EnableMetrics bool
-	MaxFileSizeMB int
-	MaxAgeDays    int
-	MaxBackups    int
-	Format        string
-	Colorize      bool
-	ConsoleFormat string
-	DebugMode     bool
-	SeparateFiles bool
-	RequestDir    string
-	ErrorDir      string
-	MaskSensitive bool
-	BufferSize    int
-	FlushInterval int
-	DropOnFull    bool
+	Level             string
+	ConsoleLevel      string
+	BaseDir           string
+	EnableMetrics     bool
+	MaxFileSizeMB     int
+	MaxAgeDays        int
+	MaxBackups        int
+	Format            string
+	Colorize          bool
+	ConsoleFormat     string
+	DebugMode         bool
+	SeparateFiles     bool
+	RequestDir        string
+	ErrorDir          string
+	MaskSensitive     bool
+	BufferSize        int
+	FlushInterval     int
+	DropOnFull        bool
+	MaxLogContentSize int
 }
 
 type TimeoutConfig struct {

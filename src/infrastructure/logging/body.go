@@ -36,7 +36,9 @@ type RequestBodyLogger struct {
 	writer   *lumberjack.Logger
 	config   *config.RequestBodyConfig
 	mu       sync.Mutex
+	rootDir  string
 	baseDir  string
+	disabled bool
 	testMode bool
 }
 
@@ -54,16 +56,18 @@ func InitRequestBodyLogger(cfg *config.Config) error {
 
 	bodyLoggerInit = true
 
-	if !cfg.Logging.RequestBody.Enabled {
+	if !cfg.Logging.RequestBody.IsEnabled() {
 		bodyLogger = &RequestBodyLogger{
 			config:   &cfg.Logging.RequestBody,
+			disabled: true,
 			testMode: false,
 		}
 		return nil
 	}
 
 	dateDir := time.Now().Format("2006-01-02")
-	baseDir := filepath.Join(cfg.Logging.GetBaseDir(), dateDir, "request_body")
+	rootDir := cfg.Logging.RequestBody.GetBaseDir()
+	baseDir := filepath.Join(rootDir, dateDir)
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("创建请求体日志目录失败: %w", err)
 	}
@@ -79,6 +83,7 @@ func InitRequestBodyLogger(cfg *config.Config) error {
 	bodyLogger = &RequestBodyLogger{
 		writer:  writer,
 		config:  &cfg.Logging.RequestBody,
+		rootDir: rootDir,
 		baseDir: baseDir,
 	}
 
@@ -125,7 +130,7 @@ func GetRequestBodyLogger() *RequestBodyLogger {
 
 // Write 写入请求体日志
 func (l *RequestBodyLogger) Write(reqID string, logType BodyLogType, httpReq *http.Request, body []byte) error {
-	if l.testMode {
+	if l.testMode || l.disabled {
 		return nil
 	}
 
@@ -155,7 +160,7 @@ func (l *RequestBodyLogger) Write(reqID string, logType BodyLogType, httpReq *ht
 	sb.WriteString("\r\n")
 
 	// 写入请求体
-	if len(body) > 0 {
+	if len(body) > 0 && l.config.ShouldIncludeBody() {
 		sb.Write(body)
 		if !bytes.HasSuffix(body, []byte("\n")) {
 			sb.WriteString("\n")
@@ -168,7 +173,7 @@ func (l *RequestBodyLogger) Write(reqID string, logType BodyLogType, httpReq *ht
 
 // WriteResponse 写入响应体日志
 func (l *RequestBodyLogger) WriteResponse(reqID string, logType BodyLogType, statusCode int, header http.Header, body []byte) error {
-	if l.testMode {
+	if l.testMode || l.disabled {
 		return nil
 	}
 
@@ -200,7 +205,7 @@ func (l *RequestBodyLogger) WriteResponse(reqID string, logType BodyLogType, sta
 	sb.WriteString("\r\n")
 
 	// 写入响应体
-	if len(body) > 0 {
+	if len(body) > 0 && l.config.ShouldIncludeBody() {
 		sb.Write(body)
 		if !bytes.HasSuffix(body, []byte("\n")) {
 			sb.WriteString("\n")
@@ -213,7 +218,7 @@ func (l *RequestBodyLogger) WriteResponse(reqID string, logType BodyLogType, sta
 
 // WriteFromMap 从 map 数据写入请求体日志（用于客户端请求）
 func (l *RequestBodyLogger) WriteFromMap(reqID string, logType BodyLogType, method, path, protocol string, headers map[string][]string, body map[string]interface{}) error {
-	if l.testMode {
+	if l.testMode || l.disabled {
 		return nil
 	}
 
@@ -252,7 +257,7 @@ func (l *RequestBodyLogger) WriteFromMap(reqID string, logType BodyLogType, meth
 
 // WriteResponseFromMap 从 map 数据写入响应体日志
 func (l *RequestBodyLogger) WriteResponseFromMap(reqID string, logType BodyLogType, statusCode int, headers map[string][]string, body interface{}) error {
-	if l.testMode {
+	if l.testMode || l.disabled {
 		return nil
 	}
 
@@ -302,7 +307,7 @@ func (l *RequestBodyLogger) WriteResponseFromMap(reqID string, logType BodyLogTy
 
 // WriteUpstreamResponse 写入上游响应体日志（处理 io.Reader）
 func (l *RequestBodyLogger) WriteUpstreamResponse(reqID string, statusCode int, header http.Header, body io.Reader) error {
-	if l.testMode {
+	if l.testMode || l.disabled {
 		return nil
 	}
 
@@ -428,7 +433,7 @@ func CleanupOldLogs() error {
 		return nil
 	}
 
-	if logger.testMode {
+	if logger.testMode || logger.disabled {
 		return nil
 	}
 
@@ -439,7 +444,7 @@ func CleanupOldLogs() error {
 
 	cutoffTime := time.Now().AddDate(0, 0, -maxAgeDays)
 
-	return filepath.Walk(logger.baseDir, func(path string, info os.FileInfo, err error) error {
+	return filepath.Walk(logger.rootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			// 忽略不存在的路径
 			return nil
@@ -481,6 +486,8 @@ func GetRequestBodyLoggerInfo() map[string]interface{} {
 	return map[string]interface{}{
 		"initialized": true,
 		"testMode":    logger.testMode,
+		"disabled":    logger.disabled,
+		"rootDir":     logger.rootDir,
 		"baseDir":     logger.baseDir,
 	}
 }

@@ -162,7 +162,7 @@ func TestWriteFromMap_FileCreation(t *testing.T) {
 	}
 
 	// 验证文件创建
-	files, err := filepath.Glob(filepath.Join(tempDir, "*", "*.httpdump"))
+	files, err := filepath.Glob(filepath.Join(getTestDateDir(tempDir), "*.httpdump"))
 	if err != nil {
 		t.Fatalf("查找日志文件失败: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestWriteResponseFromMap_FileCreation(t *testing.T) {
 	}
 
 	// 验证文件创建
-	files, err := filepath.Glob(filepath.Join(tempDir, "*", "*.httpdump"))
+	files, err := filepath.Glob(filepath.Join(getTestDateDir(tempDir), "*.httpdump"))
 	if err != nil {
 		t.Fatalf("查找日志文件失败: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestWriteFromMap_IncludeBodyDisabled(t *testing.T) {
 	}
 
 	// 验证文件存在
-	files, err := filepath.Glob(filepath.Join(tempDir, "*", "*.httpdump"))
+	files, err := filepath.Glob(filepath.Join(getTestDateDir(tempDir), "*.httpdump"))
 	if err != nil {
 		t.Fatalf("查找日志文件失败: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestWrite_Integration(t *testing.T) {
 	}
 
 	// 验证文件创建
-	files, err := filepath.Glob(filepath.Join(tempDir, "*", "*.httpdump"))
+	files, err := filepath.Glob(filepath.Join(getTestDateDir(tempDir), "*.httpdump"))
 	if err != nil {
 		t.Fatalf("查找日志文件失败: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestWriteResponse_Integration(t *testing.T) {
 	}
 
 	// 验证文件创建
-	files, err := filepath.Glob(filepath.Join(tempDir, "*", "*.httpdump"))
+	files, err := filepath.Glob(filepath.Join(getTestDateDir(tempDir), "*.httpdump"))
 	if err != nil {
 		t.Fatalf("查找日志文件失败: %v", err)
 	}
@@ -680,7 +680,7 @@ func TestWriteUpstreamResponse(t *testing.T) {
 	}
 
 	// 验证文件创建
-	files, err := filepath.Glob(filepath.Join(tempDir, "*", "*.httpdump"))
+	files, err := filepath.Glob(filepath.Join(getTestDateDir(tempDir), "*.httpdump"))
 	if err != nil {
 		t.Fatalf("查找日志文件失败: %v", err)
 	}
@@ -743,7 +743,7 @@ func TestWriteUpstreamResponse_ReadError(t *testing.T) {
 	}
 
 	// 验证文件仍然创建（包含错误信息）
-	files, err := filepath.Glob(filepath.Join(tempDir, "*", "*.httpdump"))
+	files, err := filepath.Glob(filepath.Join(getTestDateDir(tempDir), "*.httpdump"))
 	if err != nil {
 		t.Fatalf("查找日志文件失败: %v", err)
 	}
@@ -762,5 +762,5 @@ func (r *failingReader) Read(p []byte) (n int, err error) {
 // getTestDateDir 获取测试日期目录（与 InitRequestBodyLogger 保持一致）
 func getTestDateDir(tempDir string) string {
 	dateDir := time.Now().Format("2006-01-02")
-	return filepath.Join(tempDir, dateDir, "request_body")
+	return filepath.Join(tempDir, dateDir)
 }

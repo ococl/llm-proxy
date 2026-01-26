@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -141,6 +142,14 @@ func NewPassthroughStreamingAdapter(uc *ProxyRequestUseCase, handler func([]byte
 	}
 }
 
+func (a *PassthroughStreamingAdapter) maxCaptureBytes() int {
+	cfg := a.uc.config.Get()
+	if cfg == nil {
+		return 0
+	}
+	return cfg.Logging.MaxLogContentSize
+}
+
 // Execute 执行流式处理。
 func (a *PassthroughStreamingAdapter) Execute(ctx context.Context, backendReq *entity.Request, backend *entity.Backend, backendModel string) error {
 	reqID := backendReq.ID().String()
@@ -156,6 +165,11 @@ func (a *PassthroughStreamingAdapter) Execute(ctx context.Context, backendReq *e
 		port.String("后端", backend.Name()),
 	)
 
+	maxCapture := a.maxCaptureBytes()
+	capturing := maxCapture != 0
+	captureExceeded := false
+	var captured bytes.Buffer
+
 	buf := make([]byte, 32*1024)
 	totalBytes := 0
 	for {
@@ -163,6 +177,19 @@ func (a *PassthroughStreamingAdapter) Execute(ctx context.Context, backendReq *e
 		if n > 0 {
 			totalBytes += n
 			chunk := buf[:n]
+
+			if capturing && !captureExceeded {
+				remaining := maxCapture - captured.Len()
+				if remaining <= 0 {
+					captureExceeded = true
+				} else if n <= remaining {
+					_, _ = captured.Write(chunk)
+				} else {
+					_, _ = captured.Write(chunk[:remaining])
+					captureExceeded = true
+				}
+			}
+
 			if handlerErr := a.handler(chunk); handlerErr != nil {
 				a.uc.logger.Error("处理流式数据块失败(透传模式)",
 					port.String("请求ID", reqID),
@@ -190,6 +217,13 @@ func (a *PassthroughStreamingAdapter) Execute(ctx context.Context, backendReq *e
 		}
 	}
 
+	if capturing {
+		bodyBytes := captured.Bytes()
+		if captureExceeded {
+			bodyBytes = append(bodyBytes, []byte("\n\n[response body capture truncated]\n")...)
+		}
+		a.uc.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, string(bodyBytes))
+	}
 	a.uc.logger.Info("上游流式请求完成(透传模式)",
 		port.String("请求ID", reqID),
 		port.String("后端", backend.Name()),

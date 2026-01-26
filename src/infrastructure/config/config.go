@@ -369,7 +369,7 @@ func (r *RequestBodyConfig) ShouldCompress() bool {
 }
 
 func (r *RequestBodyConfig) ShouldIncludeBody() bool {
-	if !r.Enabled {
+	if !r.IsEnabled() {
 		return false
 	}
 	return r.IncludeBody == nil || *r.IncludeBody
