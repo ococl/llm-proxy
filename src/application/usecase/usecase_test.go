@@ -129,6 +129,7 @@ func TestNewProxyRequestUseCase(t *testing.T) {
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
 		&port.NopBodyLogger{},
+		&port.NopCooldownProvider{},
 	)
 
 	if uc == nil {
@@ -149,6 +150,7 @@ func TestProxyRequestUseCase_ValidateRequest_EmptyModel(t *testing.T) {
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
 		&port.NopBodyLogger{},
+		&port.NopCooldownProvider{},
 	)
 
 	req := entity.NewRequest(
@@ -298,6 +300,7 @@ func TestProxyRequestUseCase_Execute_ValidationError(t *testing.T) {
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
 		&port.NopBodyLogger{},
+		&port.NopCooldownProvider{},
 	)
 
 	req := entity.NewRequest(
@@ -339,6 +342,7 @@ func TestProxyRequestUseCase_Execute_RouteNotFound(t *testing.T) {
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
 		&port.NopBodyLogger{},
+		&port.NopCooldownProvider{},
 	)
 
 	req := entity.NewRequest(
@@ -391,6 +395,7 @@ func TestProxyRequestUseCase_Execute_NoAvailableBackends(t *testing.T) {
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
 		&port.NopBodyLogger{},
+		&port.NopCooldownProvider{},
 	)
 
 	req := entity.NewRequest(
@@ -448,6 +453,7 @@ func TestProxyRequestUseCase_Execute_Success(t *testing.T) {
 		&MockMetricsProvider{},
 		&MockRequestLogger{},
 		&port.NopBodyLogger{},
+		&port.NopCooldownProvider{},
 	)
 
 	req := entity.NewRequest(

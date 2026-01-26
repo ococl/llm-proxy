@@ -345,7 +345,10 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetryCommon(
 		)
 
 		if !uc.retryStrategy.ShouldRetry(attempt, err) {
-			uc.logger.Error("重试次数耗尽",
+			// 遇到不可重试的错误（如4xx客户端错误），将后端加入冷却
+			uc.cooldownBackendIfNeeded(backend.Name(), modelName, err)
+
+			uc.logger.Error("后端不可重试错误，触发冷却",
 				port.ReqID(reqID),
 				port.Model(modelName),
 				port.Backend(backend.Name()),

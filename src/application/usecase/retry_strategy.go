@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"strings"
 	"time"
 )
 
@@ -50,8 +51,64 @@ func NewRetryStrategy(
 }
 
 // ShouldRetry implements port.RetryStrategy.
+// 根据错误类型和重试次数决定是否应该重试。
+// 对于认证错误(401)、权限错误(403)、客户端错误(400)等不应重试。
+// 对于服务器错误(500)、服务不可用(503)、超时等可以重试。
 func (rs *RetryStrategy) ShouldRetry(attempt int, lastErr error) bool {
-	return attempt < rs.maxRetries
+	// 首先检查重试次数是否超过最大值
+	if attempt >= rs.maxRetries {
+		return false
+	}
+
+	// 如果没有错误信息，允许重试
+	if lastErr == nil {
+		return true
+	}
+
+	// 根据错误消息判断错误类型，决定是否重试
+	errMsg := lastErr.Error()
+
+	// 客户端错误(4xx)通常不应重试，除非是速率限制(429)可能需要等待后重试
+	if isClientError(errMsg) && !isRateLimitError(errMsg) {
+		return false
+	}
+
+	// 其他情况允许重试
+	return true
+}
+
+// isClientError 判断是否为客户端错误(4xx)
+func isClientError(errMsg string) bool {
+	// 检查常见的客户端错误状态码
+	clientErrorPatterns := []string{
+		"401", "Unauthorized",
+		"403", "Forbidden",
+		"400", "Bad Request",
+		"404", "Not Found",
+		"422", "Unprocessable Entity",
+	}
+
+	for _, pattern := range clientErrorPatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// isRateLimitError 判断是否为速率限制错误(429)
+func isRateLimitError(errMsg string) bool {
+	rateLimitPatterns := []string{
+		"429", "Too Many Requests",
+		"rate limit",
+	}
+
+	for _, pattern := range rateLimitPatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // GetDelay implements port.RetryStrategy.

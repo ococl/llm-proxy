@@ -96,15 +96,15 @@ type ToolCallFunction struct {
 
 // Tool represents a tool definition.
 type Tool struct {
-	Type     string
-	Function ToolFunction
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
 }
 
 // ToolFunction represents a function tool.
 type ToolFunction struct {
-	Name        string
-	Description string
-	Parameters  map[string]any
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
 // Request represents a chat completion request.

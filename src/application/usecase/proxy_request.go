@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"llm-proxy/domain/entity"
@@ -24,6 +25,7 @@ type ProxyRequestUseCase struct {
 	metrics          port.MetricsProvider
 	requestLogger    port.RequestLogger
 	bodyLogger       port.BodyLogger
+	cooldownProvider port.CooldownProvider
 }
 
 // NewProxyRequestUseCase creates a new proxy request use case.
@@ -39,9 +41,13 @@ func NewProxyRequestUseCase(
 	metrics port.MetricsProvider,
 	requestLogger port.RequestLogger,
 	bodyLogger port.BodyLogger,
+	cooldownProvider port.CooldownProvider,
 ) *ProxyRequestUseCase {
 	if bodyLogger == nil {
 		bodyLogger = &port.NopBodyLogger{}
+	}
+	if cooldownProvider == nil {
+		cooldownProvider = &port.NopCooldownProvider{}
 	}
 	return &ProxyRequestUseCase{
 		logger:           logger,
@@ -55,6 +61,7 @@ func NewProxyRequestUseCase(
 		metrics:          metrics,
 		requestLogger:    requestLogger,
 		bodyLogger:       bodyLogger,
+		cooldownProvider: cooldownProvider,
 	}
 }
 
@@ -282,7 +289,10 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		)
 
 		if !uc.retryStrategy.ShouldRetry(attempt, err) {
-			uc.logger.Error("重试次数耗尽",
+			// 遇到不可重试的错误（如4xx客户端错误），将后端加入冷却
+			uc.cooldownBackendIfNeeded(backend.Name(), modelName, err)
+
+			uc.logger.Error("后端不可重试错误，触发冷却",
 				port.ReqID(reqID),
 				port.Model(modelName),
 				port.Backend(backend.Name()),
@@ -318,6 +328,47 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 		return nil, domainerror.NewNoBackend().WithCause(lastErr)
 	}
 	return nil, domainerror.NewNoBackend()
+}
+
+// cooldownBackendIfNeeded 在遇到不可重试错误时将后端加入冷却。
+// 对于4xx客户端错误（认证、权限、请求格式错误等），将后端短暂冷却，
+// 避免立即重试同一后端。
+func (uc *ProxyRequestUseCase) cooldownBackendIfNeeded(backendName, modelName string, err error) {
+	if err == nil {
+		return
+	}
+
+	errMsg := err.Error()
+	// 只对客户端错误(4xx)触发冷却，服务器错误(5xx)不应该触发冷却
+	// 因为5xx可能是暂时性问题，应该让负载均衡器选择其他后端重试
+	if isClientErrorForCooldown(errMsg) {
+		// 使用默认冷却时间 30 秒
+		uc.cooldownProvider.SetCooldown(backendName, modelName, 30*time.Second)
+		uc.logger.Info("后端触发冷却（客户端错误）",
+			port.ReqID(""),
+			port.Backend(backendName),
+			port.Model(modelName),
+			port.Int("冷却秒数", 30),
+		)
+	}
+}
+
+// isClientErrorForCooldown 判断是否应该触发冷却的客户端错误
+func isClientErrorForCooldown(errMsg string) bool {
+	clientErrorPatterns := []string{
+		"401", "Unauthorized",
+		"403", "Forbidden",
+		"400", "Bad Request",
+		"404", "Not Found",
+		"422", "Unprocessable Entity",
+	}
+
+	for _, pattern := range clientErrorPatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // findRouteForBackend 根据backend查找对应的路由

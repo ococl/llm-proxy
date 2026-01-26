@@ -58,3 +58,15 @@ func (n *NopMetricsProvider) DecActiveRequests() {}
 
 // GetSnapshot returns an empty map.
 func (n *NopMetricsProvider) GetSnapshot() map[string]interface{} { return nil }
+
+// NopCooldownProvider is a no-op implementation of CooldownProvider for testing.
+type NopCooldownProvider struct{}
+
+// IsCoolingDown always returns false.
+func (n *NopCooldownProvider) IsCoolingDown(backend, model string) bool { return false }
+
+// SetCooldown does nothing.
+func (n *NopCooldownProvider) SetCooldown(backend, model string, duration time.Duration) {}
+
+// ClearExpired does nothing.
+func (n *NopCooldownProvider) ClearExpired() {}
