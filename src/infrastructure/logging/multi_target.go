@@ -152,15 +152,14 @@ func DefaultMultiTargetConfig() *MultiTargetConfig {
 				Path: "network/network.log",
 			},
 			string(LogCategoryRequestBody): {
+				// 请求体日志由 body.go 的 InitRequestBodyLogger 处理
+				// 此处配置为仅文件输出，控制台级别为 none
 				Target: string(LogTargetFile),
 				Levels: LogLevelConfig{
-					Console: "none", // 请求体日志不输出到控制台
+					Console: "none", // 请求体不输出到控制台
 					File:    "debug",
 				},
-				Path:     "request_body/{date}/{time}_{req_id}_{type}.httpdump",
-				MaxSize:  200,
-				MaxAge:   14,
-				Compress: true,
+				Path: "request_body/{date}/{time}_{req_id}_{type}.log",
 			},
 		},
 	}

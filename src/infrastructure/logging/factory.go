@@ -277,9 +277,7 @@ func fieldValueString(field zapcore.Field) string {
 func Init(cfg *config.Config) error {
 	baseDir := cfg.Logging.GetBaseDir()
 
-	dateDir := time.Now().Format("2006-01-02")
-	baseDir = filepath.Join(baseDir, dateDir)
-
+	// 日志直接写入 logs/ 目录，不创建日期子目录
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("创建日志根目录失败 %s: %w", baseDir, err)
 	}
@@ -356,6 +354,8 @@ func Init(cfg *config.Config) error {
 		return fmt.Errorf("初始化FileOnlyLogger失败: %w", err)
 	}
 
+	// 旧版 request/error 日志已废弃，多目标日志系统使用 categories 配置
+	// 保留向后兼容但不推荐使用
 	if err := initRequestErrorLoggers(cfg); err != nil {
 		return err
 	}
@@ -379,9 +379,8 @@ func Init(cfg *config.Config) error {
 
 func initRequestErrorLoggers(cfg *config.Config) error {
 	baseDir := cfg.Logging.GetBaseDir()
-	dateDir := time.Now().Format("2006-01-02")
-	baseDir = filepath.Join(baseDir, dateDir)
 
+	// 旧版 request/error 日志直接写入 logs/ 目录，不创建日期子目录
 	reqDir := cfg.Logging.RequestDir
 	if reqDir == "" {
 		reqDir = filepath.Join(baseDir, "requests")
