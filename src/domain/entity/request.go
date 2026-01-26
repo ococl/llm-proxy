@@ -26,10 +26,11 @@ func (id RequestID) IsEmpty() bool {
 // Message represents a chat message.
 // Content can be a string, array (multimodal content), or any valid JSON type.
 type Message struct {
-	Role       string     `json:"role,omitempty"`
-	Content    any        `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Role         string     `json:"role,omitempty"`
+	Content      any        `json:"content,omitempty"`
+	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID   string     `json:"tool_call_id,omitempty"`
+	CacheControl any        `json:"cache_control,omitempty"`
 }
 
 // NewMessage creates a new message with string content.
@@ -83,15 +84,15 @@ func (m Message) IsZero() bool {
 
 // ToolCall represents a tool call from the model.
 type ToolCall struct {
-	ID       string
-	Type     string
-	Function ToolCallFunction
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function ToolCallFunction `json:"function"`
 }
 
 // ToolCallFunction represents a function tool call.
 type ToolCallFunction struct {
-	Name      string
-	Arguments string
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // Tool represents a tool definition.

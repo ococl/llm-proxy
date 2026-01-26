@@ -299,6 +299,11 @@ func (h *ProxyHandler) buildDomainRequest(
 		builder.Tools(domainTools)
 	}
 
+	// 处理 tool_choice 字段
+	if toolChoice, ok := reqBody["tool_choice"]; ok && toolChoice != nil {
+		builder.ToolChoice(toolChoice)
+	}
+
 	if user, ok := reqBody["user"].(string); ok {
 		builder.User(user)
 	}
@@ -357,6 +362,11 @@ func (h *ProxyHandler) extractMessages(reqBody map[string]interface{}) ([]entity
 			msg.ToolCallID = toolCallID
 		}
 
+		// 处理 cache_control 字段（Anthropic API 缓存控制）
+		if cacheControl, ok := msgMap["cache_control"]; ok && cacheControl != nil {
+			msg.CacheControl = cacheControl
+		}
+
 		messages = append(messages, msg)
 	}
 
@@ -374,18 +384,36 @@ func (h *ProxyHandler) extractTools(toolsRaw []interface{}) ([]entity.Tool, erro
 		tool := entity.Tool{
 			Type: getString(toolMap, "type"),
 		}
+		if tool.Type == "" {
+			tool.Type = "function"
+		}
 
-		if fn, ok := toolMap["function"].(map[string]interface{}); ok {
+		// 处理函数类型的工具
+		if tool.Type == "function" {
+			fn, ok := toolMap["function"].(map[string]interface{})
+			if !ok {
+				// function 类型工具必须有 function 字段
+				continue
+			}
+
+			name := getString(fn, "name")
+			if name == "" {
+				// function.name 是必填字段，为空则跳过此工具
+				continue
+			}
+
 			tool.Function = entity.ToolFunction{
-				Name:        getString(fn, "name"),
+				Name:        name,
 				Description: getString(fn, "description"),
 			}
 			if params, ok := fn["parameters"].(map[string]any); ok {
 				tool.Function.Parameters = params
 			}
-		}
 
-		tools = append(tools, tool)
+			tools = append(tools, tool)
+		} else {
+			tools = append(tools, tool)
+		}
 	}
 
 	return tools, nil

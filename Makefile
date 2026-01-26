@@ -32,7 +32,7 @@ darwin:
 
 # 单平台快速构建
 dev:
-	go build -o $(OUTPUT_DIR)/$(BINARY_NAME).exe ./src
+	cd src && go build -o ../$(OUTPUT_DIR)/$(BINARY_NAME).exe .
 
 test:
 	cd src && go test -v ./...
