@@ -22,6 +22,8 @@ type RateLimiter struct {
 	configGetter func() port.RateLimitConfig
 }
 
+// NewRateLimiter creates a new rate limiter with the given config provider.
+// The limiter will dynamically update when the configuration changes.
 func NewRateLimiter(configProvider port.ConfigProvider) *RateLimiter {
 	configGetter := func() port.RateLimitConfig {
 		return configProvider.Get().RateLimit
@@ -32,11 +34,29 @@ func NewRateLimiter(configProvider port.ConfigProvider) *RateLimiter {
 		perModel:     make(map[string]*rate.Limiter),
 		configGetter: configGetter,
 	}
+	// 初始化全局限流器
 	if cfg.Enabled {
 		burst := int(cfg.GlobalRPS * cfg.BurstFactor)
 		rl.global = rate.NewLimiter(rate.Limit(cfg.GlobalRPS), burst)
 	}
 	return rl
+}
+
+// Update 更新限流器配置，当配置变更时调用此方法
+func (rl *RateLimiter) Update() {
+	cfg := rl.configGetter()
+	rl.mu.Lock()
+	// 更新全局限流器
+	if cfg.Enabled {
+		burst := int(cfg.GlobalRPS * cfg.BurstFactor)
+		rl.global = rate.NewLimiter(rate.Limit(cfg.GlobalRPS), burst)
+	} else {
+		rl.global = nil
+	}
+	// 清除缓存的 perIP 和 perModel limiter，下次请求时重新创建
+	rl.perIP = make(map[string]*rate.Limiter)
+	rl.perModel = make(map[string]*rate.Limiter)
+	rl.mu.Unlock()
 }
 
 func (rl *RateLimiter) getIPLimiter(ip string) *rate.Limiter {

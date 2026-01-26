@@ -60,11 +60,6 @@ func main() {
 
 	// 启动配置热重载监控
 	notifyChan := configMgr.Watch()
-	go func() {
-		for range notifyChan {
-			infra_logging.GeneralSugar.Info("检测到配置文件变化,已重新加载")
-		}
-	}()
 
 	cfg := configMgr.Get()
 
@@ -204,6 +199,23 @@ func main() {
 
 	rateLimiter := http_middleware.NewRateLimiter(configAdapter)
 	concurrencyLimiter := http_middleware.NewConcurrencyLimiter(configAdapter)
+
+	// 启动配置热重载监控 - 在中间件创建后启动
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-notifyChan:
+				rateLimiter.Update()
+				concurrencyLimiter.Update()
+				infra_logging.GeneralSugar.Info("配置热重载完成: 限流器和并发限制器已更新")
+			case <-ticker.C:
+				// 备用：每秒检查一次配置变更
+				_ = configMgr.Get()
+			}
+		}
+	}()
 
 	printBanner(Version, cfg.GetListen(), len(cfg.Backends), len(cfg.Models))
 

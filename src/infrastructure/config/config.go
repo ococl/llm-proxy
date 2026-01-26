@@ -560,7 +560,8 @@ func (cm *Manager) Get() *Config {
 	if err != nil {
 		return cfg
 	}
-	if stat.ModTime().Equal(cm.lastMod) {
+	// 使用 After 而不是 Equal，兼容不同文件系统的时间精度
+	if !stat.ModTime().After(cm.lastMod) {
 		return cfg
 	}
 
@@ -569,14 +570,21 @@ func (cm *Manager) Get() *Config {
 	if stat, err = os.Stat(cm.configPath); err != nil {
 		return cm.config
 	}
-	if stat.ModTime().Equal(cm.lastMod) {
+	if !stat.ModTime().After(cm.lastMod) {
 		return cm.config
 	}
-	cm.tryReload()
+	// 直接调用 tryReloadLocked，因为已经持有锁
+	cm.tryReloadLocked()
 	return cm.config
 }
 
 func (cm *Manager) tryReload() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.tryReloadLocked()
+}
+
+func (cm *Manager) tryReloadLocked() {
 	data, err := os.ReadFile(cm.configPath)
 	if err != nil {
 		return
@@ -626,7 +634,9 @@ func (cm *Manager) Watch() <-chan struct{} {
 			case <-cm.stopChan:
 				return
 			case <-ticker.C:
-				cm.tryReload()
+				cm.mu.Lock()
+				cm.tryReloadLocked()
+				cm.mu.Unlock()
 			}
 		}
 	}()

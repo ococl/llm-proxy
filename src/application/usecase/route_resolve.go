@@ -3,6 +3,7 @@ package usecase
 import (
 	domainerror "llm-proxy/domain/error"
 	"llm-proxy/domain/port"
+	"sort"
 )
 
 // RouteResolveUseCase handles route resolution.
@@ -56,6 +57,11 @@ func (uc *RouteResolveUseCase) Resolve(alias string) ([]*port.Route, error) {
 	if len(routes) == 0 {
 		return nil, domainerror.NewUnknownModel(alias)
 	}
+
+	// 按 priority 升序排序（数值越小优先级越高）
+	sort.Slice(routes, func(i, j int) bool {
+		return routes[i].Priority < routes[j].Priority
+	})
 
 	return routes, nil
 }

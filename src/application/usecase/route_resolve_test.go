@@ -367,3 +367,79 @@ func TestRouteResolveUseCase_Resolve_MixedEnabledDisabled(t *testing.T) {
 		t.Error("Route should be enabled")
 	}
 }
+
+func TestRouteResolveUseCase_Resolve_SortsByPriority(t *testing.T) {
+	backend1, _ := entity.NewBackend("backend1", "http://b1.com", "key1", true, types.ProtocolOpenAI)
+	backend2, _ := entity.NewBackend("backend2", "http://b2.com", "key2", true, types.ProtocolOpenAI)
+	backend3, _ := entity.NewBackend("backend3", "http://b3.com", "key3", true, types.ProtocolOpenAI)
+	backend4, _ := entity.NewBackend("backend4", "http://b4.com", "key4", true, types.ProtocolOpenAI)
+
+	backendRepo := &mockBackendRepository{
+		backends: map[string]*entity.Backend{
+			"backend1": backend1,
+			"backend2": backend2,
+			"backend3": backend3,
+			"backend4": backend4,
+		},
+	}
+
+	// 配置中的路由顺序是乱序的，priority 值也不连续
+	configProvider := &mockConfigProvider{
+		config: &port.Config{
+			Models: map[string]*port.ModelAlias{
+				"test/model": {
+					Enabled: true,
+					Routes: []port.ModelRoute{
+						{
+							Backend:  "backend1",
+							Model:    "model1",
+							Priority: 10, // 最高优先级值
+							Enabled:  true,
+						},
+						{
+							Backend:  "backend2",
+							Model:    "model2",
+							Priority: 1, // 最低优先级值
+							Enabled:  true,
+						},
+						{
+							Backend:  "backend3",
+							Model:    "model3",
+							Priority: 5,
+							Enabled:  true,
+						},
+						{
+							Backend:  "backend4",
+							Model:    "model4",
+							Priority: 3,
+							Enabled:  true,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	uc := NewRouteResolveUseCase(configProvider, backendRepo, nil)
+
+	routes, err := uc.Resolve("test/model")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+
+	if len(routes) != 4 {
+		t.Fatalf("Expected 4 routes, got %d", len(routes))
+	}
+
+	// 验证按 priority 升序排序（数值越小优先级越高）
+	expectedOrder := []string{"backend2", "backend4", "backend3", "backend1"} // priorities: 1, 3, 5, 10
+	for i, route := range routes {
+		expectedBackend := expectedOrder[i]
+		if route.Backend.Name() != expectedBackend {
+			t.Errorf("Route %d: expected backend %s, got %s (priority %d)", i, expectedBackend, route.Backend.Name(), route.Priority)
+		}
+		if route.Priority != []int{1, 3, 5, 10}[i] {
+			t.Errorf("Route %d: expected priority %d, got %d", i, []int{1, 3, 5, 10}[i], route.Priority)
+		}
+	}
+}

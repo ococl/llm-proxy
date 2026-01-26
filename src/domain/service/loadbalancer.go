@@ -147,8 +147,8 @@ func (lb *LoadBalancer) selectWeighted(routes []*port.Route) *entity.Backend {
 		topRoutes := lb.filterByPriority(routes, priority)
 
 		if len(topRoutes) > 0 {
-			// 在该优先级组内随机选择
-			backend := lb.selectRandomBackend(topRoutes)
+			// 在该优先级组内选择第一个（因为路由已按配置顺序排序）
+			backend := topRoutes[0].Backend
 			lb.logger.Debug("优先级选择完成",
 				port.String("backend", backend.Name()),
 				port.Int(FieldPriority, priority),

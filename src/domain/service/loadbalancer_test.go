@@ -183,7 +183,7 @@ func TestLoadBalancer_Select(t *testing.T) {
 		}
 	})
 
-	t.Run("Weighted selects from same priority group randomly", func(t *testing.T) {
+	t.Run("Weighted selects first from same priority group", func(t *testing.T) {
 		lb := NewLoadBalancer(StrategyWeighted)
 		backend1, _ := entity.NewBackend("backend1", "https://b1.com", "key1", true, types.ProtocolOpenAI)
 		backend2, _ := entity.NewBackend("backend2", "https://b2.com", "key2", true, types.ProtocolOpenAI)
@@ -195,21 +195,16 @@ func TestLoadBalancer_Select(t *testing.T) {
 			{Backend: backend3, Model: "model", Priority: 2, Enabled: true},
 		}
 
-		// 多次选择，应该在 priority 1 的两个后端中随机选择
-		selectedP1 := make(map[string]int)
+		// 多次选择，应该总是选择第一个后端（在 priority 1 组内按配置顺序选择第一个）
 		for i := 0; i < 100; i++ {
 			result := lb.Select(routes)
 			if result == nil {
 				t.Error("Expected non-nil result")
 			}
-			if result.Name() != "backend3" {
-				selectedP1[result.Name()]++
+			// 应该总是选择第一个（backend1）
+			if result.Name() != "backend1" {
+				t.Errorf("Expected 'backend1', got '%s' at iteration %d", result.Name(), i)
 			}
-		}
-
-		// 应该只在 backend1 和 backend2 中选择（都在 priority 1）
-		if len(selectedP1) != 2 {
-			t.Errorf("Expected selection from 2 backends in priority 1, got %v", selectedP1)
 		}
 		// backend3 不应该被选择（priority 2 更低）
 	})

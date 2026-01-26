@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"sync"
 	"sync/atomic"
 
 	domainerror "llm-proxy/domain/error"
@@ -14,8 +15,11 @@ type ConcurrencyLimiter struct {
 	queueSize    int64
 	maxQueue     int
 	configGetter func() port.ConcurrencyConfig
+	mu           sync.RWMutex
 }
 
+// NewConcurrencyLimiter creates a new concurrency limiter with the given config provider.
+// The limiter will dynamically update when the configuration changes.
 func NewConcurrencyLimiter(configProvider port.ConfigProvider) *ConcurrencyLimiter {
 	configGetter := func() port.ConcurrencyConfig {
 		return configProvider.Get().Concurrency
@@ -25,10 +29,35 @@ func NewConcurrencyLimiter(configProvider port.ConfigProvider) *ConcurrencyLimit
 		maxQueue:     cfg.MaxQueueSize,
 		configGetter: configGetter,
 	}
+	cl.updateChannel(cfg)
+	return cl
+}
+
+// updateChannel 更新并发限制 channel
+func (cl *ConcurrencyLimiter) updateChannel(cfg port.ConcurrencyConfig) {
 	if cfg.Enabled {
 		cl.global = make(chan struct{}, cfg.MaxRequests)
+	} else {
+		cl.global = nil
 	}
-	return cl
+}
+
+// Update 更新并发限制器配置，当配置变更时调用此方法
+func (cl *ConcurrencyLimiter) Update() {
+	cfg := cl.configGetter()
+	cl.mu.Lock()
+	cl.maxQueue = cfg.MaxQueueSize
+	cl.updateChannelLocked(cfg)
+	cl.mu.Unlock()
+}
+
+// updateChannelLocked 在持有锁的情况下更新 channel
+func (cl *ConcurrencyLimiter) updateChannelLocked(cfg port.ConcurrencyConfig) {
+	if cfg.Enabled {
+		cl.global = make(chan struct{}, cfg.MaxRequests)
+	} else {
+		cl.global = nil
+	}
 }
 
 func (cl *ConcurrencyLimiter) Acquire(ctx context.Context) error {
