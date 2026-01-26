@@ -276,6 +276,9 @@ func fieldValueString(field zapcore.Field) string {
 func Init(cfg *config.Config) error {
 	baseDir := cfg.Logging.GetBaseDir()
 
+	dateDir := time.Now().Format("2006-01-02")
+	baseDir = filepath.Join(baseDir, dateDir)
+
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("创建日志根目录失败 %s: %w", baseDir, err)
 	}
@@ -375,6 +378,9 @@ func Init(cfg *config.Config) error {
 
 func initRequestErrorLoggers(cfg *config.Config) error {
 	baseDir := cfg.Logging.GetBaseDir()
+	dateDir := time.Now().Format("2006-01-02")
+	baseDir = filepath.Join(baseDir, dateDir)
+
 	reqDir := cfg.Logging.RequestDir
 	if reqDir == "" {
 		reqDir = filepath.Join(baseDir, "requests")

@@ -88,7 +88,10 @@ func main() {
 		if err := infra_logging.InitLogger(c); err != nil {
 			return err
 		}
-		return infra_logging.InitRequestBodyLogger(c)
+		if err := infra_logging.InitRequestBodyLogger(c); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	configAdapter := config_adapter.NewConfigAdapter(configMgr)
@@ -118,7 +121,7 @@ func main() {
 			select {
 			case <-cleanupTicker.C:
 				if err := infra_logging.CleanupOldLogs(); err != nil {
-					infra_logging.GeneralSugar.Errorw("清理请求体日志失败", "error", err)
+					infra_logging.GeneralSugar.Errorw("清理请求体日志失败", "错误", err)
 				}
 			case <-shutdownBodyLogCleanup:
 				return
@@ -200,11 +203,11 @@ func main() {
 
 	printBanner(Version, cfg.GetListen(), len(cfg.Backends), len(cfg.Models))
 
-	infra_logging.GeneralSugar.Infow("LLM Proxy started",
-		"version", Version,
-		"address", formatListenAddress(cfg.GetListen()),
-		"backends", len(cfg.Backends),
-		"models", len(cfg.Models),
+	infra_logging.GeneralSugar.Infow("LLM Proxy 已启动",
+		"版本", Version,
+		"地址", formatListenAddress(cfg.GetListen()),
+		"后端数量", len(cfg.Backends),
+		"模型数量", len(cfg.Models),
 	)
 
 	mux := http.NewServeMux()
@@ -235,7 +238,7 @@ func main() {
 
 	// 关闭请求体日志器
 	if err := infra_logging.ShutdownRequestBodyLogger(); err != nil {
-		infra_logging.GeneralSugar.Errorw("关闭请求体日志失败", "error", err)
+		infra_logging.GeneralSugar.Errorw("关闭请求体日志失败", "错误", err)
 	}
 
 	infra_logging.ShutdownLogger()
@@ -244,7 +247,7 @@ func main() {
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		infra_logging.GeneralSugar.Errorw("服务器关闭失败", "error", err)
+		infra_logging.GeneralSugar.Errorw("服务器关闭失败", "错误", err)
 	}
 
 	infra_logging.GeneralSugar.Info("服务器已关闭")

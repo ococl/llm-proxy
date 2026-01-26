@@ -304,9 +304,17 @@ func (l *RequestBodyLogger) WriteResponseFromMap(reqID string, logType BodyLogTy
 
 	// 写入响应体
 	if body != nil && l.config.ShouldIncludeBody() {
-		if bodyJSON, err := json.MarshalIndent(body, "", "  "); err == nil {
-			sb.Write(bodyJSON)
-			sb.WriteString("\n")
+		switch v := body.(type) {
+		case string:
+			sb.WriteString(v)
+			if !strings.HasSuffix(v, "\n") {
+				sb.WriteString("\n")
+			}
+		default:
+			if bodyJSON, err := json.MarshalIndent(body, "", "  "); err == nil {
+				sb.Write(bodyJSON)
+				sb.WriteString("\n")
+			}
 		}
 	}
 
@@ -422,7 +430,7 @@ func LogRequestBody(reqID string, logType BodyLogType, method, path, protocol st
 	}
 	if err := logger.WriteFromMap(reqID, logType, method, path, protocol, headers, body); err != nil {
 		// 记录日志写入失败但不中断请求处理
-		GeneralSugar.Errorw("写入请求体日志失败", "req_id", reqID, "error", err)
+		GeneralSugar.Errorw("写入请求体日志失败", "请求ID", reqID, "错误", err)
 	}
 }
 
@@ -434,7 +442,7 @@ func LogResponseBody(reqID string, logType BodyLogType, statusCode int, headers 
 	}
 	if err := logger.WriteResponseFromMap(reqID, logType, statusCode, headers, body); err != nil {
 		// 记录日志写入失败但不中断请求处理
-		GeneralSugar.Errorw("写入响应体日志失败", "req_id", reqID, "error", err)
+		GeneralSugar.Errorw("写入响应体日志失败", "请求ID", reqID, "错误", err)
 	}
 }
 
@@ -479,7 +487,7 @@ func CleanupOldLogs() error {
 		if dirDate.Before(cutoffTime) {
 			if err := os.RemoveAll(path); err != nil {
 				// 记录错误但不停止遍历
-				GeneralSugar.Errorw("删除过期日志目录失败", "path", path, "error", err)
+				GeneralSugar.Errorw("删除过期日志目录失败", "路径", path, "错误", err)
 			}
 		}
 

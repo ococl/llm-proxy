@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -41,8 +42,9 @@ func InitMultiTargetRouter(cfg *config.Config) error {
 	routerMu.Lock()
 	defer routerMu.Unlock()
 
-	// 转换配置
+	dateDir := time.Now().Format("2006-01-02")
 	multiCfg := ConvertFromLegacyConfig(cfg)
+	multiCfg.File.BaseDir = filepath.Join(multiCfg.File.BaseDir, dateDir)
 
 	router := &MultiTargetRouter{
 		config:  multiCfg,

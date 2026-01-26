@@ -35,7 +35,7 @@ func Bool(key string, value bool) Field {
 
 // Error returns an error field.
 func Error(err error) Field {
-	return Field{Key: "error", Value: err.Error()}
+	return Field{Key: "错误", Value: err.Error()}
 }
 
 // Logger interface for structured logging.
