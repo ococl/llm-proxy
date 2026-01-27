@@ -17,9 +17,11 @@ import (
 
 // 协议路径常量定义
 const (
-	ChatCompletionsPath   = "/chat/completions"
-	AnthropicMessagesPath = "/v1/messages"
-	CohereChatPath        = "/v1/chat"
+	ChatCompletionsPath             = "/chat/completions"
+	AnthropicMessagesPath           = "/v1/messages"
+	CohereChatPath                  = "/v1/chat"
+	GoogleGenerateContentPath       = ":generateContent"
+	GoogleStreamGenerateContentPath = ":streamGenerateContent"
 )
 
 // getPathForProtocol 根据协议类型返回对应的 API 路径。
@@ -30,8 +32,20 @@ func getPathForProtocol(protocol types.Protocol) string {
 		return AnthropicMessagesPath
 	case types.ProtocolCohere:
 		return CohereChatPath
+	case types.ProtocolGoogle:
+		return GoogleGenerateContentPath
 	default:
 		return ChatCompletionsPath
+	}
+}
+
+// getStreamPathForProtocol 根据协议类型返回对应的流式 API 路径。
+func getStreamPathForProtocol(protocol types.Protocol) string {
+	switch protocol {
+	case types.ProtocolGoogle:
+		return GoogleStreamGenerateContentPath
+	default:
+		return getPathForProtocol(protocol)
 	}
 }
 
@@ -293,7 +307,7 @@ func (a *BackendClientAdapter) SendStreaming(
 
 	body := buildRequestBody(req, backendModel, true)
 
-	path := getPathForProtocol(backend.Protocol())
+	path := getStreamPathForProtocol(backend.Protocol())
 	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", path, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
@@ -441,7 +455,7 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 
 	body := buildRequestBody(req, backendModel, true)
 
-	path := getPathForProtocol(backend.Protocol())
+	path := getStreamPathForProtocol(backend.Protocol())
 	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", path, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{

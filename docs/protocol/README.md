@@ -14,10 +14,11 @@ docs/protocol/
 │   ├── streaming-response-format.md      # 流式响应格式
 │   ├── anthropic-protocol.md             # Anthropic Claude 协议
 │   ├── azure-openai-protocol.md          # Azure OpenAI 协议
+│   ├── cohere-protocol.md                # Cohere 协议
 │   ├── deepseek-protocol.md              # DeepSeek 协议
+│   ├── google-protocol.md                # Google Vertex AI Gemini 协议
 │   ├── groq-protocol.md                  # Groq 协议
-│   ├── mistral-protocol.md               # Mistral AI 协议
-│   └── cohere-protocol.md                # Cohere 协议
+│   └── mistral-protocol.md               # Mistral AI 协议
 │
 └── JSON Schema 文件 (.schema.json)
     ├── openai-chat-completion.schema.json    # OpenAI Chat Completion API

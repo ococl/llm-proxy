@@ -52,9 +52,22 @@ backends:
 
 # Cohere 协议示例
 - name: "cohere"
-  url: "https://api.cohere.com/v1/chat"
+  url: "https://api.cohere.com"
   api_key: "xxx"
   protocol: "cohere"  # RAG 和 citations 支持
+
+# Google Vertex AI 协议示例
+- name: "vertex-ai"
+  url: "https://aiplatform.googleapis.com/v1/projects/your-project-id/locations/us-central1/publishers/google/models/gemini-1.5-pro"
+  api_key: "your-oauth-token"  # OAuth 2.0 访问令牌
+  protocol: "google"  # 多模态支持
+  timeout: 60s
+
+# Google Gemini API 协议示例（开发者版本）
+- name: "gemini-api"
+  url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro"
+  api_key: "your-api-key"
+  protocol: "google"
 
 models:
   "anthropic/claude-sonnet-4":
@@ -100,6 +113,20 @@ models:
     routes:
     - backend: "cohere"
       model: "command-r-plus"
+      priority: 1
+
+  # Google Vertex AI 模型示例
+  "google/gemini-1.5-pro":
+    routes:
+    - backend: "vertex-ai"
+      model: "gemini-1.5-pro"
+      priority: 1
+
+  # Google Gemini API 模型示例
+  "google/gemini-2.0-flash":
+    routes:
+    - backend: "gemini-api"
+      model: "gemini-2.0-flash-exp"
       priority: 1
 
 fallback:
