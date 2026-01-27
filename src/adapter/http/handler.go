@@ -18,11 +18,12 @@ import (
 )
 
 type ProxyHandler struct {
-	proxyUseCase   *usecase.ProxyRequestUseCase
-	config         port.ConfigProvider
-	logger         port.Logger
-	bodyLogger     port.BodyLogger
-	errorPresenter *ErrorPresenter
+	proxyUseCase        *usecase.ProxyRequestUseCase
+	config              port.ConfigProvider
+	logger              port.Logger
+	bodyLogger          port.BodyLogger
+	errorPresenter      *ErrorPresenter
+	systemPromptManager *SystemPromptManager
 }
 
 func NewProxyHandler(
@@ -33,11 +34,12 @@ func NewProxyHandler(
 	errorPresenter *ErrorPresenter,
 ) *ProxyHandler {
 	return &ProxyHandler{
-		proxyUseCase:   proxyUseCase,
-		config:         config,
-		logger:         logger,
-		bodyLogger:     bodyLogger,
-		errorPresenter: errorPresenter,
+		proxyUseCase:        proxyUseCase,
+		config:              config,
+		logger:              logger,
+		bodyLogger:          bodyLogger,
+		errorPresenter:      errorPresenter,
+		systemPromptManager: NewSystemPromptManager(),
 	}
 }
 
@@ -125,6 +127,8 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeClientRequest, r.Method, r.URL.Path, r.Proto, map[string][]string(r.Header), reqBody)
 
 	if cfg.Proxy.EnableSystemPrompt {
+		h.systemPromptManager.SetCustomVariables(cfg.Proxy.GetCustomVariables())
+		h.systemPromptManager.LoadSystemPrompts()
 		reqBody = h.injectSystemPrompt(reqBody)
 	}
 
@@ -474,7 +478,94 @@ func (h *ProxyHandler) validateAPIKey(r *http.Request, expectedKey string, proto
 }
 
 func (h *ProxyHandler) injectSystemPrompt(reqBody map[string]interface{}) map[string]interface{} {
-	return reqBody
+	modelName, ok := reqBody["model"].(string)
+	if !ok || modelName == "" {
+		return reqBody
+	}
+
+	prompts := h.systemPromptManager.GetPromptsForModel(modelName)
+	if len(prompts) == 0 {
+		return reqBody
+	}
+
+	messagesRaw, ok := reqBody["messages"].([]interface{})
+	if !ok {
+		return reqBody
+	}
+
+	systemMessageIdx := -1
+	for i, msg := range messagesRaw {
+		msgMap, ok := msg.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if role, ok := msgMap["role"].(string); ok && role == "system" {
+			systemMessageIdx = i
+			break
+		}
+	}
+
+	existingSystemContent := ""
+	if systemMessageIdx >= 0 {
+		if sysMsg, ok := messagesRaw[systemMessageIdx].(map[string]interface{}); ok {
+			if content, ok := sysMsg["content"].(string); ok {
+				existingSystemContent = content
+			}
+		}
+	}
+
+	for _, promptConfig := range prompts {
+		if promptConfig.Position == "before" {
+			separator := promptConfig.GetSeparator()
+			if existingSystemContent == "" {
+				existingSystemContent = promptConfig.Content
+			} else {
+				existingSystemContent = promptConfig.Content + separator + existingSystemContent
+			}
+		}
+	}
+
+	for _, promptConfig := range prompts {
+		if promptConfig.Position == "after" {
+			separator := promptConfig.GetSeparator()
+			if existingSystemContent == "" {
+				existingSystemContent = promptConfig.Content
+			} else {
+				existingSystemContent = existingSystemContent + separator + promptConfig.Content
+			}
+		}
+	}
+
+	newMessages := make([]interface{}, 0, len(messagesRaw))
+
+	if existingSystemContent != "" {
+		newMessages = append(newMessages, map[string]interface{}{
+			"role":    "system",
+			"content": existingSystemContent,
+		})
+	}
+
+	if systemMessageIdx >= 0 {
+		for i, msg := range messagesRaw {
+			msgMap, ok := msg.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if role, ok := msgMap["role"].(string); ok && role != "system" {
+				newMessages = append(newMessages, messagesRaw[i])
+			}
+		}
+	} else {
+		newMessages = append(newMessages, messagesRaw...)
+	}
+
+	newReqBody := make(map[string]interface{})
+	for k, v := range reqBody {
+		newReqBody[k] = v
+	}
+	newReqBody["messages"] = newMessages
+
+	return newReqBody
 }
 
 func (h *ProxyHandler) isStreamRequest(reqBody map[string]interface{}) bool {

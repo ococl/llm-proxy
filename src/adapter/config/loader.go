@@ -114,12 +114,18 @@ func (a *ConfigAdapter) GetFallbackConfig() *port.FallbackConfig {
 	}
 }
 
-// GetDetectionConfig returns the detection configuration.
-func (a *ConfigAdapter) GetDetectionConfig() *port.DetectionConfig {
+// GetErrorFallbackConfig returns the error fallback configuration.
+func (a *ConfigAdapter) GetErrorFallbackConfig() *port.ErrorFallbackConfig {
 	cfg := a.manager.Get()
-	return &port.DetectionConfig{
-		ErrorCodes:    cfg.Detection.ErrorCodes,
-		ErrorPatterns: cfg.Detection.ErrorPatterns,
+	return &port.ErrorFallbackConfig{
+		ServerError: port.ServerErrorConfig{
+			Enabled: cfg.ErrorFallback.ServerError.Enabled,
+		},
+		ClientError: port.ClientErrorConfig{
+			Enabled:     cfg.ErrorFallback.ClientError.Enabled,
+			StatusCodes: cfg.ErrorFallback.ClientError.StatusCodes,
+			Patterns:    cfg.ErrorFallback.ClientError.Patterns,
+		},
 	}
 }
 
@@ -179,6 +185,7 @@ func (a *ConfigAdapter) convertConfig(cfg *config.Config) *port.Config {
 		Proxy: port.ProxyConfig{
 			EnableSystemPrompt: cfg.Proxy.GetEnableSystemPrompt(),
 			ForwardClientIP:    cfg.Proxy.GetForwardClientIP(),
+			CustomVariables:    cfg.Proxy.GetCustomVariables(),
 		},
 		Backends: backends,
 		Models:   models,
@@ -196,9 +203,15 @@ func (a *ConfigAdapter) convertConfig(cfg *config.Config) *port.Config {
 			CircuitSuccessThresh:  cfg.Fallback.GetCircuitSuccessThreshold(),
 			CircuitOpenTimeoutSec: cfg.Fallback.GetCircuitOpenTimeout(),
 		},
-		Detection: port.DetectionConfig{
-			ErrorCodes:    cfg.Detection.ErrorCodes,
-			ErrorPatterns: cfg.Detection.ErrorPatterns,
+		ErrorFallback: port.ErrorFallbackConfig{
+			ServerError: port.ServerErrorConfig{
+				Enabled: cfg.ErrorFallback.ServerError.Enabled,
+			},
+			ClientError: port.ClientErrorConfig{
+				Enabled:     cfg.ErrorFallback.ClientError.Enabled,
+				StatusCodes: cfg.ErrorFallback.ClientError.StatusCodes,
+				Patterns:    cfg.ErrorFallback.ClientError.Patterns,
+			},
 		},
 		Logging: port.LoggingConfig{
 			Level:             cfg.Logging.GetLevel(),

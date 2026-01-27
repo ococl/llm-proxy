@@ -44,7 +44,7 @@ func (m *mockConfigProvider) GetFallbackConfig() *port.FallbackConfig {
 	return nil
 }
 
-func (m *mockConfigProvider) GetDetectionConfig() *port.DetectionConfig {
+func (m *mockConfigProvider) GetErrorFallbackConfig() *port.ErrorFallbackConfig {
 	return nil
 }
 

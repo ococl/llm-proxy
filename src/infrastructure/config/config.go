@@ -130,9 +130,35 @@ func (f *Fallback) GetCircuitOpenTimeout() int {
 	return f.CircuitOpenTimeoutSec
 }
 
-type Detection struct {
-	ErrorCodes    []string `yaml:"error_codes"`
-	ErrorPatterns []string `yaml:"error_patterns"`
+// ErrorFallbackConfig 错误回退策略配置
+// 定义不同类型错误的回退规则，帮助系统在遇到特定错误时自动切换后端
+type ErrorFallbackConfig struct {
+	// ServerError 配置服务器错误（5xx）的回退策略
+	ServerError ServerErrorConfig `yaml:"server_error"`
+	// ClientError 配置客户端错误（4xx）的回退策略
+	ClientError ClientErrorConfig `yaml:"client_error"`
+}
+
+// ServerErrorConfig 服务器错误回退配置
+// 5xx 错误通常是上游服务暂时不可用，应立即回退到其他后端
+type ServerErrorConfig struct {
+	// Enabled 是否启用服务器错误回退
+	// 启用后，5xx 错误会立即触发回退（不重试当前后端）
+	Enabled bool `yaml:"enabled"`
+}
+
+// ClientErrorConfig 客户端错误回退配置
+// 4xx 错误通常是请求问题，但某些状态码或错误消息需要回退
+type ClientErrorConfig struct {
+	// Enabled 是否启用客户端错误回退
+	Enabled bool `yaml:"enabled"`
+	// StatusCodes 需要回退的 HTTP 状态码列表
+	// 例如 [401, 403, 429] 表示遇到这些状态码时立即回退
+	StatusCodes []int `yaml:"codes"`
+	// Patterns 错误消息中包含的关键词（不区分大小写）
+	// 例如 ["insufficient_quota", "rate_limit", "billing"]
+	// 匹配到这些关键词时会触发回退
+	Patterns []string `yaml:"patterns"`
 }
 
 type Logging struct {
@@ -376,17 +402,17 @@ func (r *RequestBodyConfig) ShouldIncludeBody() bool {
 }
 
 type Config struct {
-	Listen      string                 `yaml:"listen"`
-	ProxyAPIKey string                 `yaml:"proxy_api_key"`
-	Proxy       ProxyConfig            `yaml:"proxy"`
-	Backends    []Backend              `yaml:"backends"`
-	Models      map[string]*ModelAlias `yaml:"models"`
-	Fallback    Fallback               `yaml:"fallback"`
-	Detection   Detection              `yaml:"detection"`
-	Logging     Logging                `yaml:"logging"`
-	Timeout     TimeoutConfig          `yaml:"timeout"`
-	RateLimit   RateLimitConfig        `yaml:"rate_limit"`
-	Concurrency ConcurrencyConfig      `yaml:"concurrency"`
+	Listen        string                 `yaml:"listen"`
+	ProxyAPIKey   string                 `yaml:"proxy_api_key"`
+	Proxy         ProxyConfig            `yaml:"proxy"`
+	Backends      []Backend              `yaml:"backends"`
+	Models        map[string]*ModelAlias `yaml:"models"`
+	Fallback      Fallback               `yaml:"fallback"`
+	ErrorFallback ErrorFallbackConfig    `yaml:"error_fallback"`
+	Logging       Logging                `yaml:"logging"`
+	Timeout       TimeoutConfig          `yaml:"timeout"`
+	RateLimit     RateLimitConfig        `yaml:"rate_limit"`
+	Concurrency   ConcurrencyConfig      `yaml:"concurrency"`
 }
 
 type TimeoutConfig struct {
@@ -413,8 +439,17 @@ type ConcurrencyConfig struct {
 }
 
 type ProxyConfig struct {
-	EnableSystemPrompt bool  `yaml:"enable_system_prompt"`
-	ForwardClientIP    *bool `yaml:"forward_client_ip"`
+	EnableSystemPrompt bool                `yaml:"enable_system_prompt"`
+	ForwardClientIP    *bool               `yaml:"forward_client_ip"`
+	SystemPrompt       *SystemPromptConfig `yaml:"system_prompt,omitempty"`
+}
+
+// SystemPromptConfig 系统提示词配置
+type SystemPromptConfig struct {
+	// CustomVariables 自定义变量，用于覆盖内置变量的默认值
+	// 例如：proxy 在 Linux 服务器，但客户端用户使用 Windows
+	// 可以配置 { "_OS": "windows" } 来覆盖 ${_OS} 的值
+	CustomVariables map[string]string `yaml:"custom_variables,omitempty"`
 }
 
 func (p *ProxyConfig) GetEnableSystemPrompt() bool {
@@ -423,6 +458,13 @@ func (p *ProxyConfig) GetEnableSystemPrompt() bool {
 
 func (p *ProxyConfig) GetForwardClientIP() bool {
 	return p.ForwardClientIP == nil || *p.ForwardClientIP
+}
+
+func (p *ProxyConfig) GetCustomVariables() map[string]string {
+	if p.SystemPrompt == nil || p.SystemPrompt.CustomVariables == nil {
+		return make(map[string]string)
+	}
+	return p.SystemPrompt.CustomVariables
 }
 
 func (r *RateLimitConfig) GetGlobalRPS() float64 {

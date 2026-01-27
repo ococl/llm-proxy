@@ -10,22 +10,30 @@ import (
 )
 
 type Config struct {
-	Listen      string
-	ProxyAPIKey string
-	Proxy       ProxyConfig
-	Backends    []*entity.Backend
-	Models      map[string]*ModelAlias
-	Fallback    FallbackConfig
-	Detection   DetectionConfig
-	Logging     LoggingConfig
-	Timeout     TimeoutConfig
-	RateLimit   RateLimitConfig
-	Concurrency ConcurrencyConfig
+	Listen        string
+	ProxyAPIKey   string
+	Proxy         ProxyConfig
+	Backends      []*entity.Backend
+	Models        map[string]*ModelAlias
+	Fallback      FallbackConfig
+	ErrorFallback ErrorFallbackConfig
+	Logging       LoggingConfig
+	Timeout       TimeoutConfig
+	RateLimit     RateLimitConfig
+	Concurrency   ConcurrencyConfig
 }
 
 type ProxyConfig struct {
 	EnableSystemPrompt bool
 	ForwardClientIP    bool
+	CustomVariables    map[string]string
+}
+
+func (p *ProxyConfig) GetCustomVariables() map[string]string {
+	if p.CustomVariables == nil {
+		return make(map[string]string)
+	}
+	return p.CustomVariables
 }
 
 type FallbackConfig struct {
@@ -43,9 +51,22 @@ type FallbackConfig struct {
 	CircuitOpenTimeoutSec int
 }
 
-type DetectionConfig struct {
-	ErrorCodes    []string
-	ErrorPatterns []string
+// ErrorFallbackConfig 定义错误回退策略配置
+type ErrorFallbackConfig struct {
+	ServerError ServerErrorConfig
+	ClientError ClientErrorConfig
+}
+
+// ServerErrorConfig 服务器错误回退配置
+type ServerErrorConfig struct {
+	Enabled bool
+}
+
+// ClientErrorConfig 客户端错误回退配置
+type ClientErrorConfig struct {
+	Enabled     bool
+	StatusCodes []int
+	Patterns    []string
 }
 
 type LoggingConfig struct {

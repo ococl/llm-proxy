@@ -153,18 +153,23 @@ timeout:
   write_timeout: 60s
   total_timeout: 15m
 
-detection:
-  error_codes: [ "4xx", "5xx" ]
-  error_patterns:
-  - "insufficient_quota"
-  - "rate_limit"
-  - "exceeded"
-  - "billing"
-  - "quota"
-  - "organization has been disabled"
-  - "upstream_all_accounts_busy"
-  - "upstream_no_eligible_accounts"
-  - "invalid chat setting"
+error_fallback:
+  server_error:
+    enabled: true
+
+  client_error:
+    enabled: true
+    codes: [401, 403, 429]
+    patterns:
+      - "insufficient_quota"
+      - "rate_limit"
+      - "exceeded"
+      - "billing"
+      - "quota"
+      - "organization has been disabled"
+      - "upstream_all_accounts_busy"
+      - "upstream_no_eligible_accounts"
+      - "invalid chat setting"
 
 # 日志配置
 logging:

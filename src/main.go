@@ -160,13 +160,27 @@ func main() {
 	}
 
 	fallbackStrategy := domain_service.NewFallbackStrategy(cooldownMgr, fallbackAliases, retryConfig)
-	retryStrategy := usecase.NewRetryStrategy(
+
+	// 构建错误回退配置
+	errorFallbackConfig := &port.ErrorFallbackConfig{
+		ServerError: port.ServerErrorConfig{
+			Enabled: cfg.ErrorFallback.ServerError.Enabled,
+		},
+		ClientError: port.ClientErrorConfig{
+			Enabled:     cfg.ErrorFallback.ClientError.Enabled,
+			StatusCodes: cfg.ErrorFallback.ClientError.StatusCodes,
+			Patterns:    cfg.ErrorFallback.ClientError.Patterns,
+		},
+	}
+
+	retryStrategy := usecase.NewRetryStrategyWithFallback(
 		cfg.Fallback.MaxRetries,
 		cfg.Fallback.IsBackoffEnabled(),
 		time.Duration(cfg.Fallback.GetBackoffInitialDelay())*time.Millisecond,
 		time.Duration(cfg.Fallback.GetBackoffMaxDelay())*time.Millisecond,
 		cfg.Fallback.GetBackoffMultiplier(),
 		cfg.Fallback.GetBackoffJitter(),
+		errorFallbackConfig,
 	)
 
 	protocolConverter := service.NewProtocolConverter(loadSystemPrompts(), proxyLogger)
@@ -279,10 +293,10 @@ func loadSystemPrompts() map[string]string {
 		return prompts
 	}
 	for _, file := range files {
-		if file.IsDir() || !strings.HasSuffix(file.Name(), ".txt") {
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".md") {
 			continue
 		}
-		modelName := strings.TrimSuffix(file.Name(), ".txt")
+		modelName := strings.TrimSuffix(file.Name(), ".md")
 		data, err := os.ReadFile(systemPromptsDir + "/" + file.Name())
 		if err != nil {
 			continue

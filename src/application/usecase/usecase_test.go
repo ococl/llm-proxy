@@ -192,21 +192,26 @@ func TestRetryStrategy_ShouldRetry(t *testing.T) {
 		0.1,
 	)
 
-	testErr := errors.New("test error")
-
-	// Should retry for first 3 attempts (0, 1, 2)
-	if !strategy.ShouldRetry(0, testErr) {
-		t.Error("ShouldRetry(0) should return true")
-	}
-	if !strategy.ShouldRetry(1, testErr) {
-		t.Error("ShouldRetry(1) should return true")
-	}
-	if !strategy.ShouldRetry(2, testErr) {
-		t.Error("ShouldRetry(2) should return true")
+	// 5xx 服务器错误应该回退（返回 true）
+	serverErr := errors.New("500 Internal Server Error")
+	if !strategy.ShouldRetry(0, serverErr) {
+		t.Error("ShouldRetry(500 error) should return true")
 	}
 
-	// Should not retry for attempt 3 (exceeds maxRetries)
-	if strategy.ShouldRetry(3, testErr) {
+	// 429 速率限制应该回退（返回 true）
+	rateLimitErr := errors.New("429 Too Many Requests")
+	if !strategy.ShouldRetry(0, rateLimitErr) {
+		t.Error("ShouldRetry(429 error) should return true")
+	}
+
+	// 普通错误消息不应该回退（返回 false）
+	normalErr := errors.New("test error")
+	if strategy.ShouldRetry(0, normalErr) {
+		t.Error("ShouldRetry(normal error) should return false")
+	}
+
+	// 超过最大重试次数不应该回退
+	if strategy.ShouldRetry(3, serverErr) {
 		t.Error("ShouldRetry(3) should return false")
 	}
 }
@@ -221,10 +226,9 @@ func TestRetryStrategy_ShouldRetry_NoBackoff(t *testing.T) {
 		0.1,
 	)
 
-	testErr := errors.New("test error")
-
-	// Should still retry
-	if !strategy.ShouldRetry(0, testErr) {
+	// 5xx 服务器错误应该回退
+	serverErr := errors.New("503 Service Unavailable")
+	if !strategy.ShouldRetry(0, serverErr) {
 		t.Error("ShouldRetry should work even without backoff")
 	}
 }
