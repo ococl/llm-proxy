@@ -183,7 +183,7 @@ func TestLoadBalancer_Select(t *testing.T) {
 		}
 	})
 
-	t.Run("Weighted selects first from same priority group", func(t *testing.T) {
+	t.Run("Weighted randomly selects from same priority group", func(t *testing.T) {
 		lb := NewLoadBalancer(StrategyWeighted)
 		backend1, _ := entity.NewBackend("backend1", "https://b1.com", "key1", true, types.ProtocolOpenAI)
 		backend2, _ := entity.NewBackend("backend2", "https://b2.com", "key2", true, types.ProtocolOpenAI)
@@ -195,18 +195,47 @@ func TestLoadBalancer_Select(t *testing.T) {
 			{Backend: backend3, Model: "model", Priority: 2, Enabled: true},
 		}
 
-		// 多次选择，应该总是选择第一个后端（在 priority 1 组内按配置顺序选择第一个）
-		for i := 0; i < 100; i++ {
+		// 多次选择，应该在 priority 1 组内随机选择 backend1 或 backend2
+		backend1Count := 0
+		backend2Count := 0
+		backend3Count := 0
+		iterations := 100
+
+		for i := 0; i < iterations; i++ {
 			result := lb.Select(routes)
 			if result == nil {
 				t.Error("Expected non-nil result")
 			}
-			// 应该总是选择第一个（backend1）
-			if result.Name() != "backend1" {
-				t.Errorf("Expected 'backend1', got '%s' at iteration %d", result.Name(), i)
+			switch result.Name() {
+			case "backend1":
+				backend1Count++
+			case "backend2":
+				backend2Count++
+			case "backend3":
+				backend3Count++
 			}
 		}
+
 		// backend3 不应该被选择（priority 2 更低）
+		if backend3Count > 0 {
+			t.Errorf("backend3 (priority 2) should not be selected, but was selected %d times", backend3Count)
+		}
+
+		// backend1 和 backend2 都应该被选择（同优先级随机选择）
+		if backend1Count == 0 {
+			t.Error("backend1 should be selected at least once")
+		}
+		if backend2Count == 0 {
+			t.Error("backend2 should be selected at least once")
+		}
+
+		// 验证分布相对均匀（允许一定偏差）
+		if backend1Count < 20 || backend1Count > 80 {
+			t.Logf("Warning: backend1 selected %d times (expected ~50)", backend1Count)
+		}
+		if backend2Count < 20 || backend2Count > 80 {
+			t.Logf("Warning: backend2 selected %d times (expected ~50)", backend2Count)
+		}
 	})
 
 	t.Run("Weighted handles negative priorities", func(t *testing.T) {
