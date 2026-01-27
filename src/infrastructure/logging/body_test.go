@@ -764,3 +764,281 @@ func getTestDateDir(tempDir string) string {
 	dateDir := time.Now().Format("2006-01-02")
 	return filepath.Join(tempDir, dateDir)
 }
+
+// TestSortJSONKeys 测试 JSON key 排序功能
+func TestSortJSONKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected interface{}
+	}{
+		{
+			name: "简单 map 排序",
+			input: map[string]interface{}{
+				"zebra": "z",
+				"apple": "a",
+				"mango": "m",
+			},
+			expected: map[string]interface{}{
+				"apple": "a",
+				"mango": "m",
+				"zebra": "z",
+			},
+		},
+		{
+			name: "嵌套 map 排序",
+			input: map[string]interface{}{
+				"user": map[string]interface{}{
+					"name": "Alice",
+					"age":  30,
+					"id":   123,
+				},
+				"status": "active",
+			},
+			expected: map[string]interface{}{
+				"status": "active",
+				"user": map[string]interface{}{
+					"age":  30,
+					"id":   123,
+					"name": "Alice",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sortJSONKeys(tt.input)
+			// 序列化后比较
+			resultJSON, _ := marshalJSONSorted(result.(map[string]interface{}))
+			expectedJSON, _ := marshalJSONSorted(tt.expected.(map[string]interface{}))
+
+			if string(resultJSON) != string(expectedJSON) {
+				t.Errorf("排序结果不匹配\n期望: %s\n实际: %s", string(expectedJSON), string(resultJSON))
+			}
+		})
+	}
+}
+
+// TestFormatJSONWithSortedKeys 测试 JSON 格式化功能
+func TestFormatJSONWithSortedKeys(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       interface{}
+		expectError bool
+		checkKeys   []string
+	}{
+		{
+			name: "字节数组 JSON",
+			input: []byte(`{
+				"model": "gpt-4",
+				"messages": [{"role": "user", "content": "Hello"}],
+				"temperature": 0.7
+			}`),
+			expectError: false,
+			checkKeys:   []string{"messages", "model", "temperature"},
+		},
+		{
+			name: "字符串 JSON",
+			input: `{
+				"zebra": "last",
+				"apple": "first",
+				"mango": "middle"
+			}`,
+			expectError: false,
+			checkKeys:   []string{"apple", "mango", "zebra"},
+		},
+		{
+			name: "map 类型",
+			input: map[string]interface{}{
+				"id":      "chatcmpl-123",
+				"object":  "chat.completion",
+				"created": 1234567890,
+			},
+			expectError: false,
+			checkKeys:   []string{"created", "id", "object"},
+		},
+		{
+			name:        "非 JSON 字符串",
+			input:       "plain text",
+			expectError: false,
+		},
+		{
+			name:        "空字节数组",
+			input:       []byte{},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := formatJSONWithSortedKeys(tt.input)
+
+			if tt.expectError && err == nil {
+				t.Error("期望错误但成功返回")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("意外错误: %v", err)
+			}
+
+			if len(tt.checkKeys) > 0 {
+				resultStr := string(result)
+				// 验证 key 的顺序
+				lastPos := -1
+				for _, key := range tt.checkKeys {
+					pos := strings.Index(resultStr, `"`+key+`"`)
+					if pos == -1 {
+						t.Errorf("结果中未找到 key: %s", key)
+						continue
+					}
+					if pos < lastPos {
+						t.Errorf("key %s 的位置不正确，应该在前一个 key 之后", key)
+					}
+					lastPos = pos
+				}
+			}
+		})
+	}
+}
+
+// TestMarshalJSONSorted 测试 map 序列化为排序 JSON
+func TestMarshalJSONSorted(t *testing.T) {
+	input := map[string]interface{}{
+		"model":       "gpt-4",
+		"temperature": 0.7,
+		"messages": []interface{}{
+			map[string]interface{}{
+				"role":    "user",
+				"content": "Hello",
+			},
+		},
+		"stream": true,
+	}
+
+	result, err := marshalJSONSorted(input)
+	if err != nil {
+		t.Fatalf("序列化失败: %v", err)
+	}
+
+	resultStr := string(result)
+
+	// 验证 key 按升序排列
+	keys := []string{"messages", "model", "stream", "temperature"}
+	lastPos := -1
+	for _, key := range keys {
+		pos := strings.Index(resultStr, `"`+key+`"`)
+		if pos == -1 {
+			t.Errorf("结果中未找到 key: %s", key)
+			continue
+		}
+		if pos < lastPos {
+			t.Errorf("key %s 的位置不正确，应该在前一个 key 之后", key)
+		}
+		lastPos = pos
+	}
+
+	// 验证嵌套对象的 key 也排序了
+	if !strings.Contains(resultStr, `"content"`) || !strings.Contains(resultStr, `"role"`) {
+		t.Error("嵌套对象的 key 应该存在")
+	}
+
+	// content 应该在 role 之前（升序）
+	contentPos := strings.Index(resultStr, `"content"`)
+	rolePos := strings.Index(resultStr, `"role"`)
+	if contentPos > rolePos {
+		t.Error("嵌套对象的 key 应该按升序排列")
+	}
+}
+
+// TestWriteFromMap_JSONKeySorting 测试 WriteFromMap 的 JSON key 排序
+func TestWriteFromMap_JSONKeySorting(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cfg := &config.Config{
+		Logging: config.Logging{
+			RequestBody: config.RequestBodyConfig{
+				Enabled:     true,
+				BaseDir:     tempDir,
+				MaxSizeMB:   100,
+				MaxAgeDays:  14,
+				MaxBackups:  5,
+				Compress:    true,
+				IncludeBody: &trueValue,
+			},
+		},
+	}
+
+	InitRequestBodyLogger(cfg)
+	defer ShutdownRequestBodyLogger()
+
+	reqID := "test-key-sorting"
+	logType := BodyLogTypeClientRequest
+	method := "POST"
+	path := "/v1/chat/completions"
+	protocol := "HTTP/1.1"
+	headers := map[string][]string{
+		"Content-Type": {"application/json"},
+	}
+	body := map[string]interface{}{
+		"temperature": 0.7,
+		"model":       "gpt-4",
+		"stream":      true,
+		"messages": []interface{}{
+			map[string]interface{}{
+				"role":    "user",
+				"content": "Hello",
+			},
+		},
+	}
+
+	logger := GetRequestBodyLogger()
+	if logger == nil {
+		t.Fatal("日志器不应为 nil")
+	}
+
+	err := logger.WriteFromMap(reqID, logType, method, path, protocol, headers, body)
+	if err != nil {
+		t.Fatalf("写入请求日志失败: %v", err)
+	}
+
+	// 读取文件验证 key 顺序
+	files, err := filepath.Glob(filepath.Join(getTestDateDir(tempDir), "*.httpdump"))
+	if err != nil {
+		t.Fatalf("查找日志文件失败: %v", err)
+	}
+
+	if len(files) == 0 {
+		t.Fatal("应该创建日志文件")
+	}
+
+	content, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatalf("读取日志文件失败: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// 验证顶层 key 按升序排列
+	keys := []string{"messages", "model", "stream", "temperature"}
+	lastPos := -1
+	for _, key := range keys {
+		pos := strings.Index(contentStr, `"`+key+`"`)
+		if pos == -1 {
+			t.Errorf("日志中未找到 key: %s", key)
+			continue
+		}
+		if pos < lastPos {
+			t.Errorf("key %s 的位置不正确，应该在前一个 key 之后", key)
+		}
+		lastPos = pos
+	}
+
+	// 验证嵌套对象的 key 也排序了（content 在 role 之前）
+	contentPos := strings.Index(contentStr, `"content"`)
+	rolePos := strings.Index(contentStr, `"role"`)
+	if contentPos == -1 || rolePos == -1 {
+		t.Error("嵌套对象的 key 应该存在")
+	} else if contentPos > rolePos {
+		t.Error("嵌套对象的 key 应该按升序排列（content 应在 role 之前）")
+	}
+}

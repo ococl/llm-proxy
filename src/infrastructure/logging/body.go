@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,144 @@ import (
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
+
+// sortJSONKeys 递归排序 JSON 对象的所有 key（升序）
+// 输入可以是 map[string]interface{}, []interface{}, 或其他类型
+// 返回排序后的对象
+func sortJSONKeys(data interface{}) interface{} {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// 对于 map，创建一个新的有序 map
+		sorted := make(map[string]interface{}, len(v))
+		for key, value := range v {
+			// 递归处理值
+			sorted[key] = sortJSONKeys(value)
+		}
+		return sorted
+	case []interface{}:
+		// 对于数组，递归处理每个元素
+		sorted := make([]interface{}, len(v))
+		for i, item := range v {
+			sorted[i] = sortJSONKeys(item)
+		}
+		return sorted
+	default:
+		// 基本类型直接返回
+		return v
+	}
+}
+
+// formatJSONWithSortedKeys 格式化 JSON，所有 key 按升序排列
+// 输入可以是 map[string]interface{}, []byte, string, 或其他类型
+// 返回格式化后的 JSON 字节数组
+func formatJSONWithSortedKeys(data interface{}) ([]byte, error) {
+	var jsonData interface{}
+
+	switch v := data.(type) {
+	case []byte:
+		// 如果是字节数组，先尝试解析为 JSON
+		if len(v) == 0 {
+			return v, nil
+		}
+		// 检查是否是 JSON
+		if err := json.Unmarshal(v, &jsonData); err != nil {
+			// 不是有效的 JSON，直接返回原始数据
+			return v, nil
+		}
+	case string:
+		// 如果是字符串，先尝试解析为 JSON
+		if v == "" {
+			return []byte(v), nil
+		}
+		if err := json.Unmarshal([]byte(v), &jsonData); err != nil {
+			// 不是有效的 JSON，直接返回原始数据
+			return []byte(v), nil
+		}
+	case map[string]interface{}:
+		jsonData = v
+	default:
+		// 其他类型，尝试序列化后再解析
+		tempJSON, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("序列化数据失败: %w", err)
+		}
+		if err := json.Unmarshal(tempJSON, &jsonData); err != nil {
+			return tempJSON, nil
+		}
+	}
+
+	// 递归排序所有 key
+	sorted := sortJSONKeys(jsonData)
+
+	// 使用自定义编码器确保 key 有序
+	buf := &bytes.Buffer{}
+	encoder := json.NewEncoder(buf)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+
+	if err := encoder.Encode(sorted); err != nil {
+		return nil, fmt.Errorf("编码 JSON 失败: %w", err)
+	}
+
+	// 移除末尾的换行符（Encode 会自动添加）
+	result := buf.Bytes()
+	if len(result) > 0 && result[len(result)-1] == '\n' {
+		result = result[:len(result)-1]
+	}
+
+	return result, nil
+}
+
+// marshalJSONSorted 将 map 序列化为 JSON，key 按升序排列
+func marshalJSONSorted(data map[string]interface{}) ([]byte, error) {
+	// 获取所有 key 并排序
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// 手动构建 JSON
+	buf := &bytes.Buffer{}
+	buf.WriteString("{\n")
+
+	for i, key := range keys {
+		if i > 0 {
+			buf.WriteString(",\n")
+		}
+
+		// 写入 key
+		keyJSON, _ := json.Marshal(key)
+		buf.WriteString("  ")
+		buf.Write(keyJSON)
+		buf.WriteString(": ")
+
+		// 递归处理 value
+		value := data[key]
+		valueJSON, err := formatJSONWithSortedKeys(value)
+		if err != nil {
+			// 如果格式化失败，使用标准序列化
+			valueJSON, _ = json.Marshal(value)
+		}
+
+		// 如果 value 是多行的，需要缩进
+		valueStr := string(valueJSON)
+		if strings.Contains(valueStr, "\n") {
+			lines := strings.Split(valueStr, "\n")
+			for j, line := range lines {
+				if j > 0 {
+					buf.WriteString("\n  ")
+				}
+				buf.WriteString(line)
+			}
+		} else {
+			buf.WriteString(valueStr)
+		}
+	}
+
+	buf.WriteString("\n}")
+	return buf.Bytes(), nil
+}
 
 // BodyLogType 请求体日志类型
 type BodyLogType string
@@ -162,7 +301,12 @@ func (l *RequestBodyLogger) Write(reqID string, logType BodyLogType, httpReq *ht
 
 	// 写入请求体
 	if len(body) > 0 && l.config.ShouldIncludeBody() {
-		sb.Write(body)
+		// 尝试格式化 JSON
+		if formatted, err := formatJSONWithSortedKeys(body); err == nil {
+			sb.Write(formatted)
+		} else {
+			sb.Write(body)
+		}
 		if !bytes.HasSuffix(body, []byte("\n")) {
 			sb.WriteString("\n")
 		}
@@ -207,7 +351,12 @@ func (l *RequestBodyLogger) WriteResponse(reqID string, logType BodyLogType, sta
 
 	// 写入响应体
 	if len(body) > 0 && l.config.ShouldIncludeBody() {
-		sb.Write(body)
+		// 尝试格式化 JSON
+		if formatted, err := formatJSONWithSortedKeys(body); err == nil {
+			sb.Write(formatted)
+		} else {
+			sb.Write(body)
+		}
 		if !bytes.HasSuffix(body, []byte("\n")) {
 			sb.WriteString("\n")
 		}
@@ -250,7 +399,7 @@ func (l *RequestBodyLogger) WriteFromMap(reqID string, logType BodyLogType, meth
 
 	// 写入请求体
 	if body != nil && l.config.ShouldIncludeBody() {
-		if bodyJSON, err := json.MarshalIndent(body, "", "  "); err == nil {
+		if bodyJSON, err := marshalJSONSorted(body); err == nil {
 			sb.Write(bodyJSON)
 			sb.WriteString("\n")
 		}
@@ -294,12 +443,24 @@ func (l *RequestBodyLogger) WriteResponseFromMap(reqID string, logType BodyLogTy
 	if body != nil && l.config.ShouldIncludeBody() {
 		switch v := body.(type) {
 		case string:
-			sb.WriteString(v)
+			// 尝试格式化字符串形式的 JSON
+			if formatted, err := formatJSONWithSortedKeys(v); err == nil {
+				sb.Write(formatted)
+			} else {
+				sb.WriteString(v)
+			}
 			if !strings.HasSuffix(v, "\n") {
 				sb.WriteString("\n")
 			}
+		case map[string]interface{}:
+			// 对于 map 类型，使用排序后的 JSON
+			if bodyJSON, err := marshalJSONSorted(v); err == nil {
+				sb.Write(bodyJSON)
+				sb.WriteString("\n")
+			}
 		default:
-			if bodyJSON, err := json.MarshalIndent(body, "", "  "); err == nil {
+			// 其他类型，尝试格式化
+			if bodyJSON, err := formatJSONWithSortedKeys(body); err == nil {
 				sb.Write(bodyJSON)
 				sb.WriteString("\n")
 			}
@@ -346,7 +507,12 @@ func (l *RequestBodyLogger) WriteUpstreamResponse(reqID string, statusCode int, 
 		if err != nil {
 			sb.WriteString(fmt.Sprintf("[读取响应体失败: %v]\n", err))
 		} else {
-			sb.Write(bodyBytes)
+			// 尝试格式化 JSON
+			if formatted, err := formatJSONWithSortedKeys(bodyBytes); err == nil {
+				sb.Write(formatted)
+			} else {
+				sb.Write(bodyBytes)
+			}
 			if !bytes.HasSuffix(bodyBytes, []byte("\n")) {
 				sb.WriteString("\n")
 			}
