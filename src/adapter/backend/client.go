@@ -84,35 +84,42 @@ func (h *HTTPClient) buildHTTPRequest(ctx context.Context, backendReq *BackendRe
 		return nil, domainerror.NewBadRequest(fmt.Sprintf("failed to create HTTP request: %v", err))
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	// 默认使用中国大陆、简体中文，除非后端显式配置了 locale
-	locale := backendReq.Backend.Locale()
-	if locale == "" {
-		locale = "zh-CN"
-	}
-	httpReq.Header.Set("Accept-Language", locale)
-
-	apiKey := backendReq.Backend.APIKey()
-	if !apiKey.IsEmpty() {
-		keyStr := string(apiKey)
-		switch backendReq.Backend.Protocol() {
-		case types.ProtocolAnthropic:
-			httpReq.Header.Set("x-api-key", keyStr)
-			httpReq.Header.Set("anthropic-version", "2023-06-01")
-		case types.ProtocolOpenAI:
-			httpReq.Header.Set("Authorization", "Bearer "+keyStr)
-		default:
-			httpReq.Header.Set("Authorization", "Bearer "+keyStr)
-		}
-	}
-
+	// Headers 已经在 BackendClientAdapter.buildBackendHeaders 中完整构建
+	// 这里直接复制传入的 Headers（已包含 Content-Type、Accept-Language、认证头等）
+	// 注意：过滤掉 hop-by-hop 头部
 	for key, values := range backendReq.Headers {
 		if isHopByHopHeader(key) {
 			continue
 		}
 		for _, value := range values {
 			httpReq.Header.Add(key, value)
+		}
+	}
+
+	// 后备逻辑：如果 Headers 中没有这些关键头部，则自动添加（用于测试和向后兼容）
+	if httpReq.Header.Get("Content-Type") == "" {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	if httpReq.Header.Get("Accept-Language") == "" {
+		locale := backendReq.Backend.Locale()
+		if locale == "" {
+			locale = "zh-CN"
+		}
+		httpReq.Header.Set("Accept-Language", locale)
+	}
+	if httpReq.Header.Get("Authorization") == "" && httpReq.Header.Get("x-api-key") == "" {
+		apiKey := backendReq.Backend.APIKey()
+		if !apiKey.IsEmpty() {
+			keyStr := string(apiKey)
+			switch backendReq.Backend.Protocol() {
+			case types.ProtocolAnthropic:
+				httpReq.Header.Set("x-api-key", keyStr)
+				httpReq.Header.Set("anthropic-version", "2023-06-01")
+			case types.ProtocolOpenAI:
+				httpReq.Header.Set("Authorization", "Bearer "+keyStr)
+			default:
+				httpReq.Header.Set("Authorization", "Bearer "+keyStr)
+			}
 		}
 	}
 

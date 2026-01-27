@@ -129,7 +129,8 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	body := buildRequestBody(req, backendModel, false)
 
 	requestPath := getPathForProtocol(backend.Protocol())
-	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", requestPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	headers := a.buildBackendHeaders(req.Headers(), backend)
+	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", requestPath, "HTTP/1.1", headers, body)
 
 	if req.RawBody() != nil {
 		a.bodyLogger.LogRequestDiff(reqID, req.RawBody(), body)
@@ -138,7 +139,7 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
-		Headers: mergeHeadersWithDefaults(req.Headers()),
+		Headers: headers,
 		Path:    requestPath,
 		Stream:  false,
 	}
@@ -220,17 +221,17 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 		responseID = "resp-" + req.ID().String()
 	}
 
-	headers := make(map[string][]string)
+	respHeaders := make(map[string][]string)
 	for k, v := range httpResp.Header {
 		if !isHopByHopHeader(k) {
-			headers[k] = v
+			respHeaders[k] = v
 		}
 	}
 
 	builder := entity.NewResponseBuilder().
 		ID(responseID).
 		Model(req.Model().String()).
-		Headers(headers)
+		Headers(respHeaders)
 
 	if usage, ok := respData["usage"].(map[string]interface{}); ok {
 		promptTokens, _ := usage["prompt_tokens"].(float64)
@@ -298,7 +299,8 @@ func (a *BackendClientAdapter) SendStreaming(
 	body := buildRequestBody(req, backendModel, true)
 
 	path := getStreamPathForProtocol(backend.Protocol())
-	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", path, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	headers := a.buildBackendHeaders(req.Headers(), backend)
+	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", path, "HTTP/1.1", headers, body)
 
 	if req.RawBody() != nil {
 		a.bodyLogger.LogRequestDiff(reqID, req.RawBody(), body)
@@ -307,7 +309,7 @@ func (a *BackendClientAdapter) SendStreaming(
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
-		Headers: mergeHeadersWithDefaults(req.Headers()),
+		Headers: headers,
 		Path:    path,
 		Stream:  true,
 	}
@@ -450,7 +452,8 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 	body := buildRequestBody(req, backendModel, true)
 
 	path := getStreamPathForProtocol(backend.Protocol())
-	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", path, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	headers := a.buildBackendHeaders(req.Headers(), backend)
+	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", path, "HTTP/1.1", headers, body)
 
 	if req.RawBody() != nil {
 		a.bodyLogger.LogRequestDiff(reqID, req.RawBody(), body)
@@ -459,7 +462,7 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
-		Headers: mergeHeadersWithDefaults(req.Headers()),
+		Headers: headers,
 		Path:    path,
 		Stream:  true,
 	}
@@ -518,6 +521,44 @@ func (a *BackendClientAdapter) GetHTTPClient() *http.Client {
 
 // Ensure BackendClientAdapter implements port.BackendClient.
 var _ port.BackendClient = (*BackendClientAdapter)(nil)
+
+// buildBackendHeaders 构建完整的后端请求头（包含认证头和 Accept-Language）
+// 这个方法在日志记录之前调用，确保日志中包含完整的请求头信息
+func (a *BackendClientAdapter) buildBackendHeaders(clientHeaders map[string][]string, backend *entity.Backend) map[string][]string {
+	headers := make(map[string][]string)
+	headers["Content-Type"] = []string{"application/json"}
+
+	// 添加 Accept-Language
+	locale := backend.Locale()
+	if locale == "" {
+		locale = "zh-CN"
+	}
+	headers["Accept-Language"] = []string{locale}
+
+	// 添加认证头
+	apiKey := backend.APIKey()
+	if !apiKey.IsEmpty() {
+		keyStr := string(apiKey)
+		switch backend.Protocol() {
+		case types.ProtocolAnthropic:
+			headers["x-api-key"] = []string{keyStr}
+			headers["anthropic-version"] = []string{"2023-06-01"}
+		case types.ProtocolOpenAI:
+			headers["Authorization"] = []string{"Bearer " + keyStr}
+		default:
+			headers["Authorization"] = []string{"Bearer " + keyStr}
+		}
+	}
+
+	// 合并客户端头部（排除 hop-by-hop 头和已设置的头）
+	for k, v := range clientHeaders {
+		if !isHopByHopHeader(k) && k != "Content-Type" && k != "Authorization" && k != "X-Api-Key" && k != "Accept-Language" {
+			headers[k] = v
+		}
+	}
+
+	return headers
+}
 
 func mergeHeadersWithDefaults(clientHeaders map[string][]string) map[string][]string {
 	headers := make(map[string][]string)
