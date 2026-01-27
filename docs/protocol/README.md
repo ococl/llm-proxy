@@ -12,6 +12,7 @@ docs/protocol/
 │   ├── error-response-specification.md   # 错误响应格式
 │   ├── openapi-specification.md          # OpenAPI 规范
 │   ├── streaming-response-format.md      # 流式响应格式
+│   ├── anthropic-protocol.md             # Anthropic Claude 协议
 │   ├── azure-openai-protocol.md          # Azure OpenAI 协议
 │   ├── deepseek-protocol.md              # DeepSeek 协议
 │   ├── groq-protocol.md                  # Groq 协议

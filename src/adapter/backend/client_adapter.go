@@ -12,12 +12,28 @@ import (
 
 	"llm-proxy/domain/entity"
 	"llm-proxy/domain/port"
+	"llm-proxy/domain/types"
 )
 
 // 协议路径常量定义
 const (
-	ChatCompletionsPath = "/chat/completions"
+	ChatCompletionsPath   = "/chat/completions"
+	AnthropicMessagesPath = "/v1/messages"
+	CohereChatPath        = "/v1/chat"
 )
+
+// getPathForProtocol 根据协议类型返回对应的 API 路径。
+// 不同协议使用不同的端点路径。
+func getPathForProtocol(protocol types.Protocol) string {
+	switch protocol {
+	case types.ProtocolAnthropic:
+		return AnthropicMessagesPath
+	case types.ProtocolCohere:
+		return CohereChatPath
+	default:
+		return ChatCompletionsPath
+	}
+}
 
 type BackendClientAdapter struct {
 	client     *HTTPClient
@@ -112,13 +128,14 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 
 	body := buildRequestBody(req, backendModel, false)
 
-	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	requestPath := getPathForProtocol(backend.Protocol())
+	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", requestPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
 		Headers: mergeHeadersWithDefaults(req.Headers()),
-		Path:    ChatCompletionsPath,
+		Path:    requestPath,
 		Stream:  false,
 	}
 
@@ -276,13 +293,14 @@ func (a *BackendClientAdapter) SendStreaming(
 
 	body := buildRequestBody(req, backendModel, true)
 
-	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	path := getPathForProtocol(backend.Protocol())
+	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", path, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
 		Headers: mergeHeadersWithDefaults(req.Headers()),
-		Path:    ChatCompletionsPath,
+		Path:    path,
 		Stream:  true,
 	}
 
@@ -423,13 +441,14 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 
 	body := buildRequestBody(req, backendModel, true)
 
-	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", ChatCompletionsPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+	path := getPathForProtocol(backend.Protocol())
+	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", path, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
 		Headers: mergeHeadersWithDefaults(req.Headers()),
-		Path:    ChatCompletionsPath,
+		Path:    path,
 		Stream:  true,
 	}
 

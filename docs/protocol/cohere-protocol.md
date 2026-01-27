@@ -226,17 +226,20 @@ data: {"event_type":"stream-end","response_id":"resp-123","finish_reason":"COMPL
 
 ### 兼容性
 
-Cohere API 與 OpenAI API **高度兼容**，但存在一些架構差異。
+**重要**: Cohere API 與 OpenAI API **不兼容**。Cohere 使用完全不同的請求/響應格式，需要進行協議轉換才能與 OpenAI 客戶端互操作。
 
 ### 主要差異
 
 | 特性 | OpenAI | Cohere | 說明 |
 |------|--------|--------|------|
-| **消息格式** | messages 數組 | message + chat_history | 不同的對話表示方式 |
-| **preamble** | system 消息 | 獨立的 preamble 字段 | 系統提示的位置不同 |
-| **模型名稱** | gpt-4 | command-r-plus | 不同的命名 |
-| **引文** | 無 | 支持 | Cohere RAG 支持引文 |
-| **連接器** | 無 | 支持 | Cohere RAG 連接器 |
+| **端點路徑** | `/chat/completions` | `/v1/chat` | 完全不同的端點 |
+| **消息格式** | messages 數組 | message + chat_history | **不兼容**：需要轉換 |
+| **系統提示** | system 消息 | 獨立的 preamble 字段 | **不兼容**：位置不同 |
+| **角色命名** | user/assistant | USER/CHATBOT | 大小寫和命名不同 |
+| **模型名稱** | gpt-4 | command-r-plus | 不同的命名規範 |
+| **引文** | 無 | 支持 | Cohere 獨有的 RAG 功能 |
+| **連接器** | 無 | 支持 | Cohere 獨有的 RAG 連接器 |
+| **響應格式** | choices 數組 | 單個 message 字段 | **不兼容**：結構不同 |
 
 ### 字段映射表
 
@@ -323,7 +326,7 @@ Cohere 提供強大的 RAG（檢索增強生成）支持。
 ```yaml
 backends:
 - name: "cohere"
-  url: "https://api.cohere.com/v1/chat"
+  url: "https://api.cohere.com"  # 基礎 URL，不包含路徑
   api_key: "{api-key}"
   protocol: "cohere"
   timeout: 60s
@@ -332,19 +335,50 @@ backends:
 
 ### 實現詳情
 
-Cohere 被標記為 **OpenAI 兼容協議**，共享以下策略：
+Cohere 協議**不兼容** OpenAI，需要進行完整的協議轉換：
 
-- ✅ **請求轉換**: 使用 `openai.NewRequestConverter`
-- ✅ **響應轉換**: 使用 `openai.NewResponseConverter`
-- ✅ **流式處理**: 使用 `openai.NewStreamChunkConverter`
-- ✅ **錯誤轉換**: 使用 `openai.NewErrorConverter`
+#### 請求轉換流程
+
+1. **消息格式轉換**
+   - 提取最後一條 `user` 消息作為 `message` 字段
+   - 將之前的消息轉換為 `chat_history` 數組
+   - 角色映射：`user` → `USER`，`assistant` → `CHATBOT`
+
+2. **系統提示提取**
+   - 從 `messages` 數組中提取 `role: system` 的消息
+   - 將其 `content` 設置為 `preamble` 字段
+
+3. **端點路徑**
+   - 使用 `/v1/chat` 而非 `/chat/completions`
+   - 在 `client_adapter.go` 中通過 `getPathForProtocol()` 處理
+
+#### 響應轉換流程
+
+1. **非流式響應**
+   - 將 Cohere 的 `message` 字段轉換為 OpenAI 的 `choices[0].message.content`
+   - 將 `token_count` 轉換為 `usage` 對象
+   - 將 `finish_reason` 映射為 OpenAI 格式
+
+2. **流式響應**
+   - 將 Cohere 的 `text-generation` 事件轉換為 OpenAI 的 `data: [DONE]` 格式
+   - 保持 SSE 格式兼容性
+
+#### 代碼實現位置
+
+| 功��� | 文件路徑 |
+|------|---------|
+| 請求轉換 | `src/application/service/protocol/cohere/request_converter.go` |
+| 響應轉換 | `src/application/service/protocol/cohere/response_converter.go` |
+| 流式處理 | `src/application/service/protocol/cohere/stream_converter.go` |
+| 錯誤轉換 | `src/application/service/protocol/cohere/error_converter.go` |
+| 路徑處理 | `src/adapter/backend/client_adapter.go` (getPathForProtocol) |
 
 ### 特殊處理
 
 1. **消息格式轉換**: 將 OpenAI 的 messages 數組轉換為 Cohere 的 message + chat_history 格式
 2. **preamble 提取**: 從 system 消息中提取 preamble
-3. **引文處理**: 透傳 citation 字段給客戶端
-4. **RAG 支持**: 直接透傳 connectors 配置
+3. **引文處理**: 透傳 citation 字段給客戶端（如果客戶端支持）
+4. **RAG 支持**: 直接透傳 connectors 配置（如果客戶端提供）
 
 ### 錯誤碼映射
 

@@ -229,6 +229,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/v1/chat/completions", proxyHandler)
+	mux.Handle("/v1/messages", proxyHandler) // Anthropic 协议端点
 	mux.Handle("/v1/models", modelsHandler)
 	mux.Handle("/models", modelsHandler)
 	mux.Handle("/health", healthHandler)
