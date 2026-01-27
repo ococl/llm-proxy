@@ -670,3 +670,62 @@ func GetRequestBodyLoggerInfo() map[string]interface{} {
 		"baseDir":     logger.baseDir,
 	}
 }
+
+// WriteDiff 写入请求体差异日志
+func (l *RequestBodyLogger) WriteDiff(reqID string, original, modified map[string]interface{}) error {
+	if l.testMode || l.disabled {
+		return nil
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	timePrefix := now.Format("150405")
+
+	filename := fmt.Sprintf("%s_%s_request_diff.json", timePrefix, reqID)
+	filePath := filepath.Join(l.baseDir, filename)
+
+	diffResult := CompareJSON(original, modified, DefaultDiffOptions())
+
+	diffJSON, err := diffResult.ToJSON()
+	if err != nil {
+		return fmt.Errorf("生成 diff JSON 失败: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Request Diff: client_request -> upstream_request\n")
+	sb.WriteString("# 此文件记录客户端请求转换为上游请求时的字段差异\n")
+	sb.WriteString("# 忽略预期差异字段: model\n")
+	sb.WriteString("\n")
+	sb.WriteString(diffJSON)
+	sb.WriteString("\n")
+
+	if !diffResult.IsEmpty() {
+		sb.WriteString("\n# 差异摘要:\n")
+		summary := diffResult.ToSummary()
+		for _, line := range strings.Split(summary, "\n") {
+			if line != "" {
+				sb.WriteString("# ")
+				sb.WriteString(line)
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	return os.WriteFile(filePath, []byte(sb.String()), 0644)
+}
+
+// LogRequestDiff 便捷函数：记录请求体差异
+func LogRequestDiff(reqID string, original, modified map[string]interface{}) {
+	logger := GetRequestBodyLogger()
+	if logger == nil {
+		return
+	}
+	if err := logger.WriteDiff(reqID, original, modified); err != nil {
+		GeneralSugar.Errorw("写入请求体差异日志失败",
+			port.ReqID(reqID),
+			port.Error(err),
+		)
+	}
+}

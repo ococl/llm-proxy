@@ -34,3 +34,11 @@ func (a *BodyLoggerAdapter) LogResponseBody(
 ) {
 	logging.LogResponseBody(reqID, logging.BodyLogType(logType), statusCode, headers, body)
 }
+
+// LogRequestDiff 记录请求体差异日志
+func (a *BodyLoggerAdapter) LogRequestDiff(
+	reqID string,
+	original, modified map[string]interface{},
+) {
+	logging.LogRequestDiff(reqID, original, modified)
+}

@@ -8,6 +8,7 @@ const (
 	BodyLogTypeClientResponse   BodyLogType = "client_response"
 	BodyLogTypeUpstreamRequest  BodyLogType = "upstream_request"
 	BodyLogTypeUpstreamResponse BodyLogType = "upstream_response"
+	BodyLogTypeRequestDiff      BodyLogType = "request_diff"
 )
 
 // BodyLogger 接口提供请求/响应体日志记录功能
@@ -18,4 +19,9 @@ type BodyLogger interface {
 
 	// LogResponseBody 记录响应体日志
 	LogResponseBody(reqID string, logType BodyLogType, statusCode int, headers map[string][]string, body interface{})
+
+	// LogRequestDiff 记录请求体差异日志
+	// original: 原始请求体（client_request）
+	// modified: 修改后的请求体（upstream_request）
+	LogRequestDiff(reqID string, original, modified map[string]interface{})
 }

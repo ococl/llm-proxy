@@ -298,7 +298,8 @@ func (h *ProxyHandler) buildDomainRequest(
 		Messages(messages).
 		Context(ctx).
 		Headers(extractForwardHeaders(clientHeaders)).
-		ClientProtocol(string(clientProtocol))
+		ClientProtocol(string(clientProtocol)).
+		RawBody(reqBody)
 
 	if maxTokens, ok := reqBody["max_tokens"].(float64); ok {
 		builder.MaxTokens(int(maxTokens))

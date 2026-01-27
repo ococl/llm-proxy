@@ -82,3 +82,5 @@ func (n *NopBodyLogger) LogRequestBody(reqID string, logType BodyLogType, method
 }
 func (n *NopBodyLogger) LogResponseBody(reqID string, logType BodyLogType, statusCode int, headers map[string][]string, body interface{}) {
 }
+func (n *NopBodyLogger) LogRequestDiff(reqID string, original, modified map[string]interface{}) {
+}

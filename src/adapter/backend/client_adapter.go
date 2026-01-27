@@ -97,6 +97,8 @@ func getKeys(m map[string]interface{}) string {
 }
 
 // buildRequestBody 构建请求体 map，复用逻辑
+// 注意：这个函数会丢失原始请求中的额外字段（如 frequency_penalty, presence_penalty 等）
+// 因为 entity.Request 只保存了核心字段
 func buildRequestBody(req *entity.Request, backendModel string, stream bool) map[string]interface{} {
 	body := map[string]interface{}{
 		"model":    backendModel,
@@ -144,6 +146,10 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 
 	requestPath := getPathForProtocol(backend.Protocol())
 	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", requestPath, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
+
+	if req.RawBody() != nil {
+		a.bodyLogger.LogRequestDiff(reqID, req.RawBody(), body)
+	}
 
 	backendReq := &BackendRequest{
 		Backend: backend,
@@ -310,6 +316,10 @@ func (a *BackendClientAdapter) SendStreaming(
 	path := getStreamPathForProtocol(backend.Protocol())
 	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", path, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
+	if req.RawBody() != nil {
+		a.bodyLogger.LogRequestDiff(reqID, req.RawBody(), body)
+	}
+
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
@@ -458,6 +468,10 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 	path := getStreamPathForProtocol(backend.Protocol())
 	a.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeUpstreamRequest, "POST", path, "HTTP/1.1", mergeHeadersWithDefaults(req.Headers()), body)
 
+	if req.RawBody() != nil {
+		a.bodyLogger.LogRequestDiff(reqID, req.RawBody(), body)
+	}
+
 	backendReq := &BackendRequest{
 		Backend: backend,
 		Body:    body,
@@ -489,8 +503,9 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 		port.StatusCode(httpResp.StatusCode),
 	)
 
-	// 记录成功的流式响应头（透传模式）
-	a.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, nil)
+	// 透传模式下，响应体将在 streaming.go 中收集并记录
+	// 这里只记录响应头，响应体为空（因为还未读取）
+	a.bodyLogger.LogResponseBody(reqID, port.BodyLogTypeUpstreamResponse, httpResp.StatusCode, httpResp.Header, "# 透传模式：响应体将在流式传输完成后记录")
 
 	if httpResp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(httpResp.Body)

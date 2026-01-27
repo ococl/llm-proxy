@@ -124,8 +124,9 @@ type Request struct {
 	user           string
 	ctx            context.Context
 	streamHandler  func(chunk []byte) error
-	headers        map[string][]string // Client headers to forward to backend
-	clientProtocol string              // Client protocol (openai/anthropic)
+	headers        map[string][]string    // Client headers to forward to backend
+	clientProtocol string                 // Client protocol (openai/anthropic)
+	rawBody        map[string]interface{} // 原始客户端请求体，用于生成 diff
 }
 
 // NewRequest creates a new request.
@@ -223,6 +224,11 @@ func (r *Request) ClientProtocol() string {
 	return r.clientProtocol
 }
 
+// RawBody returns the raw client request body.
+func (r *Request) RawBody() map[string]interface{} {
+	return r.rawBody
+}
+
 // WithModel creates a new request with a different model.
 func (r *Request) WithModel(model ModelAlias) *Request {
 	newReq := *r
@@ -268,6 +274,7 @@ type RequestBuilder struct {
 	streamHandler  func(chunk []byte) error
 	headers        map[string][]string
 	clientProtocol string
+	rawBody        map[string]interface{}
 }
 
 // NewRequestBuilder creates a new request builder.
@@ -374,6 +381,12 @@ func (rb *RequestBuilder) ClientProtocol(protocol string) *RequestBuilder {
 	return rb
 }
 
+// RawBody sets the raw client request body.
+func (rb *RequestBuilder) RawBody(rawBody map[string]interface{}) *RequestBuilder {
+	rb.rawBody = rawBody
+	return rb
+}
+
 // Build creates the request entity.
 func (rb *RequestBuilder) Build() (*Request, error) {
 	if rb.id.IsEmpty() {
@@ -402,6 +415,7 @@ func (rb *RequestBuilder) Build() (*Request, error) {
 		streamHandler:  rb.streamHandler,
 		headers:        rb.headers,
 		clientProtocol: rb.clientProtocol,
+		rawBody:        rb.rawBody,
 	}, nil
 }
 
