@@ -73,6 +73,7 @@ func (c *RequestConverter) Convert(req *entity.Request, systemPrompt string) (*e
 		Context(req.Context()).
 		StreamHandler(req.StreamHandler()).
 		Headers(req.Headers()).
+		RawBody(req.RawBody()).
 		ClientProtocol(string(types.ProtocolGoogle))
 
 	// Google 不使用独立的 system 字段，系统提示应包含在第一个 user 消息中

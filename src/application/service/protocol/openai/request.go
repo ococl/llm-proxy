@@ -97,6 +97,7 @@ func (c *RequestConverter) buildRequest(req *entity.Request, messages []entity.M
 		Context(req.Context()).
 		StreamHandler(req.StreamHandler()).
 		Headers(req.Headers()).
+		RawBody(req.RawBody()).
 		ClientProtocol(string(types.ProtocolOpenAI)).
 		BuildUnsafe()
 }

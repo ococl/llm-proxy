@@ -112,6 +112,7 @@ func (c *RequestConverter) Convert(req *entity.Request, systemPrompt string) (*e
 		Context(req.Context()).
 		StreamHandler(req.StreamHandler()).
 		Headers(req.Headers()).
+		RawBody(req.RawBody()).
 		ClientProtocol(string(types.ProtocolAnthropic))
 
 	// 如果有系统提示，添加到请求中

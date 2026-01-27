@@ -24,6 +24,16 @@ type DiffValue struct {
 type DiffOptions struct {
 	// IgnoreFields 忽略的字段列表（预期的差异）
 	IgnoreFields []string
+
+	// MaxValueSize 单个字段值的最大记录大小（字节）
+	// 超过此大小的值将被截断为摘要
+	// 默认值：1000 字节
+	MaxValueSize int
+
+	// ArraySummaryThreshold 数组摘要阈值
+	// 当数组元素数量超过此值时，只记录摘要信息
+	// 默认值：5 个元素
+	ArraySummaryThreshold int
 }
 
 // DefaultDiffOptions 返回默认的 diff 配置
@@ -33,6 +43,8 @@ func DefaultDiffOptions() *DiffOptions {
 		IgnoreFields: []string{
 			"model", // model 字段会被路由重写，这是预期行为
 		},
+		MaxValueSize:          1000, // 单个字段值最大 1000 字节
+		ArraySummaryThreshold: 5,    // 数组超过 5 个元素时使用摘要
 	}
 }
 
@@ -67,12 +79,12 @@ func CompareJSON(original, modified map[string]interface{}, options *DiffOptions
 		newValue, exists := modified[key]
 		if !exists {
 			// 字段被删除
-			result.Removed[key] = oldValue
+			result.Removed[key] = summarizeValue(oldValue, options)
 		} else if !deepEqual(oldValue, newValue) {
 			// 字段值被修改
 			result.Modified[key] = DiffValue{
-				Old: oldValue,
-				New: newValue,
+				Old: summarizeValue(oldValue, options),
+				New: summarizeValue(newValue, options),
 			}
 		}
 	}
@@ -86,7 +98,7 @@ func CompareJSON(original, modified map[string]interface{}, options *DiffOptions
 
 		if _, exists := original[key]; !exists {
 			// 字段被新增
-			result.Added[key] = newValue
+			result.Added[key] = summarizeValue(newValue, options)
 		}
 	}
 
@@ -143,8 +155,25 @@ func (r *DiffResult) ToSummary() string {
 }
 
 // deepEqual 深度比较两个值是否相等
+// 使用 JSON 序列化比较，避免 reflect.DeepEqual 对 map/slice 指针的误判
 func deepEqual(a, b interface{}) bool {
-	return reflect.DeepEqual(a, b)
+	// 处理 nil 情况
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	// 对于复杂类型（map、slice），使用 JSON 序列化比较
+	// 这样可以正确比较内容相同但指针不同的对象
+	aJSON, aErr := json.Marshal(a)
+	bJSON, bErr := json.Marshal(b)
+
+	// 如果序列化失败，回退到 reflect.DeepEqual
+	if aErr != nil || bErr != nil {
+		return reflect.DeepEqual(a, b)
+	}
+
+	// 比较 JSON 字符串
+	return string(aJSON) == string(bJSON)
 }
 
 // sortedKeys 返回 map 的排序键列表
@@ -155,4 +184,60 @@ func sortedKeys(m map[string]interface{}) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// summarizeValue 对值进行摘要处理，防止 diff 文件过大
+func summarizeValue(value interface{}, options *DiffOptions) interface{} {
+	if value == nil {
+		return nil
+	}
+
+	if arr, ok := value.([]interface{}); ok {
+		return summarizeArray(arr, options)
+	}
+
+	jsonBytes, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+
+	if len(jsonBytes) <= options.MaxValueSize {
+		return value
+	}
+
+	return map[string]interface{}{
+		"_summary": "值过大已截断",
+		"_type":    fmt.Sprintf("%T", value),
+		"_size":    len(jsonBytes),
+		"_preview": truncateString(string(jsonBytes), 200),
+	}
+}
+
+// summarizeArray 对数组进行摘要处理
+func summarizeArray(arr []interface{}, options *DiffOptions) interface{} {
+	if len(arr) <= options.ArraySummaryThreshold {
+		return arr
+	}
+
+	return map[string]interface{}{
+		"_summary":     "数组过大已摘要",
+		"_length":      len(arr),
+		"_first_items": arr[:min(3, len(arr))],
+	}
+}
+
+// truncateString 截断字符串到指定长度
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

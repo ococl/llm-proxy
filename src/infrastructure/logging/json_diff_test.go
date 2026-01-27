@@ -1,6 +1,8 @@
 package logging
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -243,5 +245,131 @@ func TestDiffResult_ToSummary_Empty(t *testing.T) {
 
 	if summary != "无差异" {
 		t.Errorf("期望'无差异'，实际 %q", summary)
+	}
+}
+
+func TestSummarizeValue_LargeArray(t *testing.T) {
+	options := &DiffOptions{
+		MaxValueSize:          1000,
+		ArraySummaryThreshold: 5,
+	}
+
+	largeArray := make([]interface{}, 10)
+	for i := 0; i < 10; i++ {
+		largeArray[i] = map[string]interface{}{"role": "user", "content": "test"}
+	}
+
+	result := summarizeValue(largeArray, options)
+
+	resultMap, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("期望 map 类型，实际 %T", result)
+	}
+
+	if resultMap["_summary"] != "数组过大已摘要" {
+		t.Errorf("期望摘要标记，实际 %v", resultMap["_summary"])
+	}
+	if resultMap["_length"] != 10 {
+		t.Errorf("期望长度 10，实际 %v", resultMap["_length"])
+	}
+}
+
+func TestSummarizeValue_SmallArray(t *testing.T) {
+	options := &DiffOptions{
+		MaxValueSize:          1000,
+		ArraySummaryThreshold: 5,
+	}
+
+	smallArray := make([]interface{}, 3)
+	for i := 0; i < 3; i++ {
+		smallArray[i] = map[string]interface{}{"role": "user", "content": "test"}
+	}
+
+	result := summarizeValue(smallArray, options)
+
+	resultArray, ok := result.([]interface{})
+	if !ok {
+		t.Fatalf("期望数组类型，实际 %T", result)
+	}
+
+	if len(resultArray) != 3 {
+		t.Errorf("期望 3 个元素，实际 %d", len(resultArray))
+	}
+}
+
+func TestSummarizeValue_LargeValue(t *testing.T) {
+	options := &DiffOptions{
+		MaxValueSize:          100,
+		ArraySummaryThreshold: 5,
+	}
+
+	largeValue := make(map[string]interface{})
+	for i := 0; i < 100; i++ {
+		largeValue[fmt.Sprintf("key_%d", i)] = strings.Repeat("x", 10)
+	}
+
+	result := summarizeValue(largeValue, options)
+
+	resultMap, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("期望 map 类型，实际 %T", result)
+	}
+
+	if resultMap["_summary"] != "值过大已截断" {
+		t.Errorf("期望截断标记，实际 %v", resultMap["_summary"])
+	}
+}
+
+func TestCompareJSON_SameMessagesArray(t *testing.T) {
+	original := map[string]interface{}{
+		"model": "gpt-4",
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "hello"},
+			map[string]interface{}{"role": "assistant", "content": "hi"},
+		},
+	}
+
+	modified := map[string]interface{}{
+		"model": "gpt-3.5-turbo",
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "hello"},
+			map[string]interface{}{"role": "assistant", "content": "hi"},
+		},
+	}
+
+	result := CompareJSON(original, modified, DefaultDiffOptions())
+
+	if !result.IsEmpty() {
+		t.Errorf("期望无差异（messages 相同，model 已忽略），但得到: %+v", result)
+	}
+}
+
+func TestCompareJSON_DifferentMessagesArray(t *testing.T) {
+	original := map[string]interface{}{
+		"model": "gpt-4",
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "hello"},
+		},
+	}
+
+	modified := map[string]interface{}{
+		"model": "gpt-4",
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "goodbye"},
+		},
+	}
+
+	result := CompareJSON(original, modified, nil)
+
+	if len(result.Modified) != 1 {
+		t.Fatalf("期望 1 个修改字段，实际 %d", len(result.Modified))
+	}
+
+	msgDiff, ok := result.Modified["messages"]
+	if !ok {
+		t.Fatalf("messages 字段应该存在")
+	}
+	if msgDiff.Old == nil || msgDiff.New == nil {
+		t.Errorf("messages 差异应该有 Old 和 New 值")
 	}
 }

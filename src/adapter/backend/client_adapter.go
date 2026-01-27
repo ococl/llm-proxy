@@ -96,37 +96,21 @@ func getKeys(m map[string]interface{}) string {
 	return keys
 }
 
-// buildRequestBody 构建请求体 map，复用逻辑
-// 注意：这个函数会丢失原始请求中的额外字段（如 frequency_penalty, presence_penalty 等）
-// 因为 entity.Request 只保存了核心字段
+// buildRequestBody 构建请求体 map，使用黑名单模式保留所有原始字段
+// 策略：从原始请求体开始，只覆盖代理需要修改的字段（model, stream）
+// 这样可以透传所有用户参数（frequency_penalty, presence_penalty 等），无需维护白名单
 func buildRequestBody(req *entity.Request, backendModel string, stream bool) map[string]interface{} {
-	body := map[string]interface{}{
-		"model":    backendModel,
-		"messages": req.Messages(),
+	// 1. 从原始请求体开始（保留所有字段）
+	body := make(map[string]interface{})
+	if req.RawBody() != nil {
+		for k, v := range req.RawBody() {
+			body[k] = v
+		}
 	}
 
-	if req.MaxTokens() > 0 {
-		body["max_tokens"] = req.MaxTokens()
-	}
-	if req.Temperature() != 1.0 {
-		body["temperature"] = req.Temperature()
-	}
-	if req.TopP() != 1.0 {
-		body["top_p"] = req.TopP()
-	}
-	if len(req.Stop()) > 0 {
-		body["stop"] = req.Stop()
-	}
-	if len(req.Tools()) > 0 {
-		body["tools"] = req.Tools()
-	}
-	if req.ToolChoice() != nil {
-		body["tool_choice"] = req.ToolChoice()
-	}
-	if req.User() != "" {
-		body["user"] = req.User()
-	}
-	body["stream"] = stream
+	// 2. 覆盖代理需要修改的字段
+	body["model"] = backendModel // 路由重写：使用后端模型名
+	body["stream"] = stream      // 流式控制：由代理决定
 
 	return body
 }
