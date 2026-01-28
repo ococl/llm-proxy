@@ -20,6 +20,7 @@ coverage_*
 coverage-*
 logs
 *.log
+*.out
 
 # Python
 scripts/venv/

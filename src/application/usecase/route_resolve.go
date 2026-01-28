@@ -46,11 +46,12 @@ func (uc *RouteResolveUseCase) Resolve(alias string) ([]*port.Route, error) {
 		}
 
 		routes = append(routes, &port.Route{
-			Backend:  backend,
-			Model:    routeCfg.Model,
-			Priority: routeCfg.Priority,
-			Protocol: backend.Protocol(),
-			Enabled:  routeCfg.Enabled,
+			Backend:   backend,
+			Model:     routeCfg.Model,
+			Priority:  routeCfg.Priority,
+			Protocol:  backend.Protocol(),
+			Enabled:   routeCfg.Enabled,
+			Reasoning: routeCfg.Reasoning,
 		})
 	}
 

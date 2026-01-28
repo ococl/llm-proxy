@@ -188,10 +188,24 @@ func parseSystemPromptFile(filePath string, data []byte, customVars map[string]s
 	content := string(data)
 
 	var yamlPart, contentPart string
-	if idx := strings.Index(content, "---"); idx >= 0 {
+	// 检查是否以 --- 开头（YAML front matter 格式）
+	if strings.HasPrefix(content, "---") {
+		// 找到第二个 --- 的位置
+		secondIdx := strings.Index(content[3:], "---")
+		if secondIdx >= 0 {
+			yamlPart = strings.TrimSpace(content[3 : 3+secondIdx])
+			contentPart = strings.TrimSpace(content[3+secondIdx+3:])
+		} else {
+			// 只有开头的 ---，没有结尾的 ---，整个内容作为 YAML
+			yamlPart = strings.TrimSpace(content[3:])
+			contentPart = ""
+		}
+	} else if idx := strings.Index(content, "---"); idx >= 0 {
+		// 兼容旧格式：YAML 在第一个 --- 之前
 		yamlPart = strings.TrimSpace(content[:idx])
 		contentPart = strings.TrimSpace(content[idx+3:])
 	} else {
+		// 没有 ---，整个内容作为正文
 		yamlPart = ""
 		contentPart = content
 	}
@@ -209,7 +223,12 @@ func parseSystemPromptFile(filePath string, data []byte, customVars map[string]s
 
 	if yamlPart != "" {
 		if err := yaml.Unmarshal([]byte(yamlPart), config); err != nil {
-			return nil, fmt.Errorf("解析 YAML 配置失败: %w", err)
+			// YAML 解析失败，将内容视为正文（保留原始内容，包括变量占位符）
+			config.Content = content
+		} else if config.Content == "" && yamlPart != "" {
+			// YAML 解析成功但没有 Content，且原始有内容，说明内容被当作 YAML 解析了
+			// 这种情况应该将内容视为正文
+			config.Content = yamlPart
 		}
 	}
 

@@ -99,7 +99,7 @@ func getKeys(m map[string]interface{}) string {
 // buildRequestBody 构建请求体 map，使用黑名单模式保留所有原始字段
 // 策略：从原始请求体开始，只覆盖代理需要修改的字段（model, stream）
 // 这样可以透传所有用户参数（frequency_penalty, presence_penalty 等），无需维护白名单
-func buildRequestBody(req *entity.Request, backendModel string, stream bool) map[string]interface{} {
+func buildRequestBody(req *entity.Request, backendModel string, stream bool, reasoning bool) map[string]interface{} {
 	// 1. 从原始请求体开始（保留所有字段）
 	body := make(map[string]interface{})
 	if req.RawBody() != nil {
@@ -112,11 +112,105 @@ func buildRequestBody(req *entity.Request, backendModel string, stream bool) map
 	body["model"] = backendModel // 路由重写：使用后端模型名
 	body["stream"] = stream      // 流式控制：由代理决定
 
+	// 3. 修复 reasoning_content 字段位置（DeepSeek/Kimi thinking 模式要求）
+	// 只有模型配置了 reasoning 模式时才进行修复
+	if reasoning {
+		fixReasoningContentInMessages(body)
+	}
+
 	return body
 }
 
+// isThinkingModeEnabled 检测请求体中是否启用了 thinking 模式。
+// 支持以下格式：
+//   - extra_body: {"thinking": {"type": "enabled"}}
+//   - top-level: {"thinking": {"type": "enabled"}}
+func isThinkingModeEnabled(body map[string]interface{}) bool {
+	// 检查 extra_body 格式
+	if extraBody, ok := body["extra_body"].(map[string]interface{}); ok {
+		if thinking, ok := extraBody["thinking"].(map[string]interface{}); ok {
+			if t, ok := thinking["type"].(string); ok && t == "enabled" {
+				return true
+			}
+		}
+	}
+
+	// 检查顶层 thinking 字段
+	if thinking, ok := body["thinking"].(map[string]interface{}); ok {
+		if t, ok := thinking["type"].(string); ok && t == "enabled" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// fixReasoningContentInMessages 修复 messages 中 reasoning_content 字段的位置。
+// DeepSeek API 和 Kimi API 要求：包含 tool_calls 的 assistant 消息
+// 必须在顶层包含 reasoning_content 字段，而不是在 additional_kwargs 中。
+// 此函数会将 additional_kwargs.reasoning_content 提升到顶层字段。
+// 注意：即使请求中没有显式启用 thinking 模式，上游 API 也可能默认启用，
+// 因此需要对包含 tool_calls 的 assistant 消息始终进行修复。
+func fixReasoningContentInMessages(body map[string]interface{}) {
+	messagesRaw, ok := body["messages"].([]interface{})
+	if !ok {
+		return
+	}
+
+	fixed := false
+	for i, msgRaw := range messagesRaw {
+		msgMap, ok := msgRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// 检查是否是 assistant 角色且包含 tool_calls
+		role, _ := msgMap["role"].(string)
+		if role != "assistant" {
+			continue
+		}
+
+		if _, hasToolCalls := msgMap["tool_calls"]; !hasToolCalls {
+			continue
+		}
+
+		// 如果已经有顶层的 reasoning_content，跳过
+		if _, hasRC := msgMap["reasoning_content"]; hasRC {
+			continue
+		}
+
+		// 从 additional_kwargs 提升到顶层
+		if additionalKwargs, ok := msgMap["additional_kwargs"].(map[string]interface{}); ok {
+			if rc, ok := additionalKwargs["reasoning_content"].(string); ok && rc != "" {
+				msgMap["reasoning_content"] = rc
+				// 从 additional_kwargs 中删除 reasoning_content
+				delete(additionalKwargs, "reasoning_content")
+				// 如果 additional_kwargs 变为空，删除整个字段
+				if len(additionalKwargs) == 0 {
+					delete(msgMap, "additional_kwargs")
+				}
+				// 更新 slice 中的元素
+				messagesRaw[i] = msgMap
+				fixed = true
+				continue
+			}
+		}
+
+		// DeepSeek API 要求：所有包含 tool_calls 的 assistant 消息都必须有 reasoning_content
+		// 如果没有（additional_kwargs 中也没有），添加空字符串
+		msgMap["reasoning_content"] = ""
+		messagesRaw[i] = msgMap
+		fixed = true
+	}
+
+	// 如果有修复，更新 body 中的 messages
+	if fixed {
+		body["messages"] = messagesRaw
+	}
+}
+
 // Send sends a non-streaming request to the backend and returns a response.
-func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*entity.Response, error) {
+func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, reasoning bool) (*entity.Response, error) {
 	reqID := req.ID().String()
 
 	a.logger.Debug("准备发送上游请求",
@@ -124,9 +218,10 @@ func (a *BackendClientAdapter) Send(ctx context.Context, req *entity.Request, ba
 		port.Backend(backend.Name()),
 		port.BackendURL(backend.URL().String()),
 		port.BackendModel(backendModel),
+		port.Field{Key: "reasoning", Value: reasoning},
 	)
 
-	body := buildRequestBody(req, backendModel, false)
+	body := buildRequestBody(req, backendModel, false, reasoning)
 
 	requestPath := getPathForProtocol(backend.Protocol())
 	headers := a.buildBackendHeaders(req.Headers(), backend)
@@ -285,6 +380,7 @@ func (a *BackendClientAdapter) SendStreaming(
 	req *entity.Request,
 	backend *entity.Backend,
 	backendModel string,
+	reasoning bool,
 	handler func([]byte) error,
 ) error {
 	reqID := req.ID().String()
@@ -296,7 +392,7 @@ func (a *BackendClientAdapter) SendStreaming(
 		port.BackendModel(backendModel),
 	)
 
-	body := buildRequestBody(req, backendModel, true)
+	body := buildRequestBody(req, backendModel, true, reasoning)
 
 	path := getStreamPathForProtocol(backend.Protocol())
 	headers := a.buildBackendHeaders(req.Headers(), backend)
@@ -439,6 +535,7 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 	req *entity.Request,
 	backend *entity.Backend,
 	backendModel string,
+	reasoning bool,
 ) (*http.Response, error) {
 	reqID := req.ID().String()
 
@@ -449,7 +546,7 @@ func (a *BackendClientAdapter) SendStreamingPassthrough(
 		port.BackendModel(backendModel),
 	)
 
-	body := buildRequestBody(req, backendModel, true)
+	body := buildRequestBody(req, backendModel, true, reasoning)
 
 	path := getStreamPathForProtocol(backend.Protocol())
 	headers := a.buildBackendHeaders(req.Headers(), backend)

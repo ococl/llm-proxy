@@ -234,8 +234,10 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 
 		selectedRoute := findRouteForBackend(routes, backend)
 		currentBackendModel := backendModelName
+		reasoning := false
 		if selectedRoute != nil {
 			currentBackendModel = selectedRoute.Model
+			reasoning = selectedRoute.Reasoning
 		}
 
 		if attempt > 0 {
@@ -262,7 +264,7 @@ func (uc *ProxyRequestUseCase) executeWithRetry(
 			return nil, domainerror.NewProtocolError("request conversion failed", err)
 		}
 
-		resp, err := uc.backendClient.Send(ctx, backendReq, backend, currentBackendModel)
+		resp, err := uc.backendClient.Send(ctx, backendReq, backend, currentBackendModel, reasoning)
 		if err == nil {
 			if attempt > 0 {
 				uc.logger.Info("重试成功",

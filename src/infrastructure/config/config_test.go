@@ -71,6 +71,27 @@ func TestModelAlias_IsEnabled(t *testing.T) {
 	}
 }
 
+func TestModelRoute_IsReasoningEnabled(t *testing.T) {
+	tests := []struct {
+		name      string
+		reasoning *bool
+		expected  bool
+	}{
+		{"nil (default false)", nil, false},
+		{"explicit true", boolPtr(true), true},
+		{"explicit false", boolPtr(false), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &ModelRoute{Reasoning: tt.reasoning}
+			if got := r.IsReasoningEnabled(); got != tt.expected {
+				t.Errorf("IsReasoningEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func newTestManager(cfg *Config) *Manager {
 	return &Manager{config: cfg}
 }

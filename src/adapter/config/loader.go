@@ -264,15 +264,15 @@ func (a *ConfigAdapter) convertBackend(cfg *config.Backend) (*entity.Backend, er
 		protocol = types.ProtocolAnthropic
 	}
 
-	// 使用 NewBackendWithLocale 来传递 locale 配置
-	return entity.NewBackendWithLocale(
-		cfg.Name,
-		cfg.URL,
-		cfg.APIKey,
-		cfg.IsEnabled(),
-		protocol,
-		cfg.Locale,
-	)
+	// 使用 BackendBuilder 来创建后端实体
+	return entity.NewBackendBuilder().
+		Name(cfg.Name).
+		URL(cfg.URL).
+		APIKey(cfg.APIKey).
+		Enabled(cfg.IsEnabled()).
+		Protocol(protocol).
+		Locale(cfg.Locale).
+		Build()
 }
 
 // convertModelAlias converts config.ModelAlias to port.ModelAlias.
@@ -294,10 +294,11 @@ func (a *ConfigAdapter) convertModelAlias(cfg *config.ModelAlias, backends []*en
 		}
 
 		routes = append(routes, port.ModelRoute{
-			Backend:  route.Backend,
-			Model:    route.Model,
-			Priority: route.Priority,
-			Enabled:  route.IsEnabled(),
+			Backend:   route.Backend,
+			Model:     route.Model,
+			Priority:  route.Priority,
+			Enabled:   route.IsEnabled(),
+			Reasoning: route.IsReasoningEnabled(),
 		})
 	}
 

@@ -126,13 +126,19 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.bodyLogger.LogRequestBody(reqID, port.BodyLogTypeClientRequest, r.Method, r.URL.Path, r.Proto, map[string][]string(r.Header), reqBody)
 
+	// 保存原始请求体，用于生成 request_diff
+	originalReqBody := make(map[string]interface{})
+	for k, v := range reqBody {
+		originalReqBody[k] = v
+	}
+
 	if cfg.Proxy.EnableSystemPrompt {
 		h.systemPromptManager.SetCustomVariables(cfg.Proxy.GetCustomVariables())
 		h.systemPromptManager.LoadSystemPrompts()
 		reqBody = h.injectSystemPrompt(reqBody)
 	}
 
-	req, err := h.buildDomainRequest(ctx, reqID, reqBody, clientProtocol, r.Header)
+	req, err := h.buildDomainRequest(ctx, reqID, reqBody, originalReqBody, clientProtocol, r.Header)
 	if err != nil {
 		h.logger.Error("构建领域请求失败",
 			port.ReqID(reqID),
@@ -283,6 +289,7 @@ func (h *ProxyHandler) buildDomainRequest(
 	ctx context.Context,
 	reqID string,
 	reqBody map[string]interface{},
+	originalReqBody map[string]interface{},
 	clientProtocol types.Protocol,
 	clientHeaders http.Header,
 ) (*entity.Request, error) {
@@ -296,6 +303,12 @@ func (h *ProxyHandler) buildDomainRequest(
 		return nil, err
 	}
 
+	// 使用原始请求体作为 RawBody，用于生成 request_diff
+	rawBody := originalReqBody
+	if rawBody == nil {
+		rawBody = reqBody
+	}
+
 	builder := entity.NewRequestBuilder().
 		ID(entity.NewRequestID(reqID)).
 		Model(entity.NewModelAlias(modelAlias)).
@@ -303,7 +316,7 @@ func (h *ProxyHandler) buildDomainRequest(
 		Context(ctx).
 		Headers(extractForwardHeaders(clientHeaders)).
 		ClientProtocol(string(clientProtocol)).
-		RawBody(reqBody)
+		RawBody(rawBody)
 
 	if maxTokens, ok := reqBody["max_tokens"].(float64); ok {
 		builder.MaxTokens(int(maxTokens))
@@ -494,6 +507,7 @@ func (h *ProxyHandler) injectSystemPrompt(reqBody map[string]interface{}) map[st
 	}
 
 	systemMessageIdx := -1
+	var systemCacheControl interface{}
 	for i, msg := range messagesRaw {
 		msgMap, ok := msg.(map[string]interface{})
 		if !ok {
@@ -501,6 +515,10 @@ func (h *ProxyHandler) injectSystemPrompt(reqBody map[string]interface{}) map[st
 		}
 		if role, ok := msgMap["role"].(string); ok && role == "system" {
 			systemMessageIdx = i
+			// 保留原始的 cache_control 字段
+			if cc, ok := msgMap["cache_control"]; ok {
+				systemCacheControl = cc
+			}
 			break
 		}
 	}
@@ -510,6 +528,10 @@ func (h *ProxyHandler) injectSystemPrompt(reqBody map[string]interface{}) map[st
 		if sysMsg, ok := messagesRaw[systemMessageIdx].(map[string]interface{}); ok {
 			if content, ok := sysMsg["content"].(string); ok {
 				existingSystemContent = content
+			}
+			// 保留原始的 cache_control 字段
+			if cc, ok := sysMsg["cache_control"]; ok {
+				systemCacheControl = cc
 			}
 		}
 	}
@@ -539,10 +561,15 @@ func (h *ProxyHandler) injectSystemPrompt(reqBody map[string]interface{}) map[st
 	newMessages := make([]interface{}, 0, len(messagesRaw))
 
 	if existingSystemContent != "" {
-		newMessages = append(newMessages, map[string]interface{}{
+		newSystemMsg := map[string]interface{}{
 			"role":    "system",
 			"content": existingSystemContent,
-		})
+		}
+		// 如果有原始的 cache_control，保留它
+		if systemCacheControl != nil {
+			newSystemMsg["cache_control"] = systemCacheControl
+		}
+		newMessages = append(newMessages, newSystemMsg)
 	}
 
 	if systemMessageIdx >= 0 {
