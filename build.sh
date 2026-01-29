@@ -40,29 +40,6 @@ build_darwin() {
     (cd src && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-darwin-arm64" .)
 }
 
-build_current() {
-    echo ""
-    echo "[构建当前系统版本]"
-    case "$CURRENT_OS" in
-        linux)
-            echo "Linux amd64"
-            (cd src && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-linux-amd64" .)
-            ;;
-        darwin)
-            echo "macOS arm64"
-            (cd src && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-darwin-arm64" .)
-            ;;
-        windows)
-            echo "Windows amd64"
-            (cd src && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "../$OUTPUT_DIR/${BINARY_NAME}-windows-amd64.exe" .)
-            ;;
-        *)
-            echo "不支持的操作系统: $CURRENT_OS"
-            exit 1
-            ;;
-    esac
-}
-
 build_all() {
     build_windows
     build_linux
@@ -77,23 +54,19 @@ clean() {
 }
 
 case "${1:-}" in
-    all)     build_all ;;
     windows) build_windows ;;
     linux)   build_linux ;;
     darwin)  build_darwin ;;
     clean)   clean ;;
     "")
-            build_current
-            echo ""
-            echo "构建完成！输出目录: $OUTPUT_DIR"
+            build_all
             ;;
     *)
-            echo "用法: ./build.sh [all|windows|linux|darwin|clean]"
-            echo "  all     - 构建所有平台"
+            echo "用法: ./build.sh [windows|linux|darwin|clean]"
             echo "  windows - 仅构建 Windows"
             echo "  linux   - 仅构建 Linux"
             echo "  darwin  - 仅构建 macOS"
             echo "  clean   - 清理构建产物"
-            echo "  (无参数) - 仅构建当前系统"
+            echo "  (无参数) - 构建所有平台"
             ;;
 esac

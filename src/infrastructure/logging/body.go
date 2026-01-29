@@ -63,13 +63,13 @@ func formatJSONWithSortedKeys(data interface{}) ([]byte, error) {
 			return v, nil
 		}
 	case string:
-		// 如果是字符串，先尝试解析为 JSON
+		// 空字符串返回带引号的空字符串
 		if v == "" {
-			return []byte(v), nil
+			return []byte(`""`), nil
 		}
+		// 非 JSON 字符串作为 JSON 字符串值返回
 		if err := json.Unmarshal([]byte(v), &jsonData); err != nil {
-			// 不是有效的 JSON，直接返回原始数据
-			return []byte(v), nil
+			return json.Marshal(v)
 		}
 	case map[string]interface{}:
 		jsonData = v

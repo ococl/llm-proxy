@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +26,7 @@ type ProxyHandler struct {
 	bodyLogger          port.BodyLogger
 	errorPresenter      *ErrorPresenter
 	systemPromptManager *SystemPromptManager
+	rawRequestDir       string // 原始请求体日志目录
 }
 
 func NewProxyHandler(
@@ -33,6 +36,12 @@ func NewProxyHandler(
 	bodyLogger port.BodyLogger,
 	errorPresenter *ErrorPresenter,
 ) *ProxyHandler {
+	// 获取原始请求体日志目录，默认 ./logs/requests
+	rawRequestDir := "./logs/requests"
+	if cfg := config.Get(); cfg != nil && cfg.Logging.RequestDir != "" {
+		rawRequestDir = cfg.Logging.RequestDir
+	}
+
 	return &ProxyHandler{
 		proxyUseCase:        proxyUseCase,
 		config:              config,
@@ -40,6 +49,7 @@ func NewProxyHandler(
 		bodyLogger:          bodyLogger,
 		errorPresenter:      errorPresenter,
 		systemPromptManager: NewSystemPromptManager(),
+		rawRequestDir:       rawRequestDir,
 	}
 }
 
@@ -104,6 +114,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
+
+	// 【调试用】记录原始请求体到 ./logs/requests 目录
+	h.logRawRequestBody(reqID, bodyBytes)
 
 	h.logger.Debug("请求体读取成功",
 		port.ReqID(reqID),
@@ -640,4 +653,58 @@ func extractForwardHeaders(clientHeaders http.Header) map[string][]string {
 	}
 
 	return headers
+}
+
+// logRawRequestBody 将原始请求体写入 ./logs/requests 目录
+func (h *ProxyHandler) logRawRequestBody(reqID string, body []byte) {
+	if len(body) == 0 {
+		return
+	}
+
+	// 确保目录存在
+	if err := os.MkdirAll(h.rawRequestDir, 0755); err != nil {
+		h.logger.Error("创建原始请求体日志目录失败",
+			port.ReqID(reqID),
+			port.Error(err),
+		)
+		return
+	}
+
+	// 生成文件名：{reqID}_{timestamp}.httpdump
+	timestamp := time.Now().Format("20060102_150405")
+	filename := fmt.Sprintf("%s_%s_%s.httpdump", timestamp, reqID, "raw_request")
+	filePath := filepath.Join(h.rawRequestDir, filename)
+
+	// 尝试将请求体格式化为可读的 JSON
+	var formattedBody []byte
+	var jsonBody interface{}
+	if err := json.Unmarshal(body, &jsonBody); err == nil {
+		// JSON 解析成功，格式化为多行
+		formattedBody, _ = json.MarshalIndent(jsonBody, "", "  ")
+	} else {
+		// JSON 解析失败，使用原始内容
+		formattedBody = body
+	}
+
+	// 构建 HTTP Dump 格式
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("POST /v1/chat/completions HTTP/1.1\r\n"))
+	sb.WriteString(fmt.Sprintf("X-Request-ID: %s\r\n", reqID))
+	sb.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(body)))
+	sb.WriteString(fmt.Sprintf("Content-Type: application/json\r\n"))
+	sb.WriteString("\r\n")
+	sb.Write(formattedBody)
+	sb.WriteString("\n")
+
+	if err := os.WriteFile(filePath, []byte(sb.String()), 0644); err != nil {
+		h.logger.Error("写入原始请求体日志失败",
+			port.ReqID(reqID),
+			port.Error(err),
+		)
+	} else {
+		h.logger.Debug("原始请求体已记录",
+			port.ReqID(reqID),
+			port.Field{Key: "文件路径", Value: filePath},
+		)
+	}
 }
