@@ -16,7 +16,7 @@ import (
 // 通过策略模式消除 executeStreamingWithRetry 和 executeStreamingPassthroughWithRetry 的重复代码。
 type StreamingAdapter interface {
 	// Execute 执行流式处理，返回错误
-	Execute(ctx context.Context, backendReq *entity.Request, backend *entity.Backend, backendModel string, reasoning bool) error
+	Execute(ctx context.Context, backendReq *entity.Request, backend *entity.Backend, backendModel string) error
 
 	// OnSuccess 重试成功后执行的日志记录
 	LogSuccess(reqID, modelName, backendName, backendModel string, attempt int)
@@ -39,7 +39,7 @@ func NewResponseStreamingAdapter(uc *ProxyRequestUseCase, req *entity.Request, h
 }
 
 // Execute 执行流式处理。
-func (a *ResponseStreamingAdapter) Execute(ctx context.Context, backendReq *entity.Request, backend *entity.Backend, backendModel string, reasoning bool) error {
+func (a *ResponseStreamingAdapter) Execute(ctx context.Context, backendReq *entity.Request, backend *entity.Backend, backendModel string) error {
 	reqID := a.req.ID().String()
 	modelName := a.req.Model().String()
 
@@ -113,7 +113,7 @@ func (a *ResponseStreamingAdapter) Execute(ctx context.Context, backendReq *enti
 		return a.handler(resp)
 	}
 
-	return a.uc.backendClient.SendStreaming(ctx, backendReq, backend, backendModel, reasoning, streamHandler)
+	return a.uc.backendClient.SendStreaming(ctx, backendReq, backend, backendModel, streamHandler)
 }
 
 // LogSuccess 记录成功日志。
@@ -150,10 +150,10 @@ func (a *PassthroughStreamingAdapter) maxCaptureBytes() int {
 }
 
 // Execute 执行流式处理。
-func (a *PassthroughStreamingAdapter) Execute(ctx context.Context, backendReq *entity.Request, backend *entity.Backend, backendModel string, reasoning bool) error {
+func (a *PassthroughStreamingAdapter) Execute(ctx context.Context, backendReq *entity.Request, backend *entity.Backend, backendModel string) error {
 	reqID := backendReq.ID().String()
 
-	httpResp, err := a.uc.backendClient.SendStreamingPassthrough(ctx, backendReq, backend, backendModel, reasoning)
+	httpResp, err := a.uc.backendClient.SendStreamingPassthrough(ctx, backendReq, backend, backendModel)
 	if err != nil {
 		return err
 	}
@@ -248,7 +248,7 @@ func (uc *ProxyRequestUseCase) selectBackendForRetry(
 	reqID string,
 	modelName string,
 	attempt int,
-) (*entity.Backend, string, bool, error) {
+) (*entity.Backend, string, error) {
 	backend := uc.loadBalancer.Select(routes)
 	if backend == nil {
 		uc.logger.Error("重试时无可用backend",
@@ -256,18 +256,16 @@ func (uc *ProxyRequestUseCase) selectBackendForRetry(
 			port.Model(modelName),
 			port.Attempt(attempt),
 		)
-		return nil, "", false, domainerror.NewNoBackend()
+		return nil, "", domainerror.NewNoBackend()
 	}
 
 	selectedRoute := findRouteForBackend(routes, backend)
 	backendModel := modelName
-	reasoning := false
 	if selectedRoute != nil {
 		backendModel = selectedRoute.Model
-		reasoning = selectedRoute.Reasoning
 	}
 
-	return backend, backendModel, reasoning, nil
+	return backend, backendModel, nil
 }
 
 // logRetryAttempt 记录重试尝试日志。
@@ -305,7 +303,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetryCommon(
 	modelName := req.Model().String()
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		backend, currentBackendModel, reasoning, err := uc.selectBackendForRetry(ctx, routes, reqID, modelName, attempt)
+		backend, currentBackendModel, err := uc.selectBackendForRetry(ctx, routes, reqID, modelName, attempt)
 		if err != nil {
 			return err
 		}
@@ -325,7 +323,7 @@ func (uc *ProxyRequestUseCase) executeStreamingWithRetryCommon(
 			return domainerror.NewProtocolError("request conversion failed", err)
 		}
 
-		err = adapter.Execute(ctx, backendReq, backend, currentBackendModel, reasoning)
+		err = adapter.Execute(ctx, backendReq, backend, currentBackendModel)
 		if err == nil {
 			if attempt > 0 {
 				adapter.LogSuccess(reqID, modelName, backend.Name(), currentBackendModel, attempt)

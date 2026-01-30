@@ -31,12 +31,11 @@ func (b *Backend) GetProtocol() string {
 }
 
 type ModelRoute struct {
-	Backend   string `yaml:"backend"`
-	Model     string `yaml:"model"`
-	Priority  int    `yaml:"priority"`
-	Enabled   *bool  `yaml:"enabled,omitempty"`
-	Protocol  string `yaml:"protocol,omitempty"`  // "openai" or "anthropic", overrides backend protocol
-	Reasoning *bool  `yaml:"reasoning,omitempty"` // 该模型是否需要处理 reasoning_content 字段
+	Backend  string `yaml:"backend"`
+	Model    string `yaml:"model"`
+	Priority int    `yaml:"priority"`
+	Enabled  *bool  `yaml:"enabled,omitempty"`
+	Protocol string `yaml:"protocol,omitempty"` // "openai" or "anthropic", overrides backend protocol
 }
 
 func (r *ModelRoute) IsEnabled() bool {
@@ -48,10 +47,6 @@ func (r *ModelRoute) GetProtocol(backendProtocol string) string {
 		return r.Protocol
 	}
 	return backendProtocol
-}
-
-func (r *ModelRoute) IsReasoningEnabled() bool {
-	return r.Reasoning != nil && *r.Reasoning
 }
 
 type ModelAlias struct {

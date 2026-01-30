@@ -15,12 +15,11 @@ type BackendRepository interface {
 
 // Route represents a resolved route with backend information.
 type Route struct {
-	Backend   *entity.Backend
-	Model     string
-	Priority  int
-	Protocol  types.Protocol
-	Enabled   bool
-	Reasoning bool // 该模型是否需要处理 reasoning_content 字段
+	Backend  *entity.Backend
+	Model    string
+	Priority int
+	Protocol types.Protocol
+	Enabled  bool
 }
 
 func (r *Route) IsEnabled() bool {
@@ -53,9 +52,8 @@ func (m *ModelAlias) String() string {
 
 // ModelRoute represents a route from a model alias to a backend.
 type ModelRoute struct {
-	Backend   string
-	Model     string
-	Priority  int
-	Enabled   bool
-	Reasoning bool // 该模型是否需要处理 reasoning_content 字段
+	Backend  string
+	Model    string
+	Priority int
+	Enabled  bool
 }

@@ -115,9 +115,9 @@ type ConcurrencyConfig struct {
 }
 
 type BackendClient interface {
-	Send(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, reasoning bool) (*entity.Response, error)
-	SendStreaming(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, reasoning bool, handler func([]byte) error) error
-	SendStreamingPassthrough(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, reasoning bool) (*http.Response, error)
+	Send(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*entity.Response, error)
+	SendStreaming(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, handler func([]byte) error) error
+	SendStreamingPassthrough(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*http.Response, error)
 	GetHTTPClient() *http.Client
 }
 

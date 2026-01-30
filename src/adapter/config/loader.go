@@ -294,11 +294,10 @@ func (a *ConfigAdapter) convertModelAlias(cfg *config.ModelAlias, backends []*en
 		}
 
 		routes = append(routes, port.ModelRoute{
-			Backend:   route.Backend,
-			Model:     route.Model,
-			Priority:  route.Priority,
-			Enabled:   route.IsEnabled(),
-			Reasoning: route.IsReasoningEnabled(),
+			Backend:  route.Backend,
+			Model:    route.Model,
+			Priority: route.Priority,
+			Enabled:  route.IsEnabled(),
 		})
 	}
 

@@ -15,20 +15,20 @@ import (
 
 // MockBackendClient is a mock implementation of port.BackendClient
 type MockBackendClient struct {
-	sendFunc          func(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, reasoning bool) (*entity.Response, error)
-	sendStreamingFunc func(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, reasoning bool, handler func([]byte) error) error
+	sendFunc          func(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*entity.Response, error)
+	sendStreamingFunc func(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, handler func([]byte) error) error
 }
 
-func (m *MockBackendClient) Send(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, reasoning bool) (*entity.Response, error) {
+func (m *MockBackendClient) Send(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*entity.Response, error) {
 	if m.sendFunc != nil {
-		return m.sendFunc(ctx, req, backend, backendModel, reasoning)
+		return m.sendFunc(ctx, req, backend, backendModel)
 	}
 	return nil, nil
 }
 
-func (m *MockBackendClient) SendStreaming(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, reasoning bool, handler func([]byte) error) error {
+func (m *MockBackendClient) SendStreaming(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, handler func([]byte) error) error {
 	if m.sendStreamingFunc != nil {
-		return m.sendStreamingFunc(ctx, req, backend, backendModel, reasoning, handler)
+		return m.sendStreamingFunc(ctx, req, backend, backendModel, handler)
 	}
 	return nil
 }
@@ -37,7 +37,7 @@ func (m *MockBackendClient) GetHTTPClient() *http.Client {
 	return nil
 }
 
-func (m *MockBackendClient) SendStreamingPassthrough(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string, reasoning bool) (*http.Response, error) {
+func (m *MockBackendClient) SendStreamingPassthrough(ctx context.Context, req *entity.Request, backend *entity.Backend, backendModel string) (*http.Response, error) {
 	return nil, nil
 }
 
@@ -428,7 +428,7 @@ func TestProxyRequestUseCase_Execute_Success(t *testing.T) {
 	}
 
 	mockClient := &MockBackendClient{
-		sendFunc: func(ctx context.Context, req *entity.Request, b *entity.Backend, backendModel string, reasoning bool) (*entity.Response, error) {
+		sendFunc: func(ctx context.Context, req *entity.Request, b *entity.Backend, backendModel string) (*entity.Response, error) {
 			resp, _ := entity.NewResponseBuilder().
 				ID("resp-123").
 				Model(backendModel).
