@@ -113,8 +113,11 @@ fallback:
 detection:
   error_codes: ["4xx", "5xx"]
 logging:
-  level: "info"
-  console_level: "info"
+  base_dir: "./logs"
+  categories:
+    general:
+      level: "info"
+      target: "both"
 `
 
 	if err := os.WriteFile(configPath, []byte(initialConfig), 0644); err != nil {
@@ -154,8 +157,11 @@ fallback:
 detection:
   error_codes: ["4xx", "5xx"]
 logging:
-  level: "debug"
-  console_level: "debug"
+  base_dir: "./logs"
+  categories:
+    general:
+      level: "debug"
+      target: "both"
 `
 
 	time.Sleep(100 * time.Millisecond)
@@ -178,8 +184,12 @@ logging:
 	}
 
 	cfg := mgr.Get()
-	if cfg.Logging.Level != "debug" {
-		t.Errorf("Updated logging level = %q, want %q", cfg.Logging.Level, "debug")
+	catCfg, ok := cfg.Logging.GetCategoryConfig("general")
+	if !ok {
+		t.Fatal("general category config not found")
+	}
+	if catCfg.GetLevel() != "debug" {
+		t.Errorf("Updated logging level = %q, want %q", catCfg.GetLevel(), "debug")
 	}
 }
 

@@ -265,23 +265,44 @@ func TestManager_Get(t *testing.T) {
 	}
 }
 
-func TestLogging_GetLevel(t *testing.T) {
-	l := Logging{Level: "debug"}
-	if got := l.GetLevel(); got != "debug" {
-		t.Errorf("Logging.GetLevel() = %q, want %q", got, "debug")
-	}
-}
-
-func TestLogging_GetConsoleLevel(t *testing.T) {
-	l := Logging{ConsoleLevel: "warn"}
-	if got := l.GetConsoleLevel(); got != "warn" {
-		t.Errorf("Logging.GetConsoleLevel() = %q, want %q", got, "warn")
-	}
-}
-
 func TestLogging_GetBaseDir(t *testing.T) {
 	l := Logging{BaseDir: "/var/log/app"}
 	if got := l.GetBaseDir(); got != "/var/log/app" {
 		t.Errorf("Logging.GetBaseDir() = %q, want %q", got, "/var/log/app")
+	}
+}
+
+func TestLogging_GetBaseDir_Default(t *testing.T) {
+	l := Logging{}
+	if got := l.GetBaseDir(); got != "./logs" {
+		t.Errorf("Logging.GetBaseDir() = %q, want %q", got, "./logs")
+	}
+}
+
+func TestCategoryConfig_GetLevel(t *testing.T) {
+	c := CategoryConfig{Level: "debug"}
+	if got := c.GetLevel(); got != "debug" {
+		t.Errorf("CategoryConfig.GetLevel() = %q, want %q", got, "debug")
+	}
+}
+
+func TestCategoryConfig_GetLevel_Default(t *testing.T) {
+	c := CategoryConfig{}
+	if got := c.GetLevel(); got != "info" {
+		t.Errorf("CategoryConfig.GetLevel() = %q, want %q", got, "info")
+	}
+}
+
+func TestCategoryConfig_GetTarget(t *testing.T) {
+	c := CategoryConfig{Target: "file"}
+	if got := c.GetTarget(); got != "file" {
+		t.Errorf("CategoryConfig.GetTarget() = %q, want %q", got, "file")
+	}
+}
+
+func TestCategoryConfig_GetTarget_Default(t *testing.T) {
+	c := CategoryConfig{}
+	if got := c.GetTarget(); got != "both" {
+		t.Errorf("CategoryConfig.GetTarget() = %q, want %q", got, "both")
 	}
 }
