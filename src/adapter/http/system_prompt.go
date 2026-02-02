@@ -90,38 +90,58 @@ func (m *SystemPromptManager) clearCache() {
 
 // LoadSystemPrompts 从文件加载系统提示词配置（带缓存）
 func (m *SystemPromptManager) LoadSystemPrompts() error {
-	// 检查单文件
+	// 检查单文件是否存在以及是否已修改
 	singleFileStat, singleFileErr := os.Stat("system_prompt.md")
-	if singleFileErr == nil && !singleFileStat.ModTime().After(m.lastLoadTime) {
+	singleFileExists := singleFileErr == nil
+	singleFileModified := false
+
+	if singleFileExists {
 		modTime, exists := m.fileModTimes["system_prompt.md"]
-		if exists && modTime.Equal(singleFileStat.ModTime()) {
-			return nil
-		}
-		m.fileModTimes["system_prompt.md"] = singleFileStat.ModTime()
+		// 文件已修改：从未加载过，或修改时间已更新
+		singleFileModified = !exists || !modTime.Equal(singleFileStat.ModTime())
 	}
 
-	// 检查目录
+	// 检查目录是否存在以及是否已修改
 	dirStat, dirErr := os.Stat("system_prompts")
-	if dirErr == nil && dirStat.IsDir() {
-		if !m.directoryModTime.IsZero() && m.directoryModTime.Equal(dirStat.ModTime()) {
-			return nil
-		}
-		m.directoryModTime = dirStat.ModTime()
+	dirExists := dirErr == nil && dirStat.IsDir()
+	dirModified := false
+
+	if dirExists {
+		// 目录已修改：从未加载过，或修改时间已更新
+		dirModified = m.directoryModTime.IsZero() || !m.directoryModTime.Equal(dirStat.ModTime())
 	}
 
+	// 如果文件和目录都未修改，跳过加载
+	if !singleFileModified && !dirModified {
+		return nil
+	}
+
+	// 清除旧的提示词列表，准备重新加载
 	m.prompts = make([]*SystemPromptConfig, 0)
 
-	// 1. 尝试加载单个 system_prompt.md 文件
-	if err := m.loadSingleFile("system_prompt.md"); err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("加载 system_prompt.md 失败: %w", err)
+	// 1. 尝试加载单个 system_prompt.md 文件（仅当文件已修改或首次加载时）
+	if singleFileModified {
+		if err := m.loadSingleFile("system_prompt.md"); err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("加载 system_prompt.md 失败: %w", err)
+			}
+		}
+		// 更新文件修改时间缓存
+		if singleFileExists {
+			m.fileModTimes["system_prompt.md"] = singleFileStat.ModTime()
 		}
 	}
 
-	// 2. 尝试加载 system_prompts/ 目录
-	if err := m.loadDirectory("system_prompts"); err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("加载 system_prompts/ 目录失败: %w", err)
+	// 2. 尝试加载 system_prompts/ 目录（仅当目录已修改或首次加载时）
+	if dirModified {
+		if err := m.loadDirectory("system_prompts"); err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("加载 system_prompts/ 目录失败: %w", err)
+			}
+		}
+		// 更新目录修改时间缓存
+		if dirExists {
+			m.directoryModTime = dirStat.ModTime()
 		}
 	}
 

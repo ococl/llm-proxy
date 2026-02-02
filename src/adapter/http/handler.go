@@ -147,10 +147,31 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		originalReqBody[k] = v
 	}
 
-	if cfg.Proxy.EnableSystemPrompt {
+	if cfg != nil && cfg.Proxy.EnableSystemPrompt {
+		h.logger.Debug("系统提示词注入已启用",
+			port.ReqID(reqID),
+		)
 		h.systemPromptManager.SetCustomVariables(cfg.Proxy.GetCustomVariables())
-		h.systemPromptManager.LoadSystemPrompts()
-		reqBody = h.injectSystemPrompt(reqBody)
+		if err := h.systemPromptManager.LoadSystemPrompts(); err != nil {
+			h.logger.Warn("加载系统提示词失败",
+				port.ReqID(reqID),
+				port.Error(err),
+			)
+		} else {
+			prompts := h.systemPromptManager.GetPrompts()
+			h.logger.Debug("系统提示词加载成功",
+				port.ReqID(reqID),
+				port.Field{Key: "提示词数量", Value: len(prompts)},
+			)
+			if len(prompts) > 0 {
+				reqBody = h.injectSystemPrompt(reqBody)
+			}
+		}
+	} else {
+		h.logger.Debug("系统提示词注入已禁用",
+			port.ReqID(reqID),
+			port.Field{Key: "配置存在", Value: cfg != nil},
+		)
 	}
 
 	req, err := h.buildDomainRequest(ctx, reqID, reqBody, originalReqBody, clientProtocol, r.Header)
@@ -552,7 +573,8 @@ func (h *ProxyHandler) injectSystemPrompt(reqBody map[string]interface{}) map[st
 	}
 
 	for _, promptConfig := range prompts {
-		if promptConfig.Position == "before" {
+		// 支持 "before" 和 "prepend"（两者都表示在原有内容之前注入）
+		if promptConfig.Position == "before" || promptConfig.Position == "prepend" {
 			separator := promptConfig.GetSeparator()
 			if existingSystemContent == "" {
 				existingSystemContent = promptConfig.Content
@@ -563,7 +585,8 @@ func (h *ProxyHandler) injectSystemPrompt(reqBody map[string]interface{}) map[st
 	}
 
 	for _, promptConfig := range prompts {
-		if promptConfig.Position == "after" {
+		// 支持 "after" 和 "append"（两者都表示在原有内容之后注入）
+		if promptConfig.Position == "after" || promptConfig.Position == "append" {
 			separator := promptConfig.GetSeparator()
 			if existingSystemContent == "" {
 				existingSystemContent = promptConfig.Content
@@ -606,6 +629,10 @@ func (h *ProxyHandler) injectSystemPrompt(reqBody map[string]interface{}) map[st
 		newReqBody[k] = v
 	}
 	newReqBody["messages"] = newMessages
+
+	h.logger.Debug("系统提示词注入成功",
+		port.Field{Key: "模型", Value: modelName},
+		port.Field{Key: "注入提示词数量", Value: len(prompts)})
 
 	return newReqBody
 }

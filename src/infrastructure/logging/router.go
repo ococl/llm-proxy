@@ -253,7 +253,7 @@ func (r *MultiTargetRouter) createFileLogger(category LogCategory, cfg *TargetCo
 
 	core := zapcore.NewCore(
 		fileEncoder,
-		&syncWriteSyncer{w: zapcore.AddSync(writer)},
+		&syncWriteSyncer{w: zapcore.AddSync(writer), lb: writer},
 		level,
 	)
 

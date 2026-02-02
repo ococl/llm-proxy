@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"llm-proxy/domain/port"
@@ -29,29 +30,73 @@ var (
 // lumberjack 在进行日志轮转时会尝试重命名文件，如果文件句柄仍被持有会导致错误。
 // 通过包装 WriteSyncer 并在每次写入后调用 Sync()，可以确保文件缓冲被及时刷新。
 func newLumberjackSyncWriter(lb *lumberjack.Logger) zapcore.WriteSyncer {
-	return &syncWriteSyncer{w: zapcore.AddSync(lb)}
+	return &syncWriteSyncer{w: zapcore.AddSync(lb), lb: lb}
 }
 
 // syncWriteSyncer 包装 WriteSyncer，在每次写入后调用 Sync。
 // 用于解决 Windows 上文件被锁定无法重命名的问题。
 type syncWriteSyncer struct {
-	w zapcore.WriteSyncer
+	w  zapcore.WriteSyncer
+	lb *lumberjack.Logger
+	mu sync.Mutex
 }
 
-func (s *syncWriteSyncer) Write(p []byte) (n int, err error) {
-	n, err = s.w.Write(p)
+func (s *syncWriteSyncer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	n, err := s.w.Write(p)
 	if err != nil {
-		return n, err
+		return s.handleWriteError(err, p)
 	}
+
 	// 写入后立即同步，释放文件句柄
-	if err := s.w.Sync(); err != nil {
+	if syncErr := s.w.Sync(); syncErr != nil {
 		// 忽略同步错误，因为文件可能已被关闭或正在轮转
 		return n, nil
 	}
 	return n, nil
 }
 
+// handleWriteError 处理写入错误，特别是 Windows 文件锁定错误
+func (s *syncWriteSyncer) handleWriteError(err error, p []byte) (int, error) {
+	errStr := err.Error()
+	if isFileLockError(errStr) {
+		time.Sleep(100 * time.Millisecond)
+		if s.lb != nil {
+			s.w = zapcore.AddSync(s.lb)
+		}
+		n, retryErr := s.w.Write(p)
+		if retryErr == nil {
+			_ = s.w.Sync()
+			return n, nil
+		}
+		// 重试失败，静默处理，避免日志系统崩溃
+		return 0, nil
+	}
+	return 0, err
+}
+
+// isFileLockError 检查错误是否为文件锁定错误
+func isFileLockError(errStr string) bool {
+	lockErrors := []string{
+		"The process cannot access the file",
+		"file is being used by another process",
+		"Access is denied",
+		"文件正被另一进程使用",
+		"拒绝访问",
+	}
+	for _, pattern := range lockErrors {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *syncWriteSyncer) Sync() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.w.Sync()
 }
 
@@ -582,7 +627,8 @@ func createFileOnlyLogger(cfg *config.Config, name, filePath string) (*zap.Logge
 	}
 
 	fileLevel := parseLevel(cfg.Logging.GetLevel())
-	fileCore := zapcore.NewCore(fileEncoder, zapcore.AddSync(fw), fileLevel)
+	// 使用带 Sync 的 WriteSyncer，解决 Windows 文件锁定问题
+	fileCore := zapcore.NewCore(fileEncoder, newLumberjackSyncWriter(fw), fileLevel)
 
 	var core zapcore.Core
 	if cfg.Logging.ShouldMaskSensitive() {

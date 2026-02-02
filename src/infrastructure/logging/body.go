@@ -173,7 +173,6 @@ const (
 
 // RequestBodyLogger 请求体日志写入器
 type RequestBodyLogger struct {
-	writer   *lumberjack.Logger
 	config   *config.RequestBodyConfig
 	mu       sync.Mutex
 	rootDir  string
@@ -212,16 +211,7 @@ func InitRequestBodyLogger(cfg *config.Config) error {
 		return fmt.Errorf("创建请求体日志目录失败: %w", err)
 	}
 
-	writer := &lumberjack.Logger{
-		Filename:   filepath.Join(baseDir, "request_body.log"),
-		MaxSize:    cfg.Logging.RequestBody.GetMaxSizeMB(),
-		MaxAge:     cfg.Logging.RequestBody.GetMaxAgeDays(),
-		MaxBackups: cfg.Logging.RequestBody.GetMaxBackups(),
-		Compress:   cfg.Logging.RequestBody.ShouldCompress(),
-	}
-
 	bodyLogger = &RequestBodyLogger{
-		writer:  writer,
 		config:  &cfg.Logging.RequestBody,
 		rootDir: rootDir,
 		baseDir: baseDir,
@@ -247,11 +237,9 @@ func ShutdownRequestBodyLogger() error {
 	bodyLoggerMu.Lock()
 	defer bodyLoggerMu.Unlock()
 
-	if bodyLogger != nil && bodyLogger.writer != nil {
-		err := bodyLogger.writer.Close()
+	if bodyLogger != nil {
 		bodyLogger = nil
 		bodyLoggerInit = false
-		return err
 	}
 	return nil
 }
