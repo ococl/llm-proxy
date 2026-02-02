@@ -142,11 +142,8 @@ func NewPassthroughStreamingAdapter(uc *ProxyRequestUseCase, handler func([]byte
 }
 
 func (a *PassthroughStreamingAdapter) maxCaptureBytes() int {
-	cfg := a.uc.config.Get()
-	if cfg == nil {
-		return 0
-	}
-	return cfg.Logging.MaxLogContentSize
+	// 返回 0 表示不限制捕获大小
+	return 0
 }
 
 // Execute 执行流式处理。

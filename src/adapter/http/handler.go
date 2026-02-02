@@ -36,11 +36,13 @@ func NewProxyHandler(
 	bodyLogger port.BodyLogger,
 	errorPresenter *ErrorPresenter,
 ) *ProxyHandler {
-	// 获取原始请求体日志目录，默认 ./logs/requests
-	rawRequestDir := "./logs/requests"
+	// 获取原始请求体日志目录，默认 ./logs/request_body
+	rawRequestDir := "./logs/request_body"
 	if config != nil {
-		if cfg := config.Get(); cfg != nil && cfg.Logging.RequestDir != "" {
-			rawRequestDir = cfg.Logging.RequestDir
+		if cfg := config.Get(); cfg != nil {
+			if catCfg, ok := cfg.Logging.Categories["request_body"]; ok && catCfg.Path != "" {
+				rawRequestDir = filepath.Join(cfg.Logging.GetBaseDir(), catCfg.Path)
+			}
 		}
 	}
 

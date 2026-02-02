@@ -214,25 +214,22 @@ func (a *ConfigAdapter) convertConfig(cfg *config.Config) *port.Config {
 			},
 		},
 		Logging: port.LoggingConfig{
-			Level:             cfg.Logging.GetLevel(),
-			ConsoleLevel:      cfg.Logging.GetConsoleLevel(),
-			BaseDir:           cfg.Logging.GetBaseDir(),
-			EnableMetrics:     cfg.Logging.EnableMetrics,
-			MaxFileSizeMB:     cfg.Logging.GetMaxFileSizeMB(),
-			MaxAgeDays:        cfg.Logging.GetMaxAgeDays(),
-			MaxBackups:        cfg.Logging.GetMaxBackups(),
-			Format:            cfg.Logging.GetFormat(),
-			Colorize:          cfg.Logging.GetColorize(),
-			ConsoleFormat:     cfg.Logging.GetConsoleFormat(),
-			DebugMode:         cfg.Logging.DebugMode,
-			SeparateFiles:     cfg.Logging.SeparateFiles,
-			RequestDir:        cfg.Logging.RequestDir,
-			ErrorDir:          cfg.Logging.ErrorDir,
-			MaskSensitive:     cfg.Logging.ShouldMaskSensitive(),
-			BufferSize:        cfg.Logging.GetBufferSize(),
-			FlushInterval:     cfg.Logging.GetFlushInterval(),
-			DropOnFull:        cfg.Logging.ShouldDropOnFull(),
-			MaxLogContentSize: cfg.Logging.GetMaxLogContentSize(),
+			BaseDir:       cfg.Logging.GetBaseDir(),
+			MaskSensitive: cfg.Logging.MaskSensitive,
+			Async: port.AsyncConfig{
+				Enabled:              cfg.Logging.Async.Enabled,
+				BufferSize:           cfg.Logging.GetAsyncBufferSize(),
+				FlushIntervalSeconds: cfg.Logging.GetAsyncFlushInterval(),
+				DropOnFull:           cfg.Logging.ShouldDropOnFull(),
+			},
+			Rotation: port.RotationConfig{
+				MaxSizeMB:    cfg.Logging.GetRotationMaxSizeMB(),
+				TimeStrategy: cfg.Logging.GetRotationTimeStrategy(),
+				MaxAgeDays:   cfg.Logging.GetRotationMaxAgeDays(),
+				MaxBackups:   cfg.Logging.GetRotationMaxBackups(),
+				Compress:     cfg.Logging.ShouldRotateCompress(),
+			},
+			Categories: convertCategories(cfg.Logging.Categories),
 		},
 		Timeout: port.TimeoutConfig{
 			ConnectTimeout: cfg.Timeout.ConnectTimeout,
@@ -305,6 +302,23 @@ func (a *ConfigAdapter) convertModelAlias(cfg *config.ModelAlias, backends []*en
 		Enabled: cfg.IsEnabled(),
 		Routes:  routes,
 	}
+}
+
+// convertCategories converts config.CategoryConfig map to port.CategoryConfig map.
+func convertCategories(categories map[string]config.CategoryConfig) map[string]port.CategoryConfig {
+	result := make(map[string]port.CategoryConfig, len(categories))
+	for name, cfg := range categories {
+		result[name] = port.CategoryConfig{
+			Level:       cfg.Level,
+			Target:      cfg.Target,
+			Path:        cfg.Path,
+			MaxSizeMB:   cfg.MaxSizeMB,
+			MaxAgeDays:  cfg.MaxAgeDays,
+			Compress:    cfg.Compress,
+			IncludeBody: cfg.IncludeBody,
+		}
+	}
+	return result
 }
 
 // Ensure ConfigAdapter implements port.ConfigProvider interface.
