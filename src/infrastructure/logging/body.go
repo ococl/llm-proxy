@@ -15,8 +15,6 @@ import (
 
 	"llm-proxy/domain/port"
 	"llm-proxy/infrastructure/config"
-
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // sortJSONKeys 递归排序 JSON 对象的所有 key（升序）
