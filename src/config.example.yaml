@@ -171,125 +171,63 @@ error_fallback:
       - "upstream_no_eligible_accounts"
       - "invalid chat setting"
 
-# 日志配置
+# 日志配置（精简版）
 logging:
-  # 基础配置（向后兼容）
-  level: "info"                      # 文件日志级别: debug/info/warn/error
-  console_level: "info"              # 控制台日志级别（默认继承level）
+  # 基础目录
+  base_dir: "./logs"
   
-  base_dir: "./logs"                 # 日志根目录
-  max_file_size_mb: 100              # 单个文件最大100MB
-  max_age_days: 7                    # 日志保留7天后删除
-  max_backups: 21                    # 最多保留21个备份
-  compress: true                     # 压缩旧日志为.gz
-  format: "json"                     # json格式（机器可读）
-  colorize: true                     # 启用控制台着色
-  console_style: "compact"           # 输出风格: compact/verbose
-  console_format: "markdown"         # 控制台输出格式: markdown/plain
-  debug_mode: true                   # true时输出llm_debug日志
-  async: true                        # 异步写入
-  buffer_size: 10000                 # 缓冲区大小
-  flush_interval: 5                  # 5秒自动刷新
-  drop_on_full: false                # 缓冲区满时丢弃日志
-  rotate_by_size: true               # 按大小轮转
-  rotate_by_time: false              # 按时间轮转
-  time_rotation: "daily"             # 时间轮转策略: daily/hourly
-  mask_sensitive: true               # 脱敏API Key、Token
-  detailed_masking: false            # 详细脱敏（包括邮箱、IP等）
+  # 脱敏配置
+  mask_sensitive: true
   
-  # 独立日志目录
-  request_dir: "./logs/requests"
-  error_dir: "./logs/errors"
-  separate_files: false
+  # 异步写入配置
+  async:
+    enabled: true
+    buffer_size: 10000
+    flush_interval_seconds: 5
+    drop_on_full: false
   
-  # 新增：启用多目标日志系统（推荐使用新的配置方式）
-  enable_multi_target: true          # 启用多目标日志
+  # 日志轮转配置（支持按大小和按时间）
+  rotation:
+    max_size_mb: 100          # 按大小轮转：单个文件最大100MB
+    time_strategy: "daily"    # 按时间轮转策略: daily/hourly/none
+    max_age_days: 7           # 保留天数
+    max_backups: 21           # 最大备份数
+    compress: true            # 压缩旧日志
   
-  # 控制台输出配置
-  console:
-    enabled: true                    # 启用控制台输出
-    level: "info"                    # 控制台日志级别
-    style: "compact"                 # compact/verbose
-    format: "markdown"               # markdown/plain
-    colorize: true                   # 启用颜色
-    
-  # 文件输出配置
-  file:
-    enabled: true                    # 启用文件输出
-    level: "debug"                   # 文件日志级别
-    base_dir: "./logs"               # 日志根目录
-    max_size_mb: 100                 # 单个文件最大100MB
-    max_age_days: 7                  # 日志保留天数
-    max_backups: 10                  # 最多保留备份数
-    compress: true                   # 压缩旧日志
-    format: "json"                   # json/text
-    
-  # 分类日志配置（各分类独立配置输出目标和级别）
+  # 日志分类配置（level: debug/info/warn/error/none）
   categories:
-    # 普通日志：同时输出到控制台和文件
     general:
-      target: "both"                 # 输出目标: console/file/both/none
-      levels:
-        console: "info"              # 控制台显示 info 及以上
-        file: "debug"                # 文件记录 debug 及以上
-      path: "general.log"
+      level: "info"           # 日志级别
+      target: "both"          # 输出目标: console/file/both/none
+      path: "general.log"     # 文件路径（相对于 base_dir）
       
-    # 请求日志：仅输出到文件（详细请求/响应数据）
     request:
+      level: "info"
       target: "file"
-      levels:
-        console: "warn"              # 请求日志不在控制台显示，除非是警告
-        file: "debug"
       path: "requests/requests.log"
-      max_size: 200                  # 请求日志文件更大
-      max_age: 14                    # 保留更长时间
-      compress: true
+      max_size_mb: 200        # 可覆盖全局轮转配置
+      max_age_days: 14
       
-    # 错误日志：同时输出到控制台和文件
     error:
+      level: "error"
       target: "both"
-      levels:
-        console: "error"
-        file: "error"
       path: "errors/errors.log"
-      max_size: 100
-      max_age: 30                    # 错误日志保留更久
-      compress: true
+      max_age_days: 30
       
-    # 网络日志：仅输出到文件
     network:
+      level: "debug"
       target: "file"
-      levels:
-        console: "info"
-        file: "debug"
       path: "network/network.log"
       
-    # 调试日志：仅输出到文件
     debug:
+      level: "debug"
       target: "file"
-      levels:
-        console: "debug"
-        file: "debug"
       path: "debug/debug.log"
       
-    # 请求体日志：完整的 HTTP 请求/响应体（仅文件输出）
     request_body:
+      level: "debug"
       target: "file"
-      levels:
-        console: "none"              # 请求体日志不输出到控制台
-        file: "debug"
       path: "request_body/{date}/{time}_{req_id}_{type}.httpdump"
-      max_size: 200                  # 单文件最大200MB
-      max_age: 14                    # 保留14天
-      max_backups: 10                # 最多10个备份
-      compress: true                 # 压缩旧文件
-      
-  # 请求体日志专用配置（独立于多目标日志系统）
-  request_body:
-    enabled: true                    # 启用请求体日志
-    base_dir: "./logs/request_body"  # 请求体日志基础目录
-    max_size_mb: 200                 # 单文件最大200MB
-    max_age_days: 14                 # 保留14天
-    max_backups: 10                  # 最多10个备份
-    compress: true                   # 压缩旧文件
-    include_body: true               # 包含请求/响应体内容
+      max_size_mb: 200
+      max_age_days: 14
+      include_body: true      # 是否包含请求/响应体内容

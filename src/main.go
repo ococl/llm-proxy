@@ -63,12 +63,7 @@ func main() {
 
 	cfg := configMgr.Get()
 
-	if *disableColor {
-		falseValue := false
-		cfg.Logging.Colorize = &falseValue
-	}
-
-	if err := infra_logging.InitLogger(cfg); err != nil {
+	if err := infra_logging.Init(cfg); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
 
@@ -115,7 +110,11 @@ func main() {
 		for {
 			select {
 			case <-cleanupTicker.C:
-				if err := infra_logging.CleanupOldLogs(); err != nil {
+				maxAgeDays := 14
+				if catCfg, ok := cfg.Logging.Categories["request_body"]; ok {
+					maxAgeDays = catCfg.MaxAgeDays
+				}
+				if err := infra_logging.CleanupOldLogs(maxAgeDays); err != nil {
 					infra_logging.GeneralSugar.Errorw("清理请求体日志失败", "error", err)
 				}
 			case <-shutdownBodyLogCleanup:
@@ -353,10 +352,6 @@ func printBanner(version, listen string, backends, models int) {
 }
 
 func shouldUseColor() bool {
-	cfg := infra_logging.GetLoggingConfig()
-	if cfg != nil && cfg.Colorize != nil && !*cfg.Colorize {
-		return false
-	}
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
 }
 
