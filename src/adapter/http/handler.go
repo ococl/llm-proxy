@@ -38,8 +38,10 @@ func NewProxyHandler(
 ) *ProxyHandler {
 	// 获取原始请求体日志目录，默认 ./logs/requests
 	rawRequestDir := "./logs/requests"
-	if cfg := config.Get(); cfg != nil && cfg.Logging.RequestDir != "" {
-		rawRequestDir = cfg.Logging.RequestDir
+	if config != nil {
+		if cfg := config.Get(); cfg != nil && cfg.Logging.RequestDir != "" {
+			rawRequestDir = cfg.Logging.RequestDir
+		}
 	}
 
 	return &ProxyHandler{

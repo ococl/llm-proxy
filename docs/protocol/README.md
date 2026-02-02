@@ -116,7 +116,6 @@ docs/protocol/
 
 **包含内容**:
 - OpenAI 兼容的请求/响应格式
-- 特有的 thinking mode 和 reasoning_content 扩展
 - 提示词缓存统计 (prompt_tokens_details)
 - 流式响应选项配置
 
