@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
-	"strings"
-	"time"
 
-	"go.uber.org/zap"
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
 )
