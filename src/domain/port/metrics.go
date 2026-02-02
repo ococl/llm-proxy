@@ -70,25 +70,57 @@ type ClientErrorConfig struct {
 }
 
 type LoggingConfig struct {
-	Level             string
-	ConsoleLevel      string
-	BaseDir           string
-	EnableMetrics     bool
-	MaxFileSizeMB     int
-	MaxAgeDays        int
-	MaxBackups        int
-	Format            string
-	Colorize          bool
-	ConsoleFormat     string
-	DebugMode         bool
-	SeparateFiles     bool
-	RequestDir        string
-	ErrorDir          string
-	MaskSensitive     bool
-	BufferSize        int
-	FlushInterval     int
-	DropOnFull        bool
-	MaxLogContentSize int
+	BaseDir       string
+	MaskSensitive bool
+	Async         AsyncConfig
+	Rotation      RotationConfig
+	Categories    map[string]CategoryConfig
+}
+
+func (l *LoggingConfig) GetBaseDir() string {
+	if l.BaseDir == "" {
+		return "./logs"
+	}
+	return l.BaseDir
+}
+
+type AsyncConfig struct {
+	Enabled              bool
+	BufferSize           int
+	FlushIntervalSeconds int
+	DropOnFull           bool
+}
+
+type RotationConfig struct {
+	MaxSizeMB    int
+	TimeStrategy string
+	MaxAgeDays   int
+	MaxBackups   int
+	Compress     bool
+}
+
+type CategoryConfig struct {
+	Level       string
+	Target      string
+	Path        string
+	MaxSizeMB   int
+	MaxAgeDays  int
+	Compress    bool
+	IncludeBody *bool
+}
+
+func (c *CategoryConfig) GetLevel() string {
+	if c.Level == "" {
+		return "info"
+	}
+	return c.Level
+}
+
+func (c *CategoryConfig) GetTarget() string {
+	if c.Target == "" {
+		return "both"
+	}
+	return c.Target
 }
 
 type TimeoutConfig struct {

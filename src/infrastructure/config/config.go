@@ -161,151 +161,44 @@ type ClientErrorConfig struct {
 	Patterns []string `yaml:"patterns"`
 }
 
+// Logging 精简版日志配置
 type Logging struct {
-	Level             string `yaml:"level"`
-	ConsoleLevel      string `yaml:"console_level"`
-	BaseDir           string `yaml:"base_dir"`
-	RequestDir        string `yaml:"request_dir"`
-	ErrorDir          string `yaml:"error_dir"`
-	GeneralFile       string `yaml:"general_file"`
-	SeparateFiles     bool   `yaml:"separate_files"`
-	MaskSensitive     *bool  `yaml:"mask_sensitive,omitempty"`
-	EnableMetrics     bool   `yaml:"enable_metrics"`
-	MaxFileSizeMB     int    `yaml:"max_file_size_mb"`
-	MaxAgeDays        int    `yaml:"max_age_days,omitempty"`
-	MaxBackups        int    `yaml:"max_backups,omitempty"`
-	Compress          bool   `yaml:"compress,omitempty"`
-	Format            string `yaml:"format,omitempty"`
-	Colorize          *bool  `yaml:"colorize,omitempty"`
-	ConsoleStyle      string `yaml:"console_style,omitempty"`
-	ConsoleFormat     string `yaml:"console_format,omitempty"`
-	DebugMode         bool   `yaml:"debug_mode,omitempty"`
-	Async             bool   `yaml:"async"`
-	BufferSize        int    `yaml:"buffer_size"`
-	FlushInterval     int    `yaml:"flush_interval,omitempty"`
-	DropOnFull        bool   `yaml:"drop_on_full"`
-	RotateBySize      bool   `yaml:"rotate_by_size,omitempty"`
-	RotateByTime      bool   `yaml:"rotate_by_time,omitempty"`
-	TimeRotation      string `yaml:"time_rotation,omitempty"`
-	DetailedMasking   *bool  `yaml:"detailed_masking,omitempty"`
-	MaxLogContentSize int    `yaml:"max_log_content_size,omitempty"` // 最大日志内容大小(字节),0表示不限制
-
-	// 新增：多目标日志配置
-	EnableMultiTarget bool                      `yaml:"enable_multi_target"` // 启用多目标日志
-	Console           ConsoleConfig             `yaml:"console"`             // 控制台配置
-	File              FileConfig                `yaml:"file"`                // 文件配置
-	Categories        map[string]CategoryConfig `yaml:"categories"`          // 分类配置
-	RequestBody       RequestBodyConfig         `yaml:"request_body"`        // 请求体日志配置
+	BaseDir       string                    `yaml:"base_dir"`
+	MaskSensitive bool                      `yaml:"mask_sensitive"`
+	Async         AsyncConfig               `yaml:"async"`
+	Rotation      RotationConfig            `yaml:"rotation"`
+	Categories    map[string]CategoryConfig `yaml:"categories"`
 }
 
-// ConsoleConfig 控制台输出配置
-type ConsoleConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	Level    string `yaml:"level"`
-	Style    string `yaml:"style"`  // compact/verbose
-	Format   string `yaml:"format"` // markdown/plain
-	Colorize bool   `yaml:"colorize"`
+// AsyncConfig 异步日志配置
+type AsyncConfig struct {
+	Enabled              bool `yaml:"enabled"`
+	BufferSize           int  `yaml:"buffer_size"`
+	FlushIntervalSeconds int  `yaml:"flush_interval_seconds"`
+	DropOnFull           bool `yaml:"drop_on_full"`
 }
 
-// FileConfig 文件输出配置
-type FileConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	Level      string `yaml:"level"`
-	BaseDir    string `yaml:"base_dir"`
-	MaxSizeMB  int    `yaml:"max_size_mb"`
-	MaxAgeDays int    `yaml:"max_age_days"`
-	MaxBackups int    `yaml:"max_backups"`
-	Compress   bool   `yaml:"compress"`
-	Format     string `yaml:"format"` // json/text
+// RotationConfig 日志轮转配置
+type RotationConfig struct {
+	MaxSizeMB    int    `yaml:"max_size_mb"`
+	TimeStrategy string `yaml:"time_strategy"` // daily/hourly/none
+	MaxAgeDays   int    `yaml:"max_age_days"`
+	MaxBackups   int    `yaml:"max_backups"`
+	Compress     bool   `yaml:"compress"`
 }
 
 // CategoryConfig 分类日志配置
 type CategoryConfig struct {
-	Target   string       `yaml:"target"`   // 输出目标: console/file/both/none
-	Levels   LogLevelInfo `yaml:"levels"`   // 日志级别配置
-	Path     string       `yaml:"path"`     // 文件路径
-	MaxSize  int          `yaml:"max_size"` // 最大文件大小(MB)
-	MaxAge   int          `yaml:"max_age"`  // 最大保留天数
-	Compress bool         `yaml:"compress"` // 是否压缩
+	Level       string `yaml:"level"`       // debug/info/warn/error/none
+	Target      string `yaml:"target"`      // console/file/both/none
+	Path        string `yaml:"path"`        // 文件路径
+	MaxSizeMB   int    `yaml:"max_size_mb"` // 覆盖全局配置
+	MaxAgeDays  int    `yaml:"max_age_days"`
+	Compress    bool   `yaml:"compress"`
+	IncludeBody *bool  `yaml:"include_body,omitempty"` // 仅 request_body 使用
 }
 
-// RequestBodyConfig 请求体日志专用配置
-type RequestBodyConfig struct {
-	Enabled     bool   `yaml:"enabled"`      // 是否启用请求体日志
-	BaseDir     string `yaml:"base_dir"`     // 基础目录
-	MaxSizeMB   int    `yaml:"max_size_mb"`  // 单文件最大大小(MB)
-	MaxAgeDays  int    `yaml:"max_age_days"` // 保留天数
-	MaxBackups  int    `yaml:"max_backups"`  // 备份数量
-	Compress    bool   `yaml:"compress"`     // 是否压缩
-	IncludeBody *bool  `yaml:"include_body"`
-}
-
-// LogLevelInfo 日志级别信息
-type LogLevelInfo struct {
-	Console string `yaml:"console"` // 控制台日志级别
-	File    string `yaml:"file"`    // 文件日志级别
-}
-
-func (l *Logging) ShouldMaskSensitive() bool {
-	return l.MaskSensitive == nil || *l.MaskSensitive
-}
-
-func (l *Logging) GetBufferSize() int {
-	if l.BufferSize <= 0 {
-		return 10000
-	}
-	return l.BufferSize
-}
-
-func (l *Logging) GetConsoleFormat() string {
-	if l.ConsoleFormat == "" {
-		return "markdown"
-	}
-	return l.ConsoleFormat
-}
-
-func (l *Logging) GetFormat() string {
-	if l.Format == "" {
-		return "json"
-	}
-	return l.Format
-}
-
-func (l *Logging) ShouldDropOnFull() bool {
-	return l.DropOnFull
-}
-
-func (l *Logging) GetFlushInterval() int {
-	if l.FlushInterval <= 0 {
-		return 5
-	}
-	return l.FlushInterval
-}
-
-func (l *Logging) GetMaxFileSizeMB() int {
-	if l.MaxFileSizeMB <= 0 {
-		return 100
-	}
-	return l.MaxFileSizeMB
-}
-
-func (l *Logging) GetMaxAgeDays() int {
-	if l.MaxAgeDays <= 0 {
-		return 7
-	}
-	return l.MaxAgeDays
-}
-
-func (l *Logging) GetMaxBackups() int {
-	if l.MaxBackups <= 0 {
-		return 10
-	}
-	return l.MaxBackups
-}
-
-func (l *Logging) ShouldUseDetailedMasking() bool {
-	return l.DetailedMasking != nil && *l.DetailedMasking
-}
+// Logging 配置 getter 方法
 
 func (l *Logging) GetBaseDir() string {
 	if l.BaseDir == "" {
@@ -314,91 +207,105 @@ func (l *Logging) GetBaseDir() string {
 	return l.BaseDir
 }
 
-func (l *Logging) GetLevel() string {
-	if l.Level == "" {
+func (l *Logging) IsAsyncEnabled() bool {
+	return l.Async.Enabled
+}
+
+func (l *Logging) GetAsyncBufferSize() int {
+	if l.Async.BufferSize <= 0 {
+		return 10000
+	}
+	return l.Async.BufferSize
+}
+
+func (l *Logging) GetAsyncFlushInterval() int {
+	if l.Async.FlushIntervalSeconds <= 0 {
+		return 5
+	}
+	return l.Async.FlushIntervalSeconds
+}
+
+func (l *Logging) ShouldDropOnFull() bool {
+	return l.Async.DropOnFull
+}
+
+func (l *Logging) GetRotationMaxSizeMB() int {
+	if l.Rotation.MaxSizeMB <= 0 {
+		return 100
+	}
+	return l.Rotation.MaxSizeMB
+}
+
+func (l *Logging) GetRotationTimeStrategy() string {
+	if l.Rotation.TimeStrategy == "" {
+		return "daily"
+	}
+	return l.Rotation.TimeStrategy
+}
+
+func (l *Logging) GetRotationMaxAgeDays() int {
+	if l.Rotation.MaxAgeDays <= 0 {
+		return 7
+	}
+	return l.Rotation.MaxAgeDays
+}
+
+func (l *Logging) GetRotationMaxBackups() int {
+	if l.Rotation.MaxBackups <= 0 {
+		return 21
+	}
+	return l.Rotation.MaxBackups
+}
+
+func (l *Logging) ShouldRotateCompress() bool {
+	return l.Rotation.Compress
+}
+
+func (l *Logging) GetCategoryConfig(name string) (CategoryConfig, bool) {
+	cfg, ok := l.Categories[name]
+	return cfg, ok
+}
+
+// CategoryConfig 辅助方法
+
+func (c *CategoryConfig) GetLevel() string {
+	if c.Level == "" {
 		return "info"
 	}
-	return l.Level
+	return c.Level
 }
 
-func (l *Logging) GetConsoleLevel() string {
-	if l.ConsoleLevel == "" {
-		return l.GetLevel()
+func (c *CategoryConfig) GetTarget() string {
+	if c.Target == "" {
+		return "both"
 	}
-	return l.ConsoleLevel
+	return c.Target
 }
 
-func (l *Logging) GetColorize() bool {
-	return l.Colorize == nil || *l.Colorize
-}
-
-func (l *Logging) GetConsoleStyle() string {
-	if l.ConsoleStyle == "" {
-		return "compact"
+func (c *CategoryConfig) GetMaxSizeMB(defaultValue int) int {
+	if c.MaxSizeMB <= 0 {
+		return defaultValue
 	}
-	return l.ConsoleStyle
+	return c.MaxSizeMB
 }
 
-func (l *Logging) GetMaxLogContentSize() int {
-	if l.MaxLogContentSize <= 0 {
-		return 0
+func (c *CategoryConfig) GetMaxAgeDays(defaultValue int) int {
+	if c.MaxAgeDays <= 0 {
+		return defaultValue
 	}
-	return l.MaxLogContentSize
+	return c.MaxAgeDays
 }
 
-// RequestBodyConfig Getter 方法
-func (r *RequestBodyConfig) IsEnabled() bool {
-	// 如果所有配置字段都是零值（配置文件中未定义request_body段），则默认启用
-	isEmptyConfig := r.BaseDir == "" &&
-		r.MaxSizeMB == 0 &&
-		r.MaxAgeDays == 0 &&
-		r.MaxBackups == 0 &&
-		!r.Compress &&
-		r.IncludeBody == nil
-
-	if isEmptyConfig {
-		return true
+func (c *CategoryConfig) ShouldCompress(defaultValue bool) bool {
+	// 零值表示使用默认值
+	if !c.Compress && defaultValue {
+		return defaultValue
 	}
-	return r.Enabled
+	return c.Compress
 }
 
-func (r *RequestBodyConfig) GetBaseDir() string {
-	if r.BaseDir == "" {
-		return "./logs/request_body"
-	}
-	return r.BaseDir
-}
-
-func (r *RequestBodyConfig) GetMaxSizeMB() int {
-	if r.MaxSizeMB <= 0 {
-		return 200
-	}
-	return r.MaxSizeMB
-}
-
-func (r *RequestBodyConfig) GetMaxAgeDays() int {
-	if r.MaxAgeDays <= 0 {
-		return 14
-	}
-	return r.MaxAgeDays
-}
-
-func (r *RequestBodyConfig) GetMaxBackups() int {
-	if r.MaxBackups <= 0 {
-		return 10
-	}
-	return r.MaxBackups
-}
-
-func (r *RequestBodyConfig) ShouldCompress() bool {
-	return r.Compress
-}
-
-func (r *RequestBodyConfig) ShouldIncludeBody() bool {
-	if !r.IsEnabled() {
-		return false
-	}
-	return r.IncludeBody == nil || *r.IncludeBody
+func (c *CategoryConfig) ShouldIncludeBody() bool {
+	return c.IncludeBody == nil || *c.IncludeBody
 }
 
 type Config struct {
@@ -694,32 +601,26 @@ func (cm *Manager) StopWatch() {
 }
 
 func loggingConfigChanged(old, new *Logging) bool {
-	if old.Level != new.Level || old.ConsoleLevel != new.ConsoleLevel {
+	if old.BaseDir != new.BaseDir {
 		return true
 	}
-	if old.DebugMode != new.DebugMode {
+	if old.MaskSensitive != new.MaskSensitive {
 		return true
 	}
-	if old.GetColorize() != new.GetColorize() {
+	if old.Async != new.Async {
 		return true
 	}
-	if old.ConsoleStyle != new.ConsoleStyle || old.ConsoleFormat != new.ConsoleFormat {
+	if old.Rotation != new.Rotation {
 		return true
 	}
-	if old.Format != new.Format || old.BaseDir != new.BaseDir {
+	if len(old.Categories) != len(new.Categories) {
 		return true
 	}
-	if old.ShouldMaskSensitive() != new.ShouldMaskSensitive() {
-		return true
-	}
-	if old.ShouldUseDetailedMasking() != new.ShouldUseDetailedMasking() {
-		return true
-	}
-	if old.MaxFileSizeMB != new.MaxFileSizeMB || old.MaxAgeDays != new.MaxAgeDays {
-		return true
-	}
-	if old.MaxBackups != new.MaxBackups || old.Compress != new.Compress {
-		return true
+	for name, oldCfg := range old.Categories {
+		newCfg, ok := new.Categories[name]
+		if !ok || oldCfg != newCfg {
+			return true
+		}
 	}
 	return false
 }
