@@ -21,8 +21,11 @@ var (
 func TestInitRequestBodyLogger_Disabled(t *testing.T) {
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled: false,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level: "none",
+					Path:  "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+				},
 			},
 		},
 	}
@@ -119,14 +122,13 @@ func TestWriteFromMap_FileCreation(t *testing.T) {
 
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxSizeMB:   100,
-				MaxAgeDays:  14,
-				MaxBackups:  5,
-				Compress:    true,
-				IncludeBody: &trueValue,
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					IncludeBody: &trueValue,
+				},
 			},
 		},
 	}
@@ -178,14 +180,13 @@ func TestWriteResponseFromMap_FileCreation(t *testing.T) {
 
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxSizeMB:   100,
-				MaxAgeDays:  14,
-				MaxBackups:  5,
-				Compress:    true,
-				IncludeBody: &trueValue,
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					IncludeBody: &trueValue,
+				},
 			},
 		},
 	}
@@ -264,14 +265,13 @@ func TestWriteFromMap_WithoutBody(t *testing.T) {
 
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxSizeMB:   100,
-				MaxAgeDays:  14,
-				MaxBackups:  5,
-				Compress:    true,
-				IncludeBody: &trueValue,
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					IncludeBody: &trueValue,
+				},
 			},
 		},
 	}
@@ -306,14 +306,13 @@ func TestWriteFromMap_IncludeBodyDisabled(t *testing.T) {
 
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxSizeMB:   100,
-				MaxAgeDays:  14,
-				MaxBackups:  5,
-				Compress:    true,
-				IncludeBody: &falseValue, // 禁用请求体记录
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					IncludeBody: &falseValue, // 禁用请求体记录
+				},
 			},
 		},
 	}
@@ -369,14 +368,13 @@ func TestWrite_Integration(t *testing.T) {
 
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxSizeMB:   100,
-				MaxAgeDays:  14,
-				MaxBackups:  5,
-				Compress:    true,
-				IncludeBody: &trueValue,
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					IncludeBody: &trueValue,
+				},
 			},
 		},
 	}
@@ -442,14 +440,13 @@ func TestWriteResponse_Integration(t *testing.T) {
 
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxSizeMB:   100,
-				MaxAgeDays:  14,
-				MaxBackups:  5,
-				Compress:    true,
-				IncludeBody: &trueValue,
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					IncludeBody: &trueValue,
+				},
 			},
 		},
 	}
@@ -522,10 +519,31 @@ func containsSubstring(s, substr string) bool {
 func TestCleanupOldLogs(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// 创建测试目录结构
-	// 创建一个非常旧的目录（2024年）和一个很新的目录（今天）
-	oldDateDir := filepath.Join(tempDir, "2024-01-01")
-	newDateDir := filepath.Join(tempDir, time.Now().Format("2006-01-02"))
+	// MaxAgeDays=1 只保留今天创建的目录
+	cfg := &config.Config{
+		Logging: config.Logging{
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					MaxAgeDays:  1, // 保留 1 天内
+					IncludeBody: &trueValue,
+				},
+			},
+		},
+	}
+
+	InitRequestBodyLogger(cfg)
+	defer ShutdownRequestBodyLogger()
+
+	logger := GetRequestBodyLogger()
+	if logger == nil {
+		t.Fatal("日志器不应为 nil")
+	}
+
+	oldDateDir := filepath.Join(logger.rootDir, "2024-01-01")
+	newDateDir := filepath.Join(logger.rootDir, time.Now().Format("2006-01-02"))
 
 	if err := os.MkdirAll(oldDateDir, 0755); err != nil {
 		t.Fatalf("创建旧日期目录失败: %v", err)
@@ -534,7 +552,6 @@ func TestCleanupOldLogs(t *testing.T) {
 		t.Fatalf("创建新日期目录失败: %v", err)
 	}
 
-	// 创建测试文件
 	if err := os.WriteFile(filepath.Join(oldDateDir, "test.httpdump"), []byte("old"), 0644); err != nil {
 		t.Fatalf("创建旧测试文件失败: %v", err)
 	}
@@ -542,24 +559,7 @@ func TestCleanupOldLogs(t *testing.T) {
 		t.Fatalf("创建新测试文件失败: %v", err)
 	}
 
-	// MaxAgeDays=1 只保留今天创建的目录
-	// 2024-01-01 应该被删除，2025-01-24 应该保留
-	cfg := &config.Config{
-		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxAgeDays:  1, // 保留 1 天内
-				IncludeBody: &trueValue,
-			},
-		},
-	}
-
-	InitRequestBodyLogger(cfg)
-	defer ShutdownRequestBodyLogger()
-
-	// 执行清理
-	err := CleanupOldLogs()
+	err := CleanupOldLogs(1)
 	if err != nil {
 		t.Fatalf("清理日志失败: %v", err)
 	}
@@ -587,11 +587,14 @@ func TestCleanupOldLogs_NoOldDirs(t *testing.T) {
 
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxAgeDays:  14,
-				IncludeBody: &trueValue,
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					MaxAgeDays:  14,
+					IncludeBody: &trueValue,
+				},
 			},
 		},
 	}
@@ -600,7 +603,7 @@ func TestCleanupOldLogs_NoOldDirs(t *testing.T) {
 	defer ShutdownRequestBodyLogger()
 
 	// 应该不报错
-	err := CleanupOldLogs()
+	err := CleanupOldLogs(14)
 	if err != nil {
 		t.Fatalf("清理日志失败: %v", err)
 	}
@@ -622,11 +625,14 @@ func TestGetRequestBodyLoggerInfo(t *testing.T) {
 	// 初始化后
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     t.TempDir(),
-				MaxAgeDays:  14,
-				IncludeBody: &trueValue,
+			BaseDir: t.TempDir(),
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					MaxAgeDays:  14,
+					IncludeBody: &trueValue,
+				},
 			},
 		},
 	}
@@ -649,14 +655,13 @@ func TestWriteUpstreamResponse(t *testing.T) {
 
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxSizeMB:   100,
-				MaxAgeDays:  14,
-				MaxBackups:  5,
-				Compress:    true,
-				IncludeBody: &trueValue,
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					IncludeBody: &trueValue,
+				},
 			},
 		},
 	}
@@ -710,14 +715,13 @@ func TestWriteUpstreamResponse_ReadError(t *testing.T) {
 
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxSizeMB:   100,
-				MaxAgeDays:  14,
-				MaxBackups:  5,
-				Compress:    true,
-				IncludeBody: &trueValue,
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					IncludeBody: &trueValue,
+				},
 			},
 		},
 	}
@@ -762,7 +766,8 @@ func (r *failingReader) Read(p []byte) (n int, err error) {
 // getTestDateDir 获取测试日期目录（与 InitRequestBodyLogger 保持一致）
 func getTestDateDir(tempDir string) string {
 	dateDir := time.Now().Format("2006-01-02")
-	return filepath.Join(tempDir, dateDir)
+	// 新的路径结构: baseDir/request_body/{date}/2026-02-02/
+	return filepath.Join(tempDir, "request_body", "{date}", dateDir)
 }
 
 // TestSortJSONKeys 测试 JSON key 排序功能
@@ -956,14 +961,13 @@ func TestWriteFromMap_JSONKeySorting(t *testing.T) {
 
 	cfg := &config.Config{
 		Logging: config.Logging{
-			RequestBody: config.RequestBodyConfig{
-				Enabled:     true,
-				BaseDir:     tempDir,
-				MaxSizeMB:   100,
-				MaxAgeDays:  14,
-				MaxBackups:  5,
-				Compress:    true,
-				IncludeBody: &trueValue,
+			BaseDir: tempDir,
+			Categories: map[string]config.CategoryConfig{
+				"request_body": {
+					Level:       "debug",
+					Path:        "request_body/{date}/{time}_{req_id}_{type}.httpdump",
+					IncludeBody: &trueValue,
+				},
 			},
 		},
 	}
