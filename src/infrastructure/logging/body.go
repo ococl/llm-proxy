@@ -565,10 +565,12 @@ func LogRequestBody(reqID string, logType BodyLogType, method, path, protocol st
 	}
 	if err := logger.WriteFromMap(reqID, logType, method, path, protocol, headers, body); err != nil {
 		// 记录日志写入失败但不中断请求处理
-		GeneralSugar.Errorw("写入请求体日志失败",
-			port.ReqID(reqID),
-			port.Error(err),
-		)
+		if GeneralSugar != nil {
+			GeneralSugar.Errorw("写入请求体日志失败",
+				port.ReqID(reqID),
+				port.Error(err),
+			)
+		}
 	}
 }
 
@@ -580,10 +582,12 @@ func LogResponseBody(reqID string, logType BodyLogType, statusCode int, headers 
 	}
 	if err := logger.WriteResponseFromMap(reqID, logType, statusCode, headers, body); err != nil {
 		// 记录日志写入失败但不中断请求处理
-		GeneralSugar.Errorw("写入响应体日志失败",
-			port.ReqID(reqID),
-			port.Error(err),
-		)
+		if GeneralSugar != nil {
+			GeneralSugar.Errorw("写入响应体日志失败",
+				port.ReqID(reqID),
+				port.Error(err),
+			)
+		}
 	}
 }
 
@@ -628,10 +632,12 @@ func CleanupOldLogs() error {
 		if dirDate.Before(cutoffTime) {
 			if err := os.RemoveAll(path); err != nil {
 				// 记录错误但不停止遍历
-				GeneralSugar.Errorw("删除过期日志目录失败",
-					port.ReqID(path),
-					port.Error(err),
-				)
+				if GeneralSugar != nil {
+					GeneralSugar.Errorw("删除过期日志目录失败",
+						port.ReqID(path),
+						port.Error(err),
+					)
+				}
 			}
 		}
 
@@ -709,9 +715,11 @@ func LogRequestDiff(reqID string, original, modified map[string]interface{}) {
 		return
 	}
 	if err := logger.WriteDiff(reqID, original, modified); err != nil {
-		GeneralSugar.Errorw("写入请求体差异日志失败",
-			port.ReqID(reqID),
-			port.Error(err),
-		)
+		if GeneralSugar != nil {
+			GeneralSugar.Errorw("写入请求体差异日志失败",
+				port.ReqID(reqID),
+				port.Error(err),
+			)
+		}
 	}
 }
