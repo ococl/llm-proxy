@@ -171,12 +171,12 @@ const (
 
 // RequestBodyLogger 请求体日志写入器
 type RequestBodyLogger struct {
-	config   *config.RequestBodyConfig
-	mu       sync.Mutex
-	rootDir  string
-	baseDir  string
-	disabled bool
-	testMode bool
+	mu          sync.Mutex
+	rootDir     string
+	baseDir     string
+	disabled    bool
+	testMode    bool
+	includeBody bool
 }
 
 // 全局实例
@@ -193,26 +193,28 @@ func InitRequestBodyLogger(cfg *config.Config) error {
 
 	bodyLoggerInit = true
 
-	if !cfg.Logging.RequestBody.IsEnabled() {
+	// 从 categories 中获取 request_body 配置
+	catCfg, exists := cfg.Logging.Categories["request_body"]
+	if !exists || catCfg.GetLevel() == "none" {
 		bodyLogger = &RequestBodyLogger{
-			config:   &cfg.Logging.RequestBody,
 			disabled: true,
 			testMode: false,
 		}
 		return nil
 	}
 
+	baseDir := filepath.Join(cfg.Logging.GetBaseDir(), catCfg.Path)
+	baseDir = filepath.Dir(baseDir)
 	dateDir := time.Now().Format("2006-01-02")
-	rootDir := cfg.Logging.RequestBody.GetBaseDir()
-	baseDir := filepath.Join(rootDir, dateDir)
+	baseDir = filepath.Join(baseDir, dateDir)
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("创建请求体日志目录失败: %w", err)
 	}
 
 	bodyLogger = &RequestBodyLogger{
-		config:  &cfg.Logging.RequestBody,
-		rootDir: rootDir,
-		baseDir: baseDir,
+		rootDir:     baseDir,
+		baseDir:     baseDir,
+		includeBody: catCfg.ShouldIncludeBody(),
 	}
 
 	return nil
@@ -224,8 +226,8 @@ func InitTestRequestBodyLogger() {
 	defer bodyLoggerMu.Unlock()
 
 	bodyLogger = &RequestBodyLogger{
-		config:   &config.RequestBodyConfig{},
-		testMode: true,
+		testMode:    true,
+		includeBody: true,
 	}
 	bodyLoggerInit = true
 }
@@ -286,7 +288,7 @@ func (l *RequestBodyLogger) Write(reqID string, logType BodyLogType, httpReq *ht
 	sb.WriteString("\r\n")
 
 	// 写入请求体
-	if len(body) > 0 && l.config.ShouldIncludeBody() {
+	if len(body) > 0 && l.includeBody {
 		// 尝试格式化 JSON
 		if formatted, err := formatJSONWithSortedKeys(body); err == nil {
 			sb.Write(formatted)
@@ -336,7 +338,7 @@ func (l *RequestBodyLogger) WriteResponse(reqID string, logType BodyLogType, sta
 	sb.WriteString("\r\n")
 
 	// 写入响应体
-	if len(body) > 0 && l.config.ShouldIncludeBody() {
+	if len(body) > 0 && l.includeBody {
 		// 尝试格式化 JSON
 		if formatted, err := formatJSONWithSortedKeys(body); err == nil {
 			sb.Write(formatted)
@@ -384,7 +386,7 @@ func (l *RequestBodyLogger) WriteFromMap(reqID string, logType BodyLogType, meth
 	sb.WriteString("\r\n")
 
 	// 写入请求体
-	if body != nil && l.config.ShouldIncludeBody() {
+	if body != nil && l.includeBody {
 		if bodyJSON, err := marshalJSONSorted(body); err == nil {
 			sb.Write(bodyJSON)
 			sb.WriteString("\n")
@@ -426,7 +428,7 @@ func (l *RequestBodyLogger) WriteResponseFromMap(reqID string, logType BodyLogTy
 	sb.WriteString("\r\n")
 
 	// 写入响应体
-	if body != nil && l.config.ShouldIncludeBody() {
+	if body != nil && l.includeBody {
 		switch v := body.(type) {
 		case string:
 			// 尝试格式化字符串形式的 JSON
@@ -488,7 +490,7 @@ func (l *RequestBodyLogger) WriteUpstreamResponse(reqID string, statusCode int, 
 	sb.WriteString("\r\n")
 
 	// 读取并写入响应体
-	if body != nil && l.config.ShouldIncludeBody() {
+	if body != nil && l.includeBody {
 		bodyBytes, err := io.ReadAll(body)
 		if err != nil {
 			sb.WriteString(fmt.Sprintf("[读取响应体失败: %v]\n", err))
@@ -593,9 +595,9 @@ func LogResponseBody(reqID string, logType BodyLogType, statusCode int, headers 
 
 // CleanupOldLogs 清理超过保留天数的日志目录
 // 由 cron 任务每小时调用一次
-func CleanupOldLogs() error {
+func CleanupOldLogs(maxAgeDays int) error {
 	logger := GetRequestBodyLogger()
-	if logger == nil || logger.config == nil {
+	if logger == nil {
 		return nil
 	}
 
@@ -603,7 +605,6 @@ func CleanupOldLogs() error {
 		return nil
 	}
 
-	maxAgeDays := logger.config.GetMaxAgeDays()
 	if maxAgeDays <= 0 {
 		maxAgeDays = 14 // 默认 14 天
 	}

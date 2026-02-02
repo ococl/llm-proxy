@@ -1,11 +1,9 @@
 package logging
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -14,461 +12,269 @@ import (
 	"llm-proxy/infrastructure/config"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+// 全局日志变量
 var (
-	requestLogger  *zap.SugaredLogger
+	GeneralLogger  *zap.Logger
+	GeneralSugar   *zap.SugaredLogger
+	SystemLogger   *zap.Logger
+	SystemSugar    *zap.SugaredLogger
+	NetworkLogger  *zap.Logger
+	NetworkSugar   *zap.SugaredLogger
+	ProxyLogger    *zap.Logger
+	ProxySugar     *zap.SugaredLogger
+	DebugLogger    *zap.Logger
+	DebugSugar     *zap.SugaredLogger
+	FileOnlyLogger *zap.Logger
+	FileOnlySugar  *zap.SugaredLogger
+	RequestLogger  *zap.Logger
 	errorLogger    *zap.SugaredLogger
+
 	metricsEnabled bool
 	loggingCfg     *config.Logging
+	asyncWriters   []*asyncWriter
+	rotateLoggers  []*timeAndSizeRotateLogger
+
+	flushTicker *time.Ticker
+	flushDone   chan struct{}
 )
 
-// newLumberjackSyncWriter 创建一个带 Sync 的 WriteSyncer，用于解决 Windows 文件锁定问题。
-// lumberjack 在进行日志轮转时会尝试重命名文件，如果文件句柄仍被持有会导致错误。
-// 通过包装 WriteSyncer 并在每次写入后调用 Sync()，可以确保文件缓冲被及时刷新。
-func newLumberjackSyncWriter(lb *lumberjack.Logger) zapcore.WriteSyncer {
-	return &syncWriteSyncer{w: zapcore.AddSync(lb), lb: lb}
+// 脱敏模式
+var (
+	configMu      sync.RWMutex
+	testMode      = false
+	maskSensitive = true
+)
+
+func SetTestMode(enabled bool) {
+	testMode = enabled
 }
 
-// syncWriteSyncer 包装 WriteSyncer，在每次写入后调用 Sync。
-// 用于解决 Windows 上文件被锁定无法重命名的问题。
-type syncWriteSyncer struct {
-	w  zapcore.WriteSyncer
-	lb *lumberjack.Logger
-	mu sync.Mutex
+func InitTestLoggers() {
+	GeneralLogger, GeneralSugar = createNoOpLogger()
+	SystemLogger, SystemSugar = createNoOpLogger()
+	NetworkLogger, NetworkSugar = createNoOpLogger()
+	ProxyLogger, ProxySugar = createNoOpLogger()
+	DebugLogger, DebugSugar = createNoOpLogger()
+	FileOnlyLogger, FileOnlySugar = createNoOpLogger()
 }
 
-func (s *syncWriteSyncer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	n, err := s.w.Write(p)
-	if err != nil {
-		return s.handleWriteError(err, p)
-	}
-
-	// 写入后立即同步，释放文件句柄
-	if syncErr := s.w.Sync(); syncErr != nil {
-		// 忽略同步错误，因为文件可能已被关闭或正在轮转
-		return n, nil
-	}
-	return n, nil
+func InitLogger(cfg *config.Config) error {
+	configMu.Lock()
+	maskSensitive = cfg.Logging.MaskSensitive
+	configMu.Unlock()
+	return Init(cfg)
 }
 
-// handleWriteError 处理写入错误，特别是 Windows 文件锁定错误
-func (s *syncWriteSyncer) handleWriteError(err error, p []byte) (int, error) {
-	errStr := err.Error()
-	if isFileLockError(errStr) {
-		time.Sleep(100 * time.Millisecond)
-		if s.lb != nil {
-			s.w = zapcore.AddSync(s.lb)
-		}
-		n, retryErr := s.w.Write(p)
-		if retryErr == nil {
-			_ = s.w.Sync()
-			return n, nil
-		}
-		// 重试失败，静默处理，避免日志系统崩溃
-		return 0, nil
-	}
-	return 0, err
+func ShutdownLogger() {
+	Shutdown()
 }
 
-// isFileLockError 检查错误是否为文件锁定错误
-func isFileLockError(errStr string) bool {
-	lockErrors := []string{
-		"The process cannot access the file",
-		"file is being used by another process",
-		"Access is denied",
-		"文件正被另一进程使用",
-		"拒绝访问",
-	}
-	for _, pattern := range lockErrors {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *syncWriteSyncer) Sync() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.w.Sync()
-}
-
-type markdownConsoleEncoder struct {
-	zapcore.Encoder
-	colored      bool
-	consoleStyle string
-}
-
-var reqIDPattern = regexp.MustCompile(`\[req_[a-zA-Z0-9]+\]`)
-
-type maskingCore struct {
-	zapcore.Core
-	masker *SensitiveDataMasker
-}
-
-func (c *maskingCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
-	entry.Message = c.masker.Mask(entry.Message)
-	for i := range fields {
-		if fields[i].Type == zapcore.StringType {
-			fields[i].String = c.masker.Mask(fields[i].String)
-		}
-	}
-	return c.Core.Write(entry, fields)
-}
-
-func (c *maskingCore) With(fields []zapcore.Field) zapcore.Core {
-	return &maskingCore{Core: c.Core.With(fields), masker: c.masker}
-}
-
-func (c *maskingCore) Check(entry zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
-	if c.Enabled(entry.Level) {
-		return ce.AddCore(entry, c)
-	}
-	return ce
-}
-
-func newMarkdownConsoleEncoder(cfg zapcore.EncoderConfig, colored bool, consoleStyle string) zapcore.Encoder {
-	return &markdownConsoleEncoder{
-		Encoder:      zapcore.NewConsoleEncoder(cfg),
-		colored:      colored,
-		consoleStyle: consoleStyle,
-	}
-}
-
-func (enc *markdownConsoleEncoder) Clone() zapcore.Encoder {
-	return &markdownConsoleEncoder{
-		Encoder:      enc.Encoder.Clone(),
-		colored:      enc.colored,
-		consoleStyle: enc.consoleStyle,
-	}
-}
-
-func (enc *markdownConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	line := bytes.NewBuffer(nil)
-
-	timeStr := entry.Time.Format("15:04:05")
-	if enc.colored {
-		line.WriteString("\033[90m")
-		line.WriteString(timeStr)
-		line.WriteString("\033[0m")
-	} else {
-		line.WriteString(timeStr)
-	}
-	line.WriteString(" | ")
-
-	levelStr := entry.Level.CapitalString()
-	levelFormatted := fmt.Sprintf("%5s", levelStr)
-	if enc.colored {
-		switch entry.Level {
-		case zapcore.DebugLevel:
-			line.WriteString("\033[35m")
-		case zapcore.InfoLevel:
-			line.WriteString("\033[32m")
-		case zapcore.WarnLevel:
-			line.WriteString("\033[33m")
-		case zapcore.ErrorLevel, zapcore.DPanicLevel, zapcore.PanicLevel, zapcore.FatalLevel:
-			line.WriteString("\033[31m")
-		}
-		line.WriteString(levelFormatted)
-		line.WriteString("\033[0m")
-	} else {
-		line.WriteString(levelFormatted)
-	}
-	line.WriteString(" | ")
-
-	var reqID, backendModel, backend, protocol string
-	filteredFields := make([]zapcore.Field, 0, len(fields))
-	for _, field := range fields {
-		switch field.Key {
-		case "req_id":
-			if field.Type == zapcore.StringType {
-				reqID = field.String
-			}
-		case "backend_model":
-			if field.Type == zapcore.StringType {
-				backendModel = field.String
-			}
-		case "backend":
-			if field.Type == zapcore.StringType {
-				backend = field.String
-			}
-		case "protocol":
-			if field.Type == zapcore.StringType {
-				protocol = field.String
-			}
-		case "logger":
-		default:
-			filteredFields = append(filteredFields, field)
-		}
-	}
-
-	if reqID != "" {
-		colorMgr := GetGlobalColorManager()
-		reqColor := colorMgr.GetRequestColor(reqID)
-		if enc.colored && reqColor != "" {
-			line.WriteString(reqColor)
-			line.WriteString(reqID)
-			line.WriteString("\033[0m")
-		} else {
-			line.WriteString(reqID)
-		}
-	}
-	line.WriteString(" | ")
-
-	msg := entry.Message
-	line.WriteString(msg)
-
-	if backend != "" {
-		colorMgr := GetGlobalColorManager()
-		reqColor := colorMgr.GetRequestColor(reqID)
-		if enc.colored && reqColor != "" {
-			line.WriteString(" [backend=")
-			line.WriteString(reqColor)
-			line.WriteString(backend)
-			line.WriteString("\033[0m")
-			if backendModel != "" {
-				line.WriteString(", model=")
-				line.WriteString(reqColor)
-				line.WriteString(backendModel)
-				line.WriteString("\033[0m")
-			}
-			if protocol != "" {
-				line.WriteString(", protocol=")
-				line.WriteString(reqColor)
-				line.WriteString(protocol)
-				line.WriteString("\033[0m")
-			}
-			line.WriteString("]")
-		} else {
-			line.WriteString(" [backend=")
-			line.WriteString(backend)
-			if backendModel != "" {
-				line.WriteString(", model=")
-				line.WriteString(backendModel)
-			}
-			if protocol != "" {
-				line.WriteString(", protocol=")
-				line.WriteString(protocol)
-			}
-			line.WriteString("]")
-		}
-	}
-
-	if len(filteredFields) > 0 {
-		enc.encodeFields(line, filteredFields)
-	}
-
-	line.WriteString("\n")
-
-	buf := buffer.NewPool().Get()
-	buf.Write(line.Bytes())
-	return buf, nil
-}
-
-func (enc *markdownConsoleEncoder) encodeFields(line *bytes.Buffer, fields []zapcore.Field) {
-	if enc.consoleStyle == "compact" {
-		line.WriteString(" [")
-		firstField := true
-		for _, field := range fields {
-			if field.Key == "logger" {
-				continue
-			}
-			if !firstField {
-				line.WriteString(", ")
-			}
-			firstField = false
-			enc.writeField(line, field)
-		}
-		line.WriteString("]")
-	} else {
-		for _, field := range fields {
-			if field.Key == "logger" {
-				continue
-			}
-			line.WriteString("\n  ")
-			enc.writeField(line, field)
-		}
-	}
-}
-
-func (enc *markdownConsoleEncoder) writeField(line *bytes.Buffer, field zapcore.Field) {
-	if enc.colored {
-		line.WriteString("\033[90m")
-		line.WriteString(field.Key)
-		line.WriteString("\033[0m=\033[33m")
-		line.WriteString(fieldValueString(field))
-		line.WriteString("\033[0m")
-	} else {
-		line.WriteString(field.Key)
-		line.WriteString("=")
-		line.WriteString(fieldValueString(field))
-	}
-}
-
-func fieldValueString(field zapcore.Field) string {
-	switch field.Type {
-	case zapcore.StringType:
-		return field.String
-	case zapcore.Int64Type, zapcore.Int32Type, zapcore.Int16Type, zapcore.Int8Type,
-		zapcore.Uint64Type, zapcore.Uint32Type, zapcore.Uint16Type, zapcore.Uint8Type:
-		return fmt.Sprintf("%d", field.Integer)
-	case zapcore.BoolType:
-		if field.Integer == 1 {
-			return "true"
-		}
-		return "false"
-	default:
-		return field.String
-	}
-}
-
+// Init 初始化日志系统
 func Init(cfg *config.Config) error {
 	baseDir := cfg.Logging.GetBaseDir()
 
-	// 日志直接写入 logs/ 目录，不创建日期子目录
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("创建日志根目录失败 %s: %w", baseDir, err)
 	}
 
-	if cfg.Logging.ShouldUseDetailedMasking() {
-		updateSensitivePatterns()
-	}
-
-	var err error
-
-	generalLogPath := cfg.Logging.GeneralFile
-	if generalLogPath == "" {
-		generalLogPath = filepath.Join(baseDir, "general.log")
-	}
-
-	if cfg.Logging.SeparateFiles {
-		dirs := []string{
-			filepath.Join(baseDir, "system"),
-			filepath.Join(baseDir, "network"),
-			filepath.Join(baseDir, "proxy"),
-			filepath.Join(baseDir, "llm_debug"),
-		}
-		for _, dir := range dirs {
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return fmt.Errorf("创建日志子目录失败 %s: %w", dir, err)
-			}
-		}
-
-		GeneralLogger, GeneralSugar, err = createLogger(cfg, "general", filepath.Join(baseDir, "general.log"))
-		if err != nil {
-			return fmt.Errorf("初始化GeneralLogger失败: %w", err)
-		}
-		SystemLogger, SystemSugar, err = createLogger(cfg, "system", filepath.Join(baseDir, "system", "system.log"))
-		if err != nil {
-			return fmt.Errorf("初始化SystemLogger失败: %w", err)
-		}
-		NetworkLogger, NetworkSugar, err = createLogger(cfg, "network", filepath.Join(baseDir, "network", "network.log"))
-		if err != nil {
-			return fmt.Errorf("初始化NetworkLogger失败: %w", err)
-		}
-		ProxyLogger, ProxySugar, err = createLogger(cfg, "proxy", filepath.Join(baseDir, "proxy", "proxy.log"))
-		if err != nil {
-			return fmt.Errorf("初始化ProxyLogger失败: %w", err)
-		}
-		if cfg.Logging.DebugMode {
-			DebugLogger, DebugSugar, err = createLogger(cfg, "debug", filepath.Join(baseDir, "llm_debug", "debug.log"))
-			if err != nil {
-				return fmt.Errorf("初始化DebugLogger失败: %w", err)
-			}
-		} else {
-			DebugLogger, DebugSugar = createNoOpLogger()
-		}
-	} else {
-		GeneralLogger, GeneralSugar, err = createLogger(cfg, "general", generalLogPath)
-		if err != nil {
-			return fmt.Errorf("初始化GeneralLogger失败: %w", err)
-		}
-		SystemLogger = GeneralLogger.With(zap.String("category", "system"))
-		SystemSugar = SystemLogger.Sugar()
-		NetworkLogger = GeneralLogger.With(zap.String("category", "network"))
-		NetworkSugar = NetworkLogger.Sugar()
-		ProxyLogger = GeneralLogger.With(zap.String("category", "proxy"))
-		ProxySugar = ProxyLogger.Sugar()
-		if cfg.Logging.DebugMode {
-			DebugLogger = GeneralLogger.With(zap.String("category", "debug"))
-			DebugSugar = DebugLogger.Sugar()
-		} else {
-			DebugLogger, DebugSugar = createNoOpLogger()
-		}
-	}
-
-	FileOnlyLogger, FileOnlySugar, err = createFileOnlyLogger(cfg, "fileonly", filepath.Join(baseDir, "proxy", "verbose.log"))
-	if err != nil {
-		return fmt.Errorf("初始化FileOnlyLogger失败: %w", err)
-	}
-
-	// 旧版 request/error 日志已废弃，多目标日志系统使用 categories 配置
-	// 保留向后兼容但不推荐使用
-	if err := initRequestErrorLoggers(cfg); err != nil {
-		return err
-	}
-
-	if cfg.Logging.EnableMetrics {
-		metricsEnabled = true
-	}
 	loggingCfg = &cfg.Logging
 
-	startFlushTicker(cfg.Logging.GetFlushInterval())
+	// 初始化各分类日志
+	categories := []string{"general", "system", "network", "proxy", "debug", "request", "error"}
+	for _, cat := range categories {
+		if err := initCategoryLogger(cfg, cat, baseDir); err != nil {
+			return fmt.Errorf("初始化 %s 日志失败: %w", cat, err)
+		}
+	}
 
-	// 初始化新的多目标日志路由器
-	if err := InitMultiTargetRouter(cfg); err != nil {
-		// 多目标日志路由器初始化失败不应阻止应用启动
-		// 日志将回退到传统的单一日志器模式
-		return nil
+	// 启动异步刷新 ticker
+	if cfg.Logging.IsAsyncEnabled() {
+		startFlushTicker(cfg.Logging.GetAsyncFlushInterval())
 	}
 
 	return nil
 }
 
-func initRequestErrorLoggers(cfg *config.Config) error {
-	baseDir := cfg.Logging.GetBaseDir()
-
-	// 旧版 request/error 日志直接写入 logs/ 目录，不创建日期子目录
-	reqDir := cfg.Logging.RequestDir
-	if reqDir == "" {
-		reqDir = filepath.Join(baseDir, "requests")
-	}
-	errDir := cfg.Logging.ErrorDir
-	if errDir == "" {
-		errDir = filepath.Join(baseDir, "errors")
-	}
-
-	if cfg.Logging.SeparateFiles {
-		if err := os.MkdirAll(reqDir, 0755); err != nil {
-			return fmt.Errorf("创建请求日志目录失败: %w", err)
-		}
-		if err := os.MkdirAll(errDir, 0755); err != nil {
-			return fmt.Errorf("创建错误日志目录失败: %w", err)
+func initCategoryLogger(cfg *config.Config, category, baseDir string) error {
+	catCfg, exists := cfg.Logging.Categories[category]
+	if !exists {
+		// 使用默认配置
+		catCfg = config.CategoryConfig{
+			Level:  "info",
+			Target: "both",
+			Path:   category + ".log",
 		}
 	}
 
-	var err error
-	RequestLogger, requestLogger, err = createFileOnlyLogger(cfg, "request", filepath.Join(reqDir, "requests.log"))
-	if err != nil {
-		return fmt.Errorf("初始化RequestLogger失败: %w", err)
+	// 检查是否禁用（level 为 none）
+	if catCfg.GetLevel() == "none" {
+		return nil
 	}
-	ErrorLogger, errorLogger, err = createFileOnlyLogger(cfg, "error", filepath.Join(errDir, "errors.log"))
-	if err != nil {
-		return fmt.Errorf("初始化ErrorLogger失败: %w", err)
+
+	filePath := filepath.Join(baseDir, catCfg.Path)
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return fmt.Errorf("创建日志目录失败: %w", err)
 	}
+
+	// 创建日志记录器
+	logger, sugar, err := createCategoryLogger(cfg, category, filePath, catCfg)
+	if err != nil {
+		return err
+	}
+
+	// 赋值给全局变量
+	switch category {
+	case "general":
+		GeneralLogger, GeneralSugar = logger, sugar
+	case "system":
+		SystemLogger, SystemSugar = logger, sugar
+	case "network":
+		NetworkLogger, NetworkSugar = logger, sugar
+	case "proxy":
+		ProxyLogger, ProxySugar = logger, sugar
+	case "debug":
+		DebugLogger, DebugSugar = logger, sugar
+	case "request":
+		RequestLogger = logger
+	case "error":
+		errorLogger = sugar
+	}
+
 	return nil
+}
+
+func createCategoryLogger(cfg *config.Config, category, filePath string, catCfg config.CategoryConfig) (*zap.Logger, *zap.SugaredLogger, error) {
+	level := parseLevel(catCfg.GetLevel())
+	target := catCfg.GetTarget()
+
+	// 文件编码器配置
+	fileEncoderCfg := zapcore.EncoderConfig{
+		TimeKey:        "timestamp",
+		LevelKey:       "level",
+		NameKey:        "logger",
+		CallerKey:      "caller",
+		FunctionKey:    zapcore.OmitKey,
+		MessageKey:     "msg",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.LowercaseLevelEncoder,
+		EncodeTime:     zapcore.ISO8601TimeEncoder,
+		EncodeDuration: zapcore.StringDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+
+	var cores []zapcore.Core
+
+	// 文件输出
+	if target == "file" || target == "both" {
+		rotation := RotationConfig{
+			MaxSizeMB:    cfg.Logging.GetRotationMaxSizeMB(),
+			TimeStrategy: cfg.Logging.GetRotationTimeStrategy(),
+			MaxAgeDays:   cfg.Logging.GetRotationMaxAgeDays(),
+			MaxBackups:   cfg.Logging.GetRotationMaxBackups(),
+			Compress:     cfg.Logging.ShouldRotateCompress(),
+		}
+
+		rotateLogger := createRotateLogger(filePath, rotation, catCfg.MaxSizeMB, catCfg.MaxAgeDays)
+		rotateLoggers = append(rotateLoggers, rotateLogger)
+
+		var writer zapcore.WriteSyncer = zapcore.AddSync(rotateLogger)
+
+		// 异步写入
+		if cfg.Logging.IsAsyncEnabled() {
+			asyncWriter := newAsyncWriter(writer, cfg.Logging.GetAsyncBufferSize(), cfg.Logging.ShouldDropOnFull())
+			asyncWriters = append(asyncWriters, asyncWriter)
+			writer = asyncWriter
+		}
+
+		fileEncoder := zapcore.NewJSONEncoder(fileEncoderCfg)
+		fileCore := zapcore.NewCore(fileEncoder, writer, level)
+		cores = append(cores, fileCore)
+	}
+
+	// 控制台输出
+	if target == "console" || target == "both" {
+		consoleEncoderCfg := fileEncoderCfg
+		consoleEncoderCfg.EncodeLevel = encodeLevelColor
+		consoleEncoderCfg.EncodeTime = encodeTimeColor
+		consoleEncoder := newMarkdownConsoleEncoder(consoleEncoderCfg, true, "compact")
+		consoleCore := zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), level)
+		cores = append(cores, consoleCore)
+	}
+
+	if len(cores) == 0 {
+		return zap.NewNop(), zap.NewNop().Sugar(), nil
+	}
+
+	var core zapcore.Core
+	if len(cores) == 1 {
+		core = cores[0]
+	} else {
+		core = zapcore.NewTee(cores...)
+	}
+
+	// 脱敏处理
+	if cfg.Logging.MaskSensitive {
+		core = &maskingCore{Core: core, masker: NewSensitiveDataMasker()}
+	}
+
+	logger := zap.New(core,
+		zap.AddCaller(),
+		zap.AddStacktrace(zap.ErrorLevel),
+		zap.Fields(zap.String("category", category)),
+	)
+
+	return logger, logger.Sugar(), nil
+}
+
+func createNoOpLogger() (*zap.Logger, *zap.SugaredLogger) {
+	nopCore := zapcore.NewNopCore()
+	logger := zap.New(nopCore)
+	return logger, logger.Sugar()
+}
+
+func parseLevel(levelStr string) zapcore.Level {
+	switch strings.ToLower(levelStr) {
+	case "debug":
+		return zapcore.DebugLevel
+	case "info":
+		return zapcore.InfoLevel
+	case "warn", "warning":
+		return zapcore.WarnLevel
+	case "error":
+		return zapcore.ErrorLevel
+	case "none":
+		return zapcore.FatalLevel + 1
+	default:
+		return zapcore.InfoLevel
+	}
+}
+
+func encodeLevelColor(l zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
+	switch l {
+	case zapcore.DebugLevel:
+		enc.AppendString("\033[35mDEBUG\033[0m")
+	case zapcore.InfoLevel:
+		enc.AppendString("\033[32mINFO\033[0m")
+	case zapcore.WarnLevel:
+		enc.AppendString("\033[33mWARN\033[0m")
+	case zapcore.ErrorLevel:
+		enc.AppendString("\033[31mERROR\033[0m")
+	default:
+		enc.AppendString(l.String())
+	}
+}
+
+func encodeTimeColor(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+	enc.AppendString(t.Format("15:04:05"))
 }
 
 func startFlushTicker(interval int) {
 	if interval <= 0 {
-		return
+		interval = 5
 	}
 	flushDone = make(chan struct{})
 	flushTicker = time.NewTicker(time.Duration(interval) * time.Second)
@@ -485,7 +291,7 @@ func startFlushTicker(interval int) {
 }
 
 func syncAllLoggers() {
-	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger, FileOnlyLogger, RequestLogger, ErrorLogger}
+	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger, RequestLogger}
 	for _, logger := range loggers {
 		if logger != nil {
 			_ = logger.Sync()
@@ -493,222 +299,30 @@ func syncAllLoggers() {
 	}
 }
 
-func updateSensitivePatterns() {
-	extraPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})`),
-		regexp.MustCompile(`\b(?:\d{4}[-\s]?){3}\d{4}\b`),
-		regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`),
-		regexp.MustCompile(`\b(\+?\d[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b`),
-	}
-	SensitivePatterns = append(SensitivePatterns, extraPatterns...)
-}
-
-func createLogger(cfg *config.Config, name, filePath string) (*zap.Logger, *zap.SugaredLogger, error) {
-	fw := &lumberjack.Logger{
-		Filename:   filePath,
-		MaxSize:    cfg.Logging.GetMaxFileSizeMB(),
-		MaxAge:     cfg.Logging.GetMaxAgeDays(),
-		MaxBackups: cfg.Logging.GetMaxBackups(),
-		Compress:   cfg.Logging.Compress,
-	}
-
-	fileEncoderCfg := zapcore.EncoderConfig{
-		TimeKey:        "timestamp",
-		LevelKey:       "level",
-		NameKey:        "logger",
-		CallerKey:      "caller",
-		FunctionKey:    zapcore.OmitKey,
-		MessageKey:     "msg",
-		StacktraceKey:  "stacktrace",
-		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeDuration: zapcore.StringDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
-	}
-
-	var fileEncoder zapcore.Encoder
-	if cfg.Logging.GetFormat() == "text" {
-		fileEncoder = zapcore.NewConsoleEncoder(fileEncoderCfg)
-	} else {
-		fileEncoder = zapcore.NewJSONEncoder(fileEncoderCfg)
-	}
-
-	consoleEncoderCfg := zapcore.EncoderConfig{
-		TimeKey:        "timestamp",
-		LevelKey:       "level",
-		NameKey:        "logger",
-		CallerKey:      "caller",
-		FunctionKey:    zapcore.OmitKey,
-		MessageKey:     "msg",
-		StacktraceKey:  "stacktrace",
-		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    encodeLevelColor,
-		EncodeTime:     encodeTimeColor,
-		EncodeDuration: zapcore.StringDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
-	}
-
-	fileLevel := parseLevel(cfg.Logging.GetLevel())
-	consoleLevel := parseLevel(cfg.Logging.GetConsoleLevel())
-
-	// 使用带 Sync 的 WriteSyncer，解决 Windows 文件锁定问题
-	fileCore := zapcore.NewCore(fileEncoder, newLumberjackSyncWriter(fw), fileLevel)
-
-	var consoleCore zapcore.Core
-	if cfg.Logging.GetColorize() {
-		if cfg.Logging.GetConsoleFormat() == "plain" {
-			consoleCore = zapcore.NewCore(zapcore.NewConsoleEncoder(consoleEncoderCfg), zapcore.AddSync(os.Stdout), consoleLevel)
-		} else {
-			consoleEncoder := newMarkdownConsoleEncoder(consoleEncoderCfg, true, cfg.Logging.GetConsoleStyle())
-			consoleCore = zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), consoleLevel)
-		}
-	} else {
-		if cfg.Logging.GetConsoleFormat() == "plain" {
-			consoleCore = zapcore.NewCore(zapcore.NewConsoleEncoder(consoleEncoderCfg), zapcore.AddSync(os.Stdout), consoleLevel)
-		} else {
-			consoleEncoder := newMarkdownConsoleEncoder(consoleEncoderCfg, false, cfg.Logging.GetConsoleStyle())
-			consoleCore = zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), consoleLevel)
-		}
-	}
-
-	var core zapcore.Core
-	teeCore := zapcore.NewTee(fileCore, consoleCore)
-	if cfg.Logging.ShouldMaskSensitive() {
-		core = &maskingCore{Core: teeCore, masker: NewSensitiveDataMasker()}
-	} else {
-		core = teeCore
-	}
-
-	logger := zap.New(core,
-		zap.AddCaller(),
-		zap.AddStacktrace(zap.ErrorLevel),
-		zap.Fields(zap.String("logger", name)),
-	)
-
-	return logger, logger.Sugar(), nil
-}
-
-func createNoOpLogger() (*zap.Logger, *zap.SugaredLogger) {
-	nopCore := zapcore.NewNopCore()
-	logger := zap.New(nopCore)
-	return logger, logger.Sugar()
-}
-
-func createFileOnlyLogger(cfg *config.Config, name, filePath string) (*zap.Logger, *zap.SugaredLogger, error) {
-	fw := &lumberjack.Logger{
-		Filename:   filePath,
-		MaxSize:    cfg.Logging.GetMaxFileSizeMB(),
-		MaxAge:     cfg.Logging.GetMaxAgeDays(),
-		MaxBackups: cfg.Logging.GetMaxBackups(),
-		Compress:   cfg.Logging.Compress,
-	}
-
-	fileEncoderCfg := zapcore.EncoderConfig{
-		TimeKey:        "timestamp",
-		LevelKey:       "level",
-		NameKey:        "logger",
-		CallerKey:      "caller",
-		FunctionKey:    zapcore.OmitKey,
-		MessageKey:     "msg",
-		StacktraceKey:  "stacktrace",
-		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeDuration: zapcore.StringDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
-	}
-
-	var fileEncoder zapcore.Encoder
-	if cfg.Logging.GetFormat() == "text" {
-		fileEncoder = zapcore.NewConsoleEncoder(fileEncoderCfg)
-	} else {
-		fileEncoder = zapcore.NewJSONEncoder(fileEncoderCfg)
-	}
-
-	fileLevel := parseLevel(cfg.Logging.GetLevel())
-	// 使用带 Sync 的 WriteSyncer，解决 Windows 文件锁定问题
-	fileCore := zapcore.NewCore(fileEncoder, newLumberjackSyncWriter(fw), fileLevel)
-
-	var core zapcore.Core
-	if cfg.Logging.ShouldMaskSensitive() {
-		core = &maskingCore{Core: fileCore, masker: NewSensitiveDataMasker()}
-	} else {
-		core = fileCore
-	}
-
-	logger := zap.New(core, zap.AddCaller(), zap.Fields(zap.String("logger", name)))
-	return logger, logger.Sugar(), nil
-}
-
-func parseLevel(levelStr string) zapcore.Level {
-	switch strings.ToLower(levelStr) {
-	case "debug":
-		return zapcore.DebugLevel
-	case "info":
-		return zapcore.InfoLevel
-	case "warn", "warning":
-		return zapcore.WarnLevel
-	case "error":
-		return zapcore.ErrorLevel
-	case "dpanic":
-		return zapcore.DPanicLevel
-	case "panic":
-		return zapcore.PanicLevel
-	case "fatal":
-		return zapcore.FatalLevel
-	default:
-		return zapcore.InfoLevel
-	}
-}
-
-func encodeLevelColor(l zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
-	switch l {
-	case zapcore.DebugLevel:
-		enc.AppendString("\033[35mDEBUG\033[0m")
-	case zapcore.InfoLevel:
-		enc.AppendString("\033[32mINFO\033[0m")
-	case zapcore.WarnLevel:
-		enc.AppendString("\033[33mWARN\033[0m")
-	case zapcore.ErrorLevel:
-		enc.AppendString("\033[31mERROR\033[0m")
-	case zapcore.DPanicLevel, zapcore.PanicLevel, zapcore.FatalLevel:
-		enc.AppendString("\033[31mFATAL\033[0m")
-	default:
-		enc.AppendString(l.String())
-	}
-}
-
-func encodeTimeColor(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
-	enc.AppendString(t.Format("15:04:05"))
-}
-
 func Shutdown() error {
 	if flushTicker != nil {
 		flushTicker.Stop()
 		close(flushDone)
-		flushTicker = nil
-		flushDone = nil
 	}
 
-	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger, RequestLogger, ErrorLogger}
+	for _, aw := range asyncWriters {
+		aw.Stop()
+	}
+
+	for _, tl := range rotateLoggers {
+		tl.Stop()
+	}
+
+	loggers := []*zap.Logger{GeneralLogger, SystemLogger, NetworkLogger, ProxyLogger, DebugLogger, RequestLogger}
 	for _, logger := range loggers {
 		if logger != nil {
 			if err := logger.Sync(); err != nil {
 				errStr := err.Error()
 				if !strings.Contains(errStr, "sync /dev/stdout") &&
-					!strings.Contains(errStr, "invalid argument") &&
-					!strings.Contains(errStr, "handle is invalid") {
+					!strings.Contains(errStr, "invalid argument") {
 					return err
 				}
 			}
-		}
-	}
-
-	// 关闭多目标日志路由器
-	if router := GetGlobalRouter(); router != nil {
-		if err := router.Shutdown(); err != nil {
-			return err
 		}
 	}
 
@@ -716,12 +330,12 @@ func Shutdown() error {
 }
 
 func WriteRequestLog(reqID, content string) {
-	if requestLogger == nil {
+	if RequestLogger == nil {
 		return
 	}
-	requestLogger.Infow("请求日志",
-		port.ReqID(reqID),
-		port.Content(content),
+	RequestLogger.Info("请求日志",
+		zap.String("req_id", reqID),
+		zap.String("content", content),
 	)
 }
 
@@ -729,14 +343,14 @@ func WriteErrorLog(reqID, content string) {
 	if errorLogger == nil {
 		return
 	}
-	errorLogger.Errorw("错误日志",
-		port.ReqID(reqID),
-		port.Content(content),
+	errorLogger.Error("错误日志",
+		zap.String("req_id", reqID),
+		zap.String("content", content),
 	)
 }
 
 func LogMetrics(reqID, modelAlias, status, finalBackend string, attempts int, totalLatencyMs int64, backendDetails string) {
-	if !metricsEnabled || GeneralSugar == nil {
+	if GeneralSugar == nil {
 		return
 	}
 	GeneralSugar.Infow("性能指标",
